@@ -1,0 +1,6 @@
+module HarnessISH [system] {
+  header "ish/bridge/ISHKernel.h"
+  header "ish/bridge/ISHShellExecutor.h"
+  header "ish/bridge/CurrentRoot.h"
+  export *
+}

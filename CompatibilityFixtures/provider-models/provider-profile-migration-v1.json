@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "legacyConfiguration": {
+    "providerID": "openai",
+    "baseURL": "https://api.openai.com/v1",
+    "model": "gpt-5",
+    "reasoningMode": "providerDefault",
+    "maxSteps": 12,
+    "maxOutputTokens": 8192
+  },
+  "expected": {
+    "profileID": "openai",
+    "credentialReference": "provider.openai.api-key",
+    "displayName": "OpenAI"
+  }
+}

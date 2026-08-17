@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "artifacts": [
+    {
+      "path": "Vendor/OpenMinisISH/Artifacts/HarnessISH.xcframework.zip",
+      "sha256": "23016bfc2930f63510c51d3b26edec484220f16b0e2648f1f927f6a85530962b",
+      "source": "openminis-ishArm64",
+      "required": false
+    },
+    {
+      "path": "Vendor/OpenMinisISH/Artifacts/RootfsPatch.bundle.zip",
+      "sha256": "54ea66f2db904297cf9172a32581693addfe3c51d4fc575854b72bb8284dff77",
+      "source": "ishArm64",
+      "required": false
+    },
+    {
+      "path": "Vendor/OpenMinisISH/Artifacts/alpine-rootfs.zip",
+      "sha256": "16224b3f210c0378ac8d77c2e2066f2b781036ea7eee73e18d3ed749d97806e7",
+      "source": "alpineRootfs-openminis-ishArm64",
+      "required": false
+    }
+  ]
+}

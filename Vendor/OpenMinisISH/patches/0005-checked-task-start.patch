@@ -1,0 +1,30 @@
+diff --git a/kernel/task.c b/kernel/task.c
+index a7aab4a..b77def5 100644
+--- a/kernel/task.c
++++ b/kernel/task.c
+@@ -223,8 +223,12 @@ __attribute__((constructor)) static void create_attr() {
+     pthread_attr_setdetachstate(&task_thread_attr, PTHREAD_CREATE_DETACHED);
+ }
+ 
++int task_start_checked(struct task *task) {
++    return pthread_create(&task->thread, &task_thread_attr, task_thread, task);
++}
++
+ void task_start(struct task *task) {
+-    if (pthread_create(&task->thread, &task_thread_attr, task_thread, task) < 0)
++    if (task_start_checked(task) != 0)
+         die("could not create thread");
+ }
+ 
+diff --git a/kernel/task.h b/kernel/task.h
+index 8792b17..0ad17e4 100644
+--- a/kernel/task.h
++++ b/kernel/task.h
+@@ -245,6 +245,7 @@ struct task *pid_get_task_zombie(dword_t id); // don't return null if the task e
+ #define MAX_PID (1 << 15) // oughta be enough
+ 
+ // TODO document
++int task_start_checked(struct task *task);
+ void task_start(struct task *task);
+ void task_run_current(void);
+ 

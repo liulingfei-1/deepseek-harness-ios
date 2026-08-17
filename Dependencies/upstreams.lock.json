@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "deepseekHarness": {
+    "kind": "git",
+    "repository": "https://github.com/deepseek-ai/deepseek-harness.git",
+    "commit": "47f943859bef60e4160492346772ded9b24f765a",
+    "license": "MIT",
+    "role": "Agent semantics and desktop compatibility reference"
+  },
+  "swiftAgentCore": {
+    "kind": "git",
+    "repository": "https://github.com/herrkaefer/SwiftAgentCore.git",
+    "commit": "6bdd505ac196d15ab9b4bd184eba8b23bb8c2ff8",
+    "license": "MIT",
+    "role": "Swift agent architecture reference"
+  },
+  "openminis": {
+    "kind": "git",
+    "repository": "https://github.com/OpenMinis/OpenMinis.git",
+    "commit": "9cf3a855fecd27bb5735b84cacbd56852a3ab8dd",
+    "license": "GPL-3.0",
+    "role": "Mobile task lifecycle, terminal, and iSH integration reference",
+    "gitlinks": {
+      "ish": {
+        "path": "deps/ish",
+        "commit": "de124dd66124a15239cea1465164f74980ada245"
+      },
+      "proot": {
+        "path": "deps/proot",
+        "commit": "8cf13e997cdc9472997aae19df8050c073c9a86c",
+        "requiredForIOSBuild": false
+      }
+    }
+  },
+  "ishArm64": {
+    "kind": "git",
+    "repository": "https://github.com/OpenMinis/ish-arm64.git",
+    "commit": "de124dd66124a15239cea1465164f74980ada245",
+    "license": "GPL-3.0",
+    "role": "On-device ARM64 Alpine command sandbox",
+    "submodules": {
+      "libapps": {
+        "path": "deps/libapps",
+        "repository": "https://github.com/ish-app/libapps",
+        "commit": "b8cacae35e5b11d64bb736a053921c16ca7faf9e",
+        "requiredForIOSBuild": true
+      },
+      "libarchive": {
+        "path": "deps/libarchive",
+        "repository": "https://github.com/libarchive/libarchive",
+        "commit": "fc6563f5130d8a7ee1fc27c0e55baef35119f26c",
+        "requiredForIOSBuild": true
+      },
+      "linux": {
+        "path": "deps/linux",
+        "repository": "https://github.com/ish-app/linux",
+        "commit": "8ec9bf17f89c6dba818f3ed2427de4223e78644a",
+        "requiredForIOSBuild": false
+      }
+    }
+  },
+  "alpineRootfs": {
+    "kind": "artifact",
+    "version": "3.21.0",
+    "architecture": "aarch64",
+    "url": "https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/aarch64/alpine-minirootfs-3.21.0-aarch64.tar.gz",
+    "sha256": "f31202c4070c4ef7de9e157e1bd01cb4da3a2150035d74ea5372c5e86f1efac1",
+    "localPath": "Vendor/OpenMinisISH/downloads/alpine-minirootfs-3.21.0-aarch64.tar.gz",
+    "license": "Various; see Alpine package metadata",
+    "role": "Pinned guest userspace image"
+  },
+  "toolchain": {
+    "xcodegen": {
+      "version": "2.46.0",
+      "url": "https://github.com/yonaskolb/XcodeGen/releases/download/2.46.0/xcodegen.zip",
+      "sha256": "4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806",
+      "localArchivePath": ".tools/downloads/xcodegen-2.46.0.zip"
+    },
+    "swift": "6.0",
+    "minimumIOS": "18.0",
+    "projectXcode": "27.0"
+  }
+}

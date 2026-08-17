@@ -1,0 +1,16 @@
+.DS_Store
+DerivedData/
+DerivedData*/
+build/
+*.xcuserstate
+xcuserdata/
+.swiftpm/
+.build/
+.tools/
+/HarnessMobile/Resources/PluginHost/node_modules/
+/Vendor/OpenMinisISH/Artifacts/
+/Vendor/OpenMinisISH/downloads/
+Vendor/UpstreamSources/
+Vendor/OpenMinisISH/Artifacts/
+Vendor/OpenMinisISH/downloads/
+/HarnessMobile [0-9]*.xcodeproj/

@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "project": "deepseek-ai/deepseek-harness",
+    "commit": "47f943859bef60e4160492346772ded9b24f765a"
+  },
+  "askUser": {
+    "arguments": {
+      "questions": [
+        {
+          "id": "scope",
+          "question": "Which areas should change?",
+          "header": "Scope",
+          "options": [
+            {
+              "label": "Files",
+              "description": "Workspace file tools"
+            },
+            {
+              "label": "Plugins",
+              "description": "Cordis plugin runtime"
+            },
+            {
+              "label": "Runtime",
+              "description": "Agent loop and scheduler"
+            }
+          ],
+          "multi_select": true
+        },
+        {
+          "id": "mode",
+          "question": "Choose the rollout mode",
+          "options": [
+            {
+              "label": "Fast"
+            },
+            {
+              "label": "Careful"
+            }
+          ]
+        },
+        {
+          "id": "notes",
+          "question": "Any additional notes?"
+        }
+      ]
+    },
+    "expectedQuestionIDs": [
+      "scope",
+      "mode",
+      "notes"
+    ],
+    "answer": {
+      "answers": [
+        {
+          "id": "scope",
+          "selected": [
+            "Plugins",
+            "Runtime"
+          ],
+          "custom": "Preserve rollback support."
+        },
+        {
+          "id": "mode",
+          "selected": [],
+          "custom": "Use the conservative path."
+        },
+        {
+          "id": "notes",
+          "selected": []
+        }
+      ]
+    },
+    "expectedOutput": "{\"answers\":[{\"custom\":\"Preserve rollback support.\",\"id\":\"scope\",\"selected\":[\"Plugins\",\"Runtime\"]},{\"custom\":\"Use the conservative path.\",\"id\":\"mode\",\"selected\":[]},{\"id\":\"notes\",\"selected\":[]}]}"
+  },
+  "planReview": {
+    "plan": "# Upgrade Harness Mobile\n\n1. Inspect the pinned upstream contract.\n2. Apply the native adapter change.\n3. Verify rollback and iPhone behavior.",
+    "expectedPresentation": {
+      "id": "plan-review",
+      "question": "Approve this plan and leave plan mode?",
+      "approve": "Approve",
+      "decline": "Keep planning"
+    },
+    "actions": [
+      {
+        "kind": "discuss",
+        "expectedOutcome": "dismissed",
+        "activeAfterAction": true,
+        "pendingExitAfterAction": false
+      },
+      {
+        "kind": "refuse",
+        "answer": {
+          "id": "plan-review",
+          "selected": [
+            "Keep planning"
+          ],
+          "custom": "Add rollback coverage."
+        },
+        "expectedOutcome": "rejected",
+        "expectedFeedback": "Add rollback coverage.",
+        "activeAfterAction": true,
+        "pendingExitAfterAction": false
+      },
+      {
+        "kind": "approve",
+        "answer": {
+          "id": "plan-review",
+          "selected": [
+            "Approve"
+          ]
+        },
+        "expectedOutcome": "approved",
+        "expectedOutput": "{\"approved\":true}",
+        "activeAfterAction": true,
+        "pendingExitAfterAction": true,
+        "activeAfterCommit": false
+      }
+    ]
+  }
+}

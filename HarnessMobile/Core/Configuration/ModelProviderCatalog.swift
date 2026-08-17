@@ -1,0 +1,224 @@
+import Foundation
+
+enum ModelProviderID: String, Codable, CaseIterable, Sendable, Identifiable {
+    case deepSeekOfficial = "deepseek-official"
+    case openAI = "openai"
+    case anthropic = "anthropic"
+    case openRouter = "openrouter"
+    case customOpenAICompatible = "openai-compatible"
+
+    var id: String { rawValue }
+}
+
+enum ModelProviderWireProtocol: String, Codable, Sendable {
+    case openAIChatCompletions = "openai-chat-completions"
+    case anthropicMessages = "anthropic-messages"
+}
+
+enum ModelProviderInferenceSupport: String, Codable, Sendable {
+    case supported
+    case adapterRequired
+}
+
+enum ModelProviderDiscoverySupport: String, Codable, Sendable {
+    case openAICompatibleModels
+    case builtInCatalogOnly
+}
+
+struct ProviderModel: Codable, Sendable, Equatable, Hashable, Identifiable {
+    let id: String
+    let name: String?
+    let contextWindow: Int?
+    let maxOutputTokens: Int?
+
+    init(
+        id: String,
+        name: String? = nil,
+        contextWindow: Int? = nil,
+        maxOutputTokens: Int? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.contextWindow = contextWindow
+        self.maxOutputTokens = maxOutputTokens
+    }
+}
+
+enum ModelCatalogSource: String, Codable, Sendable {
+    case builtIn
+    case remote
+    case cache
+}
+
+struct ModelCatalogSnapshot: Codable, Sendable, Equatable {
+    let providerID: ModelProviderID
+    let source: ModelCatalogSource
+    let catalogVersion: String
+    let fetchedAt: Date?
+    let models: [ProviderModel]
+}
+
+struct ModelProviderDescriptor: Sendable, Equatable, Identifiable {
+    let id: ModelProviderID
+    let displayName: String
+    let detail: String
+    let wireProtocol: ModelProviderWireProtocol
+    let inferenceSupport: ModelProviderInferenceSupport
+    let discoverySupport: ModelProviderDiscoverySupport
+    let defaultBaseURL: String
+    let defaultModel: String
+    let defaultReasoningMode: ReasoningMode
+    let builtInModels: [ProviderModel]
+    let compatibilityNotice: String?
+
+    var supportsCurrentInferenceWire: Bool {
+        inferenceSupport == .supported
+    }
+
+    var supportsRemoteModelDiscovery: Bool {
+        discoverySupport == .openAICompatibleModels
+    }
+}
+
+enum ModelProviderCatalog {
+    static let schemaVersion = 1
+    static let revision = 2
+    static let version = "provider-catalog-v\(schemaVersion).r\(revision)"
+
+    static let providers: [ModelProviderDescriptor] = [
+        ModelProviderDescriptor(
+            id: .deepSeekOfficial,
+            displayName: "DeepSeek",
+            detail: "DeepSeek 官方 OpenAI-compatible Chat Completions API",
+            wireProtocol: .openAIChatCompletions,
+            inferenceSupport: .supported,
+            discoverySupport: .openAICompatibleModels,
+            defaultBaseURL: AgentConfiguration.defaultBaseURL,
+            defaultModel: AgentConfiguration.defaultModel,
+            defaultReasoningMode: .high,
+            builtInModels: [
+                ProviderModel(
+                    id: "deepseek-v4-flash",
+                    name: "DeepSeek-V4-Flash",
+                    contextWindow: 1_000_000,
+                    maxOutputTokens: 256_000
+                ),
+                ProviderModel(
+                    id: "deepseek-v4-pro",
+                    name: "DeepSeek-V4-Pro",
+                    contextWindow: 1_000_000,
+                    maxOutputTokens: 256_000
+                )
+            ],
+            compatibilityNotice: nil
+        ),
+        ModelProviderDescriptor(
+            id: .openAI,
+            displayName: "OpenAI",
+            detail: "OpenAI Chat Completions API",
+            wireProtocol: .openAIChatCompletions,
+            inferenceSupport: .supported,
+            discoverySupport: .openAICompatibleModels,
+            defaultBaseURL: "https://api.openai.com/v1",
+            defaultModel: "gpt-5",
+            defaultReasoningMode: .providerDefault,
+            builtInModels: [
+                ProviderModel(id: "gpt-5", name: "GPT-5"),
+                ProviderModel(id: "gpt-5-mini", name: "GPT-5 mini")
+            ],
+            compatibilityNotice: nil
+        ),
+        ModelProviderDescriptor(
+            id: .anthropic,
+            displayName: "Anthropic",
+            detail: "Anthropic Messages API",
+            wireProtocol: .anthropicMessages,
+            inferenceSupport: .supported,
+            discoverySupport: .builtInCatalogOnly,
+            defaultBaseURL: "https://api.anthropic.com/v1",
+            defaultModel: "claude-sonnet-4-5",
+            defaultReasoningMode: .providerDefault,
+            builtInModels: [
+                ProviderModel(id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5"),
+                ProviderModel(id: "claude-opus-4-1", name: "Claude Opus 4.1")
+            ],
+            compatibilityNotice: "Anthropic Messages 已支持流式文本、工具调用、用量和错误解析；官方 API 没有统一模型目录，因此使用内建目录或手动模型 ID。"
+        ),
+        ModelProviderDescriptor(
+            id: .openRouter,
+            displayName: "OpenRouter",
+            detail: "聚合多个厂商的 OpenAI-compatible Chat Completions API",
+            wireProtocol: .openAIChatCompletions,
+            inferenceSupport: .supported,
+            discoverySupport: .openAICompatibleModels,
+            defaultBaseURL: "https://openrouter.ai/api/v1",
+            defaultModel: "openrouter/auto",
+            defaultReasoningMode: .providerDefault,
+            builtInModels: [
+                ProviderModel(id: "openrouter/auto", name: "OpenRouter Auto")
+            ],
+            compatibilityNotice: nil
+        ),
+        ModelProviderDescriptor(
+            id: .customOpenAICompatible,
+            displayName: "自定义 OpenAI-compatible",
+            detail: "自定义 HTTPS endpoint，必须兼容流式 chat/completions；/models 可选",
+            wireProtocol: .openAIChatCompletions,
+            inferenceSupport: .supported,
+            discoverySupport: .openAICompatibleModels,
+            defaultBaseURL: "",
+            defaultModel: "",
+            defaultReasoningMode: .providerDefault,
+            builtInModels: [],
+            compatibilityNotice: "仅支持 OpenAI-compatible Chat Completions wire，不会自动兼容 Anthropic、Gemini 或其他协议。"
+        )
+    ]
+
+    static func descriptor(for id: ModelProviderID) -> ModelProviderDescriptor {
+        providers.first(where: { $0.id == id }) ?? providers[0]
+    }
+
+    static func inferredProviderID(baseURL: String) -> ModelProviderID {
+        guard let host = URLComponents(
+            string: baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        )?.host?.lowercased() else {
+            return .customOpenAICompatible
+        }
+        switch host {
+        case "api.deepseek.com":
+            return .deepSeekOfficial
+        case "api.openai.com":
+            return .openAI
+        case "api.anthropic.com":
+            return .anthropic
+        case "openrouter.ai":
+            return .openRouter
+        default:
+            return .customOpenAICompatible
+        }
+    }
+
+    static func applying(
+        _ providerID: ModelProviderID,
+        to configuration: AgentConfiguration
+    ) -> AgentConfiguration {
+        let descriptor = descriptor(for: providerID)
+        var result = configuration
+        result.providerID = providerID
+        result.baseURL = descriptor.defaultBaseURL
+        result.model = descriptor.defaultModel
+        result.reasoningMode = descriptor.defaultReasoningMode
+        return result
+    }
+
+    static func builtInSnapshot(for providerID: ModelProviderID) -> ModelCatalogSnapshot {
+        let descriptor = descriptor(for: providerID)
+        return ModelCatalogSnapshot(
+            providerID: providerID,
+            source: .builtIn,
+            catalogVersion: version,
+            fetchedAt: nil,
+            models: descriptor.builtInModels
+        )
+    }
+}

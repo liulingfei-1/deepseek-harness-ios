@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "patches": [
+    {
+      "path": "Vendor/OpenMinisISH/patches/0001-guest-network-policy.patch",
+      "sha256": "a4f85715986e2f322c4420caabbbe8845a8449a11f8a6bbf82494f8377fc7145",
+      "upstream": "ishArm64",
+      "baseCommit": "de124dd66124a15239cea1465164f74980ada245"
+    },
+    {
+      "path": "Vendor/OpenMinisISH/patches/0002-minimal-openminis-ish-bridge.patch",
+      "sha256": "d37399caff700b2e533429a94f110269730f31fa535a3eca955fc7038165aba7",
+      "upstream": "openminis",
+      "baseCommit": "9cf3a855fecd27bb5735b84cacbd56852a3ab8dd"
+    },
+    {
+      "path": "Vendor/OpenMinisISH/patches/0003-ish-bridge-abi-offsets.patch",
+      "sha256": "2e9facf549487d8943138c1d850ef9fb0b726caa46360a381f7138ba6f5c7261",
+      "upstream": "ishArm64",
+      "baseCommit": "de124dd66124a15239cea1465164f74980ada245"
+    },
+    {
+      "path": "Vendor/OpenMinisISH/patches/0004-openminis-ish-abi-guard.patch",
+      "sha256": "f4ff567e845d4bbac4574db3187467bb4a1d10e16b470aec4abadac07e76e719",
+      "upstream": "openminis",
+      "baseCommit": "9cf3a855fecd27bb5735b84cacbd56852a3ab8dd"
+    },
+    {
+      "path": "Vendor/OpenMinisISH/patches/0005-checked-task-start.patch",
+      "sha256": "c97bbbfd49b26587c30730534794dae2b50f3c187fe8b01d9fa7e87240301bd0",
+      "upstream": "ishArm64",
+      "baseCommit": "de124dd66124a15239cea1465164f74980ada245"
+    },
+    {
+      "path": "Vendor/OpenMinisISH/patches/0006-ish-runtime-robustness.patch",
+      "sha256": "7489e3805582c010ae90f0d86646b788fca26877b6ef0813c09213123c76de71",
+      "upstream": "openminis",
+      "baseCommit": "9cf3a855fecd27bb5735b84cacbd56852a3ab8dd"
+    },
+    {
+      "path": "Vendor/OpenMinisISH/patches/0007-persistent-process-stdin.patch",
+      "sha256": "130722366fb24e60cfc03f050873f85162df6b38dc5fa6c9f6a64536d24d9902",
+      "upstream": "openminis",
+      "baseCommit": "9cf3a855fecd27bb5735b84cacbd56852a3ab8dd"
+    },
+    {
+      "path": "Vendor/OpenMinisISH/patches/0008-native-offload-core-set.patch",
+      "sha256": "eb5bad319b809e6eca739ac239ca8455a9d202f83689ea86d4439dbee3186c1d",
+      "upstream": "openminis",
+      "baseCommit": "9cf3a855fecd27bb5735b84cacbd56852a3ab8dd"
+    }
+  ]
+}

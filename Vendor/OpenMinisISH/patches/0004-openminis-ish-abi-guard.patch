@@ -1,0 +1,31 @@
+diff --git a/src/ios/iSH/ISHKernel.m b/src/ios/iSH/ISHKernel.m
+index 94c78e3..36ec08f 100644
+--- a/src/ios/iSH/ISHKernel.m
++++ b/src/ios/iSH/ISHKernel.m
+@@ -21,4 +21,9 @@
+ #include "ish/fs/sock.h"
+ #include "ish/emu/cpu.h"
+ #include "ish/asbestos/frame.h"
++#include "ish/cpu-offsets.h"
++
++_Static_assert(offsetof(struct cpu_state, pc) == CPU_pc, "iSH cpu.pc ABI mismatch");
++_Static_assert(offsetof(struct cpu_state, segfault_addr) == CPU_segfault_addr, "iSH cpu.segfault_addr ABI mismatch");
++_Static_assert(offsetof(struct fiber_frame, jit_exit_sp) == LOCAL_jit_exit_sp, "iSH fiber_frame ABI mismatch");
+ #include <pthread.h>
+diff --git a/src/ios/iSH/ISHShellExecutor.m b/src/ios/iSH/ISHShellExecutor.m
+index e66e6a3..6f6f104 100644
+--- a/src/ios/iSH/ISHShellExecutor.m
++++ b/src/ios/iSH/ISHShellExecutor.m
+@@ -16,9 +16,12 @@
+ #include "ish/kernel/fs.h"
+ #include "ish/fs/devices.h"
+ #include "ish/fs/real.h"
++#include "ish/cpu-offsets.h"
+ 
+ #pragma mark - Result Implementation
+ 
++_Static_assert(offsetof(struct task, files) == TASK_files, "iSH task.files ABI mismatch");
++
+ @interface ISHShellExecutionResult ()
+ @property (nonatomic, readwrite) int exitCode;
+ @property (nonatomic, readwrite) int pid;

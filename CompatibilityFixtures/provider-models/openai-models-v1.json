@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "project": "deepseek-ai/deepseek-harness",
+    "commit": "47f943859bef60e4160492346772ded9b24f765a",
+    "contract": "OpenAI-compatible GET /models candidate discovery"
+  },
+  "response": {
+    "object": "list",
+    "data": [
+      {
+        "id": "deepseek-v4-pro",
+        "name": "DeepSeek V4 Pro",
+        "context_window": 1000000,
+        "max_output_tokens": 262144
+      },
+      {
+        "id": "gateway-chat",
+        "display_name": "Gateway Chat",
+        "context_length": 131072,
+        "max_tokens": 8192
+      },
+      {
+        "name": "missing-id"
+      },
+      {
+        "id": "deepseek-v4-pro",
+        "name": "duplicate-is-ignored"
+      },
+      "malformed-row"
+    ]
+  }
+}

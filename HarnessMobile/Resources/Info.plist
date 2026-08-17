@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.llf.harnessmobile.continued-processing.*</string>
+	</array>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>Harness Mobile</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>NFCReaderUsageDescription</key>
+	<string>仅在你主动批准 NFC 工具时开启一次系统扫描会话。</string>
+	<key>NSAppleMusicUsageDescription</key>
+	<string>仅在你批准媒体工具时访问本机音乐资料库。</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>仅在你批准蓝牙工具时扫描或连接附近的 BLE 设备。</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>仅在你批准蓝牙工具时与附近的 BLE 设备通信。</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>仅在你批准日历工具时查询或修改日程。</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>仅在你批准日历工具时查询或修改日程。</string>
+	<key>NSCameraUsageDescription</key>
+	<string>仅在你主动拍照并交给本地 OCR 工具时使用相机。</string>
+	<key>NSContactsUsageDescription</key>
+	<string>仅在你批准联系人搜索工具时读取有限的姓名、电话和邮箱。</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>用于在执行敏感本机操作前验证设备所有者。</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>仅在未来接入并由你批准 HealthKit 工具时读取所选健康数据。</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>仅在未来接入并由你批准 HealthKit 工具时写入所选健康数据。</string>
+	<key>NSHomeKitUsageDescription</key>
+	<string>仅在未来接入并由你批准 HomeKit 工具时访问智能家居。</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>仅在你批准需要访问同一局域网设备的功能时使用本地网络。</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>仅在你批准定位工具时获取一次当前定位，不进行后台跟踪。</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>仅在你主动使用语音输入时访问麦克风。</string>
+	<key>NSMotionUsageDescription</key>
+	<string>仅在你批准运动工具时读取最近的本机运动活动估计。</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>仅在你批准照片工具保存结果时写入照片图库。</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>仅在你主动选择图片供本地 OCR 分析时读取所选内容。</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>仅在你批准提醒事项工具时查询或修改提醒。</string>
+	<key>NSRemindersUsageDescription</key>
+	<string>仅在你批准提醒事项工具时查询或修改提醒。</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>仅在你主动使用语音转文字时进行语音识别。</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
+	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<true/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>processing</string>
+	</array>
+	<key>UILaunchScreen</key>
+	<dict/>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+</dict>
+</plist>

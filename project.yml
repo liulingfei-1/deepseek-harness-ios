@@ -1,0 +1,153 @@
+name: HarnessMobile
+options:
+  bundleIdPrefix: com.llf
+  deploymentTarget:
+    iOS: "18.0"
+  xcodeVersion: "27.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    DEAD_CODE_STRIPPING: YES
+    CURRENT_PROJECT_VERSION: 1
+    MARKETING_VERSION: 0.1.0
+packages:
+  HarnessMobileCore:
+    path: .
+targets:
+  HarnessMobile:
+    type: application
+    platform: iOS
+    sources:
+      - path: HarnessMobile
+        excludes:
+          - Resources/PluginHost/node_modules
+      - path: Vendor/OpenMinisISH/Artifacts/alpine-rootfs.zip
+        buildPhase: resources
+      - path: Vendor/OpenMinisISH/Artifacts/RootfsPatch.bundle
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.llf.harnessmobile
+        PRODUCT_NAME: HarnessMobile
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 2SH3TUR2JL
+        OTHER_LDFLAGS: $(inherited) -ObjC
+    dependencies:
+      - target: HarnessMobileLiveActivity
+        embed: true
+      - framework: Vendor/OpenMinisISH/Artifacts/HarnessISH.xcframework
+        embed: false
+      - sdk: SystemConfiguration.framework
+      - sdk: libsqlite3.tbd
+      - sdk: libresolv.tbd
+    info:
+      path: HarnessMobile/Resources/Info.plist
+      properties:
+        CFBundleDisplayName: Harness Mobile
+        ITSAppUsesNonExemptEncryption: false
+        NSSupportsLiveActivities: true
+        NSCameraUsageDescription: 仅在你主动拍照并交给本地 OCR 工具时使用相机。
+        NSPhotoLibraryUsageDescription: 仅在你主动选择图片供本地 OCR 分析时读取所选内容。
+        NSPhotoLibraryAddUsageDescription: 仅在你批准照片工具保存结果时写入照片图库。
+        NSContactsUsageDescription: 仅在你批准联系人搜索工具时读取有限的姓名、电话和邮箱。
+        NSLocationWhenInUseUsageDescription: 仅在你批准定位工具时获取一次当前定位，不进行后台跟踪。
+        NSMotionUsageDescription: 仅在你批准运动工具时读取最近的本机运动活动估计。
+        NSMicrophoneUsageDescription: 仅在你主动使用语音输入时访问麦克风。
+        NSSpeechRecognitionUsageDescription: 仅在你主动使用语音转文字时进行语音识别。
+        NSCalendarsUsageDescription: 仅在你批准日历工具时查询或修改日程。
+        NSCalendarsFullAccessUsageDescription: 仅在你批准日历工具时查询或修改日程。
+        NSRemindersUsageDescription: 仅在你批准提醒事项工具时查询或修改提醒。
+        NSRemindersFullAccessUsageDescription: 仅在你批准提醒事项工具时查询或修改提醒。
+        NSAppleMusicUsageDescription: 仅在你批准媒体工具时访问本机音乐资料库。
+        NSBluetoothAlwaysUsageDescription: 仅在你批准蓝牙工具时扫描或连接附近的 BLE 设备。
+        NSBluetoothPeripheralUsageDescription: 仅在你批准蓝牙工具时与附近的 BLE 设备通信。
+        NSLocalNetworkUsageDescription: 仅在你批准需要访问同一局域网设备的功能时使用本地网络。
+        NSHealthShareUsageDescription: 仅在未来接入并由你批准 HealthKit 工具时读取所选健康数据。
+        NSHealthUpdateUsageDescription: 仅在未来接入并由你批准 HealthKit 工具时写入所选健康数据。
+        NSHomeKitUsageDescription: 仅在未来接入并由你批准 HomeKit 工具时访问智能家居。
+        NFCReaderUsageDescription: 仅在你主动批准 NFC 工具时开启一次系统扫描会话。
+        NSFaceIDUsageDescription: 用于在执行敏感本机操作前验证设备所有者。
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.llf.harnessmobile.continued-processing.*
+        UIBackgroundModes:
+          - processing
+        UILaunchScreen: {}
+        UIApplicationSupportsIndirectInputEvents: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    preBuildScripts:
+      - name: Device-only tool audit
+        script: '"$SRCROOT/Scripts/audit-no-remote-execution.sh"'
+        inputFiles:
+          - $(SRCROOT)/Scripts/audit-no-remote-execution.sh
+        inputFileLists:
+          - $(SRCROOT)/Scripts/device-audit-inputs.xcfilelist
+        basedOnDependencyAnalysis: false
+  HarnessMobileLiveActivity:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: HarnessMobileLiveActivity
+      - path: HarnessMobile/Core/Background/HarnessActivityAttributes.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.llf.harnessmobile.liveactivity
+        PRODUCT_NAME: HarnessMobileLiveActivity
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 2SH3TUR2JL
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
+    info:
+      path: HarnessMobileLiveActivity/Info.plist
+      properties:
+        CFBundleDisplayName: Harness Activity
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+  HarnessMobileTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: HarnessMobileTests
+    dependencies:
+      - target: HarnessMobile
+      - package: HarnessMobileCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.llf.harnessmobile.tests
+        GENERATE_INFOPLIST_FILE: YES
+  HarnessMobileUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: HarnessMobileUITests
+    dependencies:
+      - target: HarnessMobile
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.llf.harnessmobile.uitests
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  HarnessMobile:
+    build:
+      targets:
+        HarnessMobile: all
+        HarnessMobileTests:
+          - test
+        HarnessMobileUITests:
+          - test
+    test:
+      targets:
+        - HarnessMobileTests
+        - HarnessMobileUITests

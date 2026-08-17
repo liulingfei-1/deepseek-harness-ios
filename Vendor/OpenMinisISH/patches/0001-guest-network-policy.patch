@@ -1,0 +1,72 @@
+diff --git a/fs/sock.c b/fs/sock.c
+index acff2d1..a4d3b87 100644
+--- a/fs/sock.c
++++ b/fs/sock.c
+@@ -1,6 +1,7 @@
+ #include <fcntl.h>
+ #include <netinet/tcp.h>
+ #include <poll.h>
++#include <stdatomic.h>
+ #include <string.h>
+ #include <sys/socket.h>
+ #include <sys/stat.h>
+@@ -17,6 +18,25 @@
+ 
+ const struct fd_ops socket_fdops;
+ 
++#ifndef ISH_GUEST_NETWORK_DEFAULT
++#define ISH_GUEST_NETWORK_DEFAULT 1
++#endif
++
++static atomic_bool ish_guest_network_enabled =
++    ATOMIC_VAR_INIT(ISH_GUEST_NETWORK_DEFAULT != 0);
++
++void ish_set_guest_network_enabled(bool enabled) {
++    atomic_store_explicit(&ish_guest_network_enabled, enabled, memory_order_release);
++}
++
++bool ish_is_guest_network_enabled(void) {
++    return atomic_load_explicit(&ish_guest_network_enabled, memory_order_acquire);
++}
++
++static bool socket_domain_uses_host_network(dword_t domain) {
++    return domain == AF_INET_ || domain == AF_INET6_;
++}
++
+ static lock_t peer_lock = LOCK_INITIALIZER;
+ 
+ static fd_t sock_fd_create(int sock_fd, int domain, int type, int protocol) {
+@@ -37,6 +57,8 @@ static fd_t sock_fd_create(int sock_fd, int domain, int type, int protocol) {
+ 
+ int_t sys_socket(dword_t domain, dword_t type, dword_t protocol) {
+     STRACE("socket(%d, %d, %d)", domain, type, protocol);
++    if (socket_domain_uses_host_network(domain) && !ish_is_guest_network_enabled())
++        return _EACCES;
+     int real_domain = sock_family_to_real(domain);
+     if (real_domain < 0)
+         return _EAFNOSUPPORT;
+diff --git a/fs/sock.h b/fs/sock.h
+index 24de8ac..8523f85 100644
+--- a/fs/sock.h
++++ b/fs/sock.h
+@@ -1,6 +1,7 @@
+ #ifndef SYS_SOCK_H
+ #define SYS_SOCK_H
+ 
++#include <stdbool.h>
+ #include <sys/socket.h>
+ #include <netinet/in.h>
+ #include <netinet/tcp.h>
+@@ -9,6 +10,12 @@
+ #include "misc.h"
+ #include "debug.h"
+ 
++// Configure this before starting guest commands. Disabling the policy blocks
++// creation of new AF_INET/AF_INET6 sockets while preserving AF_LOCAL IPC.
++// Existing sockets are intentionally not force-closed.
++void ish_set_guest_network_enabled(bool enabled);
++bool ish_is_guest_network_enabled(void);
++
+ int_t sys_socketcall(dword_t call_num, addr_t args_addr);
+ 
+ int_t sys_socket(dword_t domain, dword_t type, dword_t protocol);

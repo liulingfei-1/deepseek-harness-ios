@@ -1,0 +1,20 @@
+[binaries]
+c = ['@CLANG@', '-arch', 'arm64', '-target', 'arm64-apple-ios@DEPLOYMENT_TARGET@', '-isysroot', '@SDKROOT@']
+ar = '@AR@'
+strip = '@STRIP@'
+pkg-config = 'false'
+
+[host_machine]
+system = 'darwin'
+cpu_family = 'aarch64'
+cpu = 'aarch64'
+endian = 'little'
+
+[built-in options]
+c_args = ['-DISH_GUEST_NETWORK_DEFAULT=@NETWORK_DEFAULT@']
+c_link_args = ['-L@SDKROOT@/usr/lib']
+
+[properties]
+needs_exe_wrapper = true
+sys_root = '@SDKROOT@'
+library_dirs = ['@SDKROOT@/usr/lib']

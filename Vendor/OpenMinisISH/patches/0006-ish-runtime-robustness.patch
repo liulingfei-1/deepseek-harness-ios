@@ -1,0 +1,223 @@
+diff --git a/src/ios/iSH/ISHKernel.m b/src/ios/iSH/ISHKernel.m
+index 38cba12..17b6df0 100644
+--- a/src/ios/iSH/ISHKernel.m
++++ b/src/ios/iSH/ISHKernel.m
+@@ -24,6 +24,7 @@
+ 
+ _Static_assert(offsetof(struct cpu_state, pc) == CPU_pc, "iSH cpu.pc ABI mismatch");
+ _Static_assert(offsetof(struct cpu_state, segfault_addr) == CPU_segfault_addr, "iSH cpu.segfault_addr ABI mismatch");
++_Static_assert(offsetof(struct cpu_state, segfault_was_write) == CPU_segfault_was_write, "iSH cpu.segfault_was_write ABI mismatch");
+ _Static_assert(offsetof(struct fiber_frame, jit_exit_sp) == LOCAL_jit_exit_sp, "iSH fiber_frame ABI mismatch");
+ #include <pthread.h>
+ #include <stdatomic.h>
+@@ -31,8 +32,6 @@
+ #include <errno.h>
+ #include <sys/syslimits.h> // PATH_MAX
+ #include <signal.h>
+-#include <setjmp.h>
+-#include <execinfo.h>
+ #include <netinet/in.h>
+ #include <arpa/inet.h>
+ #include <netdb.h>
+@@ -57,11 +56,38 @@
+ // Assembly trampoline: returns INT_JIT_CRASH via fiber_exit (defined in entry.S)
+ extern void jit_crash_trampoline(void);
+ 
++static struct sigaction previous_sigsegv_action;
++static struct sigaction previous_sigbus_action;
++static pthread_once_t jit_crash_handler_once = PTHREAD_ONCE_INIT;
++static int jit_crash_handler_install_error;
++
++static const struct sigaction *previous_action_for_signal(int sig) {
++    if (sig == SIGSEGV) return &previous_sigsegv_action;
++    if (sig == SIGBUS) return &previous_sigbus_action;
++    return NULL;
++}
++
++static void chain_to_previous_signal_handler(int sig, siginfo_t *info, void *ctx) {
++    const struct sigaction *previous = previous_action_for_signal(sig);
++    if (previous == NULL) return;
++    if (previous->sa_handler == SIG_DFL || previous->sa_handler == SIG_IGN) {
++        sigaction(sig, previous, NULL);
++        return;
++    }
++    if ((previous->sa_flags & SA_SIGINFO) != 0) {
++        previous->sa_sigaction(sig, info, ctx);
++    } else {
++        previous->sa_handler(sig);
++    }
++}
++
+ /// Handles SIGSEGV/SIGBUS from JIT code (stale TLB pointers from concurrent CoW).
+ /// Uses ucontext PC manipulation to redirect to jit_crash_trampoline.
+ static void jit_crash_handler(int sig, siginfo_t *info, void *ctx) {
++    bool synchronous_memory_fault =
++        (sig == SIGSEGV || sig == SIGBUS) && info != NULL && info->si_code > 0 && ctx != NULL;
+ #ifdef __aarch64__
+-    if ((sig == SIGSEGV || sig == SIGBUS) && in_jit) {
++    if (synchronous_memory_fault && in_jit) {
+         ucontext_t *uc = (ucontext_t *)ctx;
+ 
+         // _cpu is in x1 — pointer to cpu_state within fiber_frame
+@@ -89,32 +115,14 @@ static void jit_crash_handler(int sig, siginfo_t *info, void *ctx) {
+         // Redirect execution to crash trampoline
+         uc->uc_mcontext->__ss.__pc = (uint64_t)jit_crash_trampoline;
+ 
+-        // Unblock signal so it can fire again
+-        sigset_t unblock;
+-        sigemptyset(&unblock);
+-        sigaddset(&unblock, sig);
+-        sigprocmask(SIG_UNBLOCK, &unblock, NULL);
+-
+         return;
+     }
+ #endif
+-    // Check if this is an iSH guest thread by testing the thread-local `in_jit` variable.
+-    // `in_jit` is only ever set on iSH execution threads. For non-iSH threads (e.g. Swift
+-    // async tasks, networking, UI), we must NOT intercept the signal — doing so kills the
+-    // thread via pthread_exit, which crashes the app (FOUNDATION 1 termination).
+-    // Instead, reset the signal to default and re-raise so the system crash reporter
+-    // handles it normally.
+-    //
+-    // Note: `in_jit` is 0 here (the in_jit==1 case was handled above). We use a separate
+-    // thread-local marker set when iSH threads start, to distinguish iSH threads with
+-    // in_jit==0 (between JIT runs) from non-iSH threads (never set).
++
++    // Only synchronous memory faults on marked iSH threads belong to the guest.
+     extern __thread int ish_thread_marker;
+-    if (!ish_thread_marker) {
+-        // Not an iSH thread — restore default handler and re-raise
+-        struct sigaction sa_default = {0};
+-        sa_default.sa_handler = SIG_DFL;
+-        sigaction(sig, &sa_default, NULL);
+-        raise(sig);
++    if (!synchronous_memory_fault || !ish_thread_marker) {
++        chain_to_previous_signal_handler(sig, info, ctx);
+         return;
+     }
+ 
+@@ -122,32 +130,15 @@ static void jit_crash_handler(int sig, siginfo_t *info, void *ctx) {
+     // Unlike upstream (standalone process where _exit is fine), we're embedded
+     // in the app — _exit would kill the entire app. Instead, log diagnostics
+     // and terminate only this guest thread.
+-    char buf[512];
+-    int len;
+-    ucontext_t *uc = (ucontext_t *)ctx;
+-    len = snprintf(buf, sizeof(buf), "\n=== iSH GUEST CRASH: signal %d ===\nfault addr: %p\n", sig, info->si_addr);
+-    write(STDERR_FILENO, buf, len);
+-#ifdef __aarch64__
+-    len = snprintf(buf, sizeof(buf),
+-        "pc:  0x%llx\nlr:  0x%llx\nsp:  0x%llx\n"
+-        "x0:  0x%llx\nx1:  0x%llx\nx2:  0x%llx\n"
+-        "x7:  0x%llx\nx28: 0x%llx\n",
+-        uc->uc_mcontext->__ss.__pc, uc->uc_mcontext->__ss.__lr,
+-        uc->uc_mcontext->__ss.__sp,
+-        uc->uc_mcontext->__ss.__x[0], uc->uc_mcontext->__ss.__x[1],
+-        uc->uc_mcontext->__ss.__x[2],
+-        uc->uc_mcontext->__ss.__x[7], uc->uc_mcontext->__ss.__x[28]);
+-    write(STDERR_FILENO, buf, len);
+-#endif
+-    void *bt[20];
+-    int n = backtrace(bt, 20);
+-    backtrace_symbols_fd(bt, n, STDERR_FILENO);
++    static const char guest_fault_message[] =
++        "\n=== iSH guest fault outside JIT; thread parked ===\n";
++    write(STDERR_FILENO, guest_fault_message, sizeof(guest_fault_message) - 1);
+ 
+     // Block all signals and suspend this thread forever.
+     // pthread_exit() triggers SIGTRAP on iOS in certain thread states.
+     sigset_t all;
+     sigfillset(&all);
+-    pthread_sigmask(SIG_BLOCK, &all, NULL);
++    sigprocmask(SIG_BLOCK, &all, NULL);
+     select(0, NULL, NULL, NULL, NULL);
+     __builtin_unreachable();
+ }
+@@ -172,22 +163,33 @@ static void embedded_die_handler(const char *msg) {
+     __builtin_unreachable();
+ }
+ 
+-static void install_jit_crash_handler(void) {
+-    static char altstack[SIGSTKSZ];
+-    stack_t ss = {.ss_sp = altstack, .ss_size = SIGSTKSZ};
+-    sigaltstack(&ss, NULL);
+-
++static void install_jit_crash_handler_once(void) {
+     struct sigaction sa = {0};
+     sa.sa_sigaction = jit_crash_handler;
+-    sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
+-    sigaction(SIGSEGV, &sa, NULL);
+-    sigaction(SIGBUS, &sa, NULL);
+-    sigaction(SIGILL, &sa, NULL);
+-    sigaction(SIGTRAP, &sa, NULL);
+-    // Note: SIGABRT intentionally NOT handled — it's used by the system
+-    // (assert(), Swift runtime, malloc failure) and intercepting it prevents
+-    // normal crash reporting and can mask OOM conditions.
+-    NSLog(@"ISHKernel: JIT crash recovery handler installed");
++    sa.sa_flags = SA_SIGINFO;
++    sigemptyset(&sa.sa_mask);
++    sigaddset(&sa.sa_mask, SIGSEGV);
++    sigaddset(&sa.sa_mask, SIGBUS);
++
++    if (sigaction(SIGSEGV, &sa, &previous_sigsegv_action) < 0) {
++        jit_crash_handler_install_error = errno;
++        return;
++    }
++    if (sigaction(SIGBUS, &sa, &previous_sigbus_action) < 0) {
++        int install_error = errno;
++        sigaction(SIGSEGV, &previous_sigsegv_action, NULL);
++        jit_crash_handler_install_error = install_error;
++    }
++}
++
++static void install_jit_crash_handler(void) {
++    pthread_once(&jit_crash_handler_once, install_jit_crash_handler_once);
++    if (jit_crash_handler_install_error == 0) {
++        NSLog(@"ISHKernel: JIT crash recovery handler installed for SIGSEGV/SIGBUS");
++    } else {
++        NSLog(@"ISHKernel: JIT crash recovery handler installation failed: %d",
++              jit_crash_handler_install_error);
++    }
+ }
+ 
+ // Forward declaration of private methods for C callbacks
+diff --git a/src/ios/iSH/ISHShellExecutor.m b/src/ios/iSH/ISHShellExecutor.m
+index c9cab7f..539a8fa 100644
+--- a/src/ios/iSH/ISHShellExecutor.m
++++ b/src/ios/iSH/ISHShellExecutor.m
+@@ -453,15 +453,29 @@ + (int)executeExecutable:(NSString *)executable
+         return ISHShellExecutorErrorExecFailed;
+     }
+ 
+-    // Get guest PID and start task
++    // Register before starting so a short-lived guest exit can find its context.
+     ctx.guestPid = task->pid;
+     ctx.result.pid = ctx.guestPid;
+-    task_start(task);
+-    current = saved_current;
+-
+-    // Register context
++    NSNumber *pidKey = @(ctx.guestPid);
+     @synchronized(_activeExecutions) {
+-        _activeExecutions[@(ctx.guestPid)] = ctx;
++        _activeExecutions[pidKey] = ctx;
++    }
++
++    int startError = task_start_checked(task);
++    current = saved_current;
++    if (startError != 0) {
++        @synchronized(_activeExecutions) {
++            if (_activeExecutions[pidKey] == ctx) {
++                [_activeExecutions removeObjectForKey:pidKey];
++            }
++        }
++        if (stdinPipe[0] >= 0) close(stdinPipe[0]);
++        if (stdinPipe[1] >= 0) close(stdinPipe[1]);
++        stdinPipe[0] = stdinPipe[1] = -1;
++        [ctx cleanup];
++        NSLog(@"ISHShellExecutor: pthread_create failed: %d (%s)",
++              startError, strerror(startError));
++        return ISHShellExecutorErrorProcessCreationFailed;
+     }
+ 
+     // Write stdinData to pipe in background, then close write end

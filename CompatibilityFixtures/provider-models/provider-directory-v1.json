@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "directory": {
+    "schemaVersion": 1,
+    "activeProfileID": "openai-main",
+    "profiles": [
+      {
+        "id": "openai-main",
+        "displayName": "OpenAI Main",
+        "providerID": "openai",
+        "wireProtocol": "openai-chat-completions",
+        "baseURL": "https://api.openai.com/v1",
+        "credentialReference": "provider.openai-main.api-key",
+        "models": [
+          {
+            "id": "gpt-5",
+            "name": "GPT-5"
+          }
+        ],
+        "defaultModel": "gpt-5",
+        "reasoningMode": "providerDefault",
+        "maxSteps": 8,
+        "maxOutputTokens": 4096,
+        "isCustom": false
+      },
+      {
+        "id": "openrouter-backup",
+        "displayName": "OpenRouter Backup",
+        "providerID": "openrouter",
+        "wireProtocol": "openai-chat-completions",
+        "baseURL": "https://openrouter.ai/api/v1",
+        "credentialReference": "provider.openrouter-backup.api-key",
+        "models": [
+          {
+            "id": "openrouter/auto",
+            "name": "OpenRouter Auto"
+          }
+        ],
+        "defaultModel": "openrouter/auto",
+        "reasoningMode": "providerDefault",
+        "maxSteps": 10,
+        "maxOutputTokens": 8192,
+        "isCustom": false
+      }
+    ]
+  },
+  "expectedProfileIDs": [
+    "openai-main",
+    "openrouter-backup"
+  ],
+  "expectedCredentialReferences": [
+    "provider.openai-main.api-key",
+    "provider.openrouter-backup.api-key"
+  ]
+}

@@ -1,0 +1,99 @@
+diff --git a/src/ios/iSH/ISHKernel.m b/src/ios/iSH/ISHKernel.m
+index 9b7796a..4460e6f 100644
+--- a/src/ios/iSH/ISHKernel.m
++++ b/src/ios/iSH/ISHKernel.m
+@@ -34,6 +34,24 @@
+ #include <netdb.h>
+ #include <resolv.h>
+ #import <SystemConfiguration/SystemConfiguration.h>
++#import "DeviceOffload.h"
++#import "ClipboardOffload.h"
++#import "OpenOffload.h"
++#import "VisionOffload.h"
++#import "LocationOffload.h"
++#import "MapsOffload.h"
++#import "NLPOffload.h"
++#import "SpeakOffload.h"
++#import "NotificationOffload.h"
++#import "BluetoothOffload.h"
++#import "CalendarOffload.h"
++#import "MediaOffload.h"
++#import "PhotosOffload.h"
++#import "RemindersOffload.h"
++#import "SpeechOffload.h"
++#import "HealthKitOffload.h"
++#import "HomeKitOffload.h"
++#import "NFCOffload.h"
+ 
+ NSNotificationName const ISHProcessExitedNotification = @"ISHProcessExited";
+ NSNotificationName const ISHTerminalOutputNotification = @"ISHTerminalOutput";
+@@ -395,5 +395,26 @@ static int bootKernel(void) {
+         NSLog(@"ISHKernel: stdio created for init process");
+     }
+ 
++    // Register only offloads whose host frameworks and permissions are
++    // available in HarnessMobile. Each handler runs in-process on the device.
++    device_offload_register();
++    clipboard_offload_register();
++    open_offload_register();
++    vision_offload_register();
++    location_offload_register();
++    maps_offload_register();
++    nlp_offload_register();
++    speak_offload_register();
++    notification_offload_register();
++    bluetooth_offload_register();
++    calendar_offload_register();
++    media_offload_register();
++    photos_offload_register();
++    reminders_offload_register();
++    speech_offload_register();
++    healthkit_offload_register();
++    homekit_offload_register();
++    nfc_offload_register();
++
+     _isBooted = YES;
+     NSLog(@"ISHKernel: Kernel initialized successfully");
+diff --git a/src/ios/NativeOffloads/ClipboardOffload.m b/src/ios/NativeOffloads/ClipboardOffload.m
+index 975146f..8d09256 100644
+--- a/src/ios/NativeOffloads/ClipboardOffload.m
++++ b/src/ios/NativeOffloads/ClipboardOffload.m
+@@ -70,7 +70,9 @@ static int cmd_get(int argc, char **argv, int stdout_fd, BOOL compact, BOOL quie
+             UIImage *img = pb.image;
+             NSData *pngData = UIImagePNGRepresentation(img);
+             if (pngData) {
+-                NSString *hostPath = noff_resolve_host_path(imageDest);
++                // native_offload_exec already translates absolute guest argv
++                // paths, including bind mounts, before invoking the handler.
++                NSString *hostPath = imageDest;
+                 if (hostPath) {
+                     NSFileManager *fm = [NSFileManager defaultManager];
+                     NSString *parentDir = [hostPath stringByDeletingLastPathComponent];
+diff --git a/src/ios/NativeOffloads/NativeOffloadUtils.m b/src/ios/NativeOffloads/NativeOffloadUtils.m
+index 0f7d2c3..7b6d9d0 100644
+--- a/src/ios/NativeOffloads/NativeOffloadUtils.m
++++ b/src/ios/NativeOffloads/NativeOffloadUtils.m
+@@ -244,10 +244,20 @@
+ NSString *_Nullable noff_resolve_host_path(NSString *guestPath) {
+     if (guestPath.length == 0) return nil;
+ 
+-    // Documents/alpine-rootfs/data/ is the fakefs data root
+-    NSString *documents = NSSearchPathForDirectoriesInDomains(
+-        NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+-    NSString *dataRoot = [documents stringByAppendingPathComponent:@"alpine-rootfs/data"];
++    extern struct mount *g_fakefs_mount;
++    // The embedded app chooses its rootfs location at runtime. Prefer the
++    // mounted fakefs source so bind-mounted workspace paths are not guessed.
++    NSString *dataRoot = nil;
++    if (g_fakefs_mount != NULL && g_fakefs_mount->source != NULL) {
++        dataRoot = [NSString stringWithUTF8String:g_fakefs_mount->source];
++    }
++    if (dataRoot.length == 0) {
++        // Keep the upstream standalone-app location as a compatibility
++        // fallback for callers that run before the embedded kernel boots.
++        NSString *documents = NSSearchPathForDirectoriesInDomains(
++            NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
++        dataRoot = [documents stringByAppendingPathComponent:@"alpine-rootfs/data"];
++    }
+ 
+     // Strip leading "/" from guest path and append to host data root

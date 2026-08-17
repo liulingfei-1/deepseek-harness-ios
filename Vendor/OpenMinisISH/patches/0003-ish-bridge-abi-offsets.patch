@@ -1,0 +1,20 @@
+diff --git a/asbestos/offsets.c b/asbestos/offsets.c
+index 4a94d8a..91c6f35 100644
+--- a/asbestos/offsets.c
++++ b/asbestos/offsets.c
+@@ -2,6 +2,7 @@
+ #include "asbestos/frame.h"
+ #include "emu/cpu.h"
+ #include "emu/tlb.h"
++#include "kernel/task.h"
+ 
+ void cpu() {
+ #if defined(GUEST_X86) || !defined(GUEST_ARM64)
+@@ -116,6 +117,7 @@ void cpu() {
+     OFFSET(CPU, cpu_state, cycle);
+     MACRO(MEM_READ);
+     MACRO(MEM_WRITE);
++    OFFSET(TASK, task, files);
+ 
+     OFFSET(FIBER_BLOCK, fiber_block, addr);
+     OFFSET(FIBER_BLOCK, fiber_block, code);

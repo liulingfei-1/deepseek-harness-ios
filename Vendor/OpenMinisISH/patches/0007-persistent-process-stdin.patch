@@ -1,0 +1,596 @@
+diff --git a/src/ios/iSH/ISHShellExecutor.h b/src/ios/iSH/ISHShellExecutor.h
+index 68160a9..bb108de 100644
+--- a/src/ios/iSH/ISHShellExecutor.h
++++ b/src/ios/iSH/ISHShellExecutor.h
+@@ -48,6 +48,35 @@ typedef void (^ISHShellLineCallback)(NSString *line, BOOL isStdErr);
+ /// @param result Execution result containing exit code and outputs
+ typedef void (^ISHShellCompletionCallback)(ISHShellExecutionResult *result);
+ 
++/// Raw stdout/stderr callback for a persistent process.
++/// Called on the main queue for each pipe read.
++typedef void (^ISHShellStreamCallback)(NSData *data, BOOL isStdErr);
++
++/// Handle for an independently piped, long-lived guest process.
++@interface ISHShellProcess : NSObject
++
++/// Guest process PID.
++@property (nonatomic, readonly) int pid;
++
++/// Whether the guest process has not reported exit yet.
++@property (atomic, readonly, getter=isRunning) BOOL running;
++
++/// Queue data for delivery to the guest process's stdin.
++/// Returns NO after stdin closes, process exit, or when pending input exceeds
++/// the bounded queue capacity. An empty data object is accepted as a no-op.
++- (BOOL)writeStdin:(NSData *)data;
++
++/// Close stdin after all previously accepted writes. Idempotent.
++- (void)closeStdin;
++
++/// Close stdin and terminate the full guest process group. Idempotent.
++- (void)terminate;
++
++- (instancetype)init NS_UNAVAILABLE;
+++ (instancetype)new NS_UNAVAILABLE;
++
++@end
++
+ @interface ISHShellExecutor : NSObject
+ 
+ /// Execute a shell command with line-by-line output callback
+@@ -101,6 +130,17 @@ typedef void (^ISHShellCompletionCallback)(ISHShellExecutionResult *result);
+             lineCallback:(nullable ISHShellLineCallback)lineCallback
+               completion:(nullable ISHShellCompletionCallback)completion;
+ 
++/// Start an independently piped process whose stdin remains open until the
++/// returned handle closes it. stdout and stderr are delivered as raw chunks;
++/// completion is called after process exit and a short bounded drain window.
++/// @return A process handle, or nil when startup fails.
+++ (nullable ISHShellProcess *)startPersistentExecutable:(NSString *)executable
++                                               arguments:(nullable NSArray<NSString *> *)arguments
++                                             environment:(nullable NSDictionary<NSString *, NSString *> *)environment
++                                               fsContext:(uint64_t)fsContext
++                                          outputCallback:(nullable ISHShellStreamCallback)outputCallback
++                                              completion:(nullable ISHShellCompletionCallback)completion;
++
+ /// Execute a shell command and wait synchronously for completion
+ /// @param command Shell command to execute
+ /// @param timeout Maximum wait time in seconds (0 = no timeout)
+diff --git a/src/ios/iSH/ISHShellExecutor.m b/src/ios/iSH/ISHShellExecutor.m
+index 539a8fa..481f341 100644
+--- a/src/ios/iSH/ISHShellExecutor.m
++++ b/src/ios/iSH/ISHShellExecutor.m
+@@ -18,6 +18,8 @@
+ #include "ish/fs/real.h"
+ #include "ish/cpu-offsets.h"
+ 
++static const NSUInteger ISHMaxPendingStdinBytes = 1024 * 1024;
++
+ #pragma mark - Result Implementation
+ 
+ _Static_assert(offsetof(struct task, files) == TASK_files, "iSH task.files ABI mismatch");
+@@ -37,21 +39,31 @@ @implementation ISHShellExecutionResult
+ #pragma mark - Execution Context
+ 
+ @interface ISHShellExecutionContext : NSObject {
++    int _stdinWriteFd;
+     int _stdoutPipe[2];
+     int _stderrPipe[2];
++    dispatch_queue_t _stdinQueue;
++    NSUInteger _pendingStdinBytes;
++    BOOL _acceptsStdin;
+ }
+ @property (nonatomic) int guestPid;
+ @property (nonatomic) NSDate *startTime;
+ @property (nonatomic, copy) ISHShellLineCallback lineCallback;
++@property (nonatomic, copy) ISHShellStreamCallback streamCallback;
+ @property (nonatomic, copy) ISHShellCompletionCallback completion;
+ @property (nonatomic) NSMutableString *stdoutBuffer;
+ @property (nonatomic) NSMutableString *stderrBuffer;
+ @property (nonatomic) dispatch_semaphore_t waitSemaphore;
+ @property (nonatomic) ISHShellExecutionResult *result;
+ @property (atomic) BOOL isCompleted;
++@property (atomic) BOOL hasExited;
+ 
+ - (int *)stdoutPipe;
+ - (int *)stderrPipe;
++- (void)adoptStdinWriteFd:(int)fd;
++- (int)takeStdinWriteFd;
++- (BOOL)enqueueStdinData:(NSData *)data;
++- (void)closeStdin;
+ 
+ @end
+ 
+@@ -69,17 +81,120 @@ - (instancetype)init {
+     if (self = [super init]) {
+         _stdoutBuffer = [NSMutableString string];
+         _stderrBuffer = [NSMutableString string];
++        _stdinWriteFd = -1;
+         _stdoutPipe[0] = -1;
+         _stdoutPipe[1] = -1;
+         _stderrPipe[0] = -1;
+         _stderrPipe[1] = -1;
++        _stdinQueue = dispatch_queue_create("com.ish.shellexecutor.stdin",
++                                            DISPATCH_QUEUE_SERIAL);
+         _result = [[ISHShellExecutionResult alloc] init];
+         _result.error = ISHShellExecutorErrorNone;
+     }
+     return self;
+ }
+ 
++- (void)adoptStdinWriteFd:(int)fd {
++    @synchronized(self) {
++        if (_stdinWriteFd >= 0) close(_stdinWriteFd);
++        _stdinWriteFd = fd;
++        _acceptsStdin = fd >= 0;
++    }
++    if (fd >= 0) {
++        int flags = fcntl(fd, F_GETFL);
++        if (flags >= 0) fcntl(fd, F_SETFL, flags | O_NONBLOCK);
++        fcntl(fd, F_SETNOSIGPIPE, 1);
++    }
++}
++
++- (int)takeStdinWriteFd {
++    @synchronized(self) {
++        int fd = _stdinWriteFd;
++        _stdinWriteFd = -1;
++        _acceptsStdin = NO;
++        return fd;
++    }
++}
++
++- (BOOL)enqueueStdinData:(NSData *)data {
++    if (data.length == 0) {
++        @synchronized(self) {
++            return _acceptsStdin && _stdinWriteFd >= 0 && !_hasExited;
++        }
++    }
++
++    NSData *payload = [data copy];
++    @synchronized(self) {
++        if (!_acceptsStdin || _stdinWriteFd < 0 || _hasExited) return NO;
++        if (_pendingStdinBytes > ISHMaxPendingStdinBytes ||
++            payload.length > ISHMaxPendingStdinBytes - _pendingStdinBytes) {
++            return NO;
++        }
++        _pendingStdinBytes += payload.length;
++
++        // Submit while holding the same lock used by closeStdin so accepted
++        // writes are always queued before the EOF operation.
++        dispatch_async(_stdinQueue, ^{
++            const uint8_t *bytes = payload.bytes;
++            size_t remaining = payload.length;
++            while (remaining > 0) {
++                int fd;
++                @synchronized(self) { fd = self->_stdinWriteFd; }
++                if (fd < 0) break;
++
++                ssize_t written = write(fd, bytes, remaining);
++                if (written > 0) {
++                    bytes += written;
++                    remaining -= (size_t)written;
++                    continue;
++                }
++                if (written < 0 && errno == EINTR) continue;
++                if (written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
++                    struct pollfd pfd = {.fd = fd, .events = POLLOUT};
++                    int pollResult = poll(&pfd, 1, 100);
++                    if (pollResult >= 0 || errno == EINTR) continue;
++                }
++
++                int fdToClose = -1;
++                @synchronized(self) {
++                    if (self->_stdinWriteFd == fd) {
++                        fdToClose = fd;
++                        self->_stdinWriteFd = -1;
++                        self->_acceptsStdin = NO;
++                    }
++                }
++                if (fdToClose >= 0) close(fdToClose);
++                break;
++            }
++            @synchronized(self) {
++                if (self->_pendingStdinBytes >= payload.length) {
++                    self->_pendingStdinBytes -= payload.length;
++                } else {
++                    self->_pendingStdinBytes = 0;
++                }
++            }
++        });
++    }
++    return YES;
++}
++
++- (void)closeStdin {
++    @synchronized(self) {
++        if (!_acceptsStdin && _stdinWriteFd < 0) return;
++        _acceptsStdin = NO;
++    }
++    dispatch_async(_stdinQueue, ^{
++        int fd = -1;
++        @synchronized(self) {
++            fd = self->_stdinWriteFd;
++            self->_stdinWriteFd = -1;
++        }
++        if (fd >= 0) close(fd);
++    });
++}
++
+ - (void)cleanup {
++    [self closeStdin];
+     if (_stdoutPipe[0] >= 0) close(_stdoutPipe[0]);
+     if (_stdoutPipe[1] >= 0) close(_stdoutPipe[1]);
+     if (_stderrPipe[0] >= 0) close(_stderrPipe[0]);
+@@ -89,13 +204,73 @@ - (void)cleanup {
+ }
+ 
+ - (void)dealloc {
+-    [self cleanup];
++    int stdinFd = _stdinWriteFd;
++    _stdinWriteFd = -1;
++    if (stdinFd >= 0) close(stdinFd);
++    if (_stdoutPipe[0] >= 0) close(_stdoutPipe[0]);
++    if (_stdoutPipe[1] >= 0) close(_stdoutPipe[1]);
++    if (_stderrPipe[0] >= 0) close(_stderrPipe[0]);
++    if (_stderrPipe[1] >= 0) close(_stderrPipe[1]);
++}
++
++@end
++
++#pragma mark - Persistent Process Handle
++
++@interface ISHShellProcess ()
++@property (nonatomic, strong) ISHShellExecutionContext *context;
++- (instancetype)initWithContext:(ISHShellExecutionContext *)context;
++@end
++
++@implementation ISHShellProcess
++
++- (instancetype)initWithContext:(ISHShellExecutionContext *)context {
++    if (self = [super init]) {
++        _context = context;
++    }
++    return self;
++}
++
++- (int)pid {
++    return self.context.guestPid;
++}
++
++- (BOOL)isRunning {
++    return !self.context.hasExited;
++}
++
++- (BOOL)writeStdin:(NSData *)data {
++    return [self.context enqueueStdinData:data];
++}
++
++- (void)closeStdin {
++    [self.context closeStdin];
++}
++
++- (void)terminate {
++    [self.context closeStdin];
++    if (!self.context.hasExited) {
++        [ISHShellExecutor killProcessGroup:self.context.guestPid];
++    }
+ }
+ 
+ @end
+ 
+ #pragma mark - Executor Implementation
+ 
++@interface ISHShellExecutor ()
+++ (int)launchExecutable:(NSString *)executable
++               arguments:(NSArray<NSString *> *)arguments
++             environment:(NSDictionary<NSString *, NSString *> *)environment
++               stdinData:(NSData *)stdinData
++               fsContext:(uint64_t)fsContext
++          keepsStdinOpen:(BOOL)keepsStdinOpen
++            lineCallback:(ISHShellLineCallback)lineCallback
++          streamCallback:(ISHShellStreamCallback)streamCallback
++              completion:(ISHShellCompletionCallback)completion
++                 process:(ISHShellProcess * __autoreleasing *)process;
++@end
++
+ @implementation ISHShellExecutor
+ 
+ static NSMutableDictionary<NSNumber *, ISHShellExecutionContext *> *_activeExecutions;
+@@ -195,6 +370,49 @@ + (int)executeExecutable:(NSString *)executable
+                fsContext:(uint64_t)fsContext
+             lineCallback:(ISHShellLineCallback)lineCallback
+               completion:(ISHShellCompletionCallback)completion {
++    return [self launchExecutable:executable
++                        arguments:arguments
++                      environment:environment
++                        stdinData:stdinData
++                        fsContext:fsContext
++                   keepsStdinOpen:NO
++                     lineCallback:lineCallback
++                   streamCallback:nil
++                       completion:completion
++                          process:nil];
++}
++
+++ (ISHShellProcess *)startPersistentExecutable:(NSString *)executable
++                                      arguments:(NSArray<NSString *> *)arguments
++                                    environment:(NSDictionary<NSString *, NSString *> *)environment
++                                      fsContext:(uint64_t)fsContext
++                                 outputCallback:(ISHShellStreamCallback)outputCallback
++                                     completion:(ISHShellCompletionCallback)completion {
++    ISHShellProcess *process = nil;
++    int pid = [self launchExecutable:executable
++                           arguments:arguments
++                         environment:environment
++                           stdinData:nil
++                           fsContext:fsContext
++                      keepsStdinOpen:YES
++                        lineCallback:nil
++                      streamCallback:outputCallback
++                          completion:completion
++                             process:&process];
++    return pid < 0 ? nil : process;
++}
++
+++ (int)launchExecutable:(NSString *)executable
++               arguments:(NSArray<NSString *> *)arguments
++             environment:(NSDictionary<NSString *, NSString *> *)environment
++               stdinData:(NSData *)stdinData
++               fsContext:(uint64_t)fsContext
++          keepsStdinOpen:(BOOL)keepsStdinOpen
++            lineCallback:(ISHShellLineCallback)lineCallback
++          streamCallback:(ISHShellStreamCallback)streamCallback
++              completion:(ISHShellCompletionCallback)completion
++                 process:(ISHShellProcess * __autoreleasing *)process {
++    if (process) *process = nil;
+ 
+     // Bail out if the iSH kernel hasn't booted yet. become_new_init_child()
+     // calls pid_get_task(1) and then assert(init != NULL); on a non-booted
+@@ -208,6 +426,7 @@ + (int)executeExecutable:(NSString *)executable
+ 
+     ISHShellExecutionContext *ctx = [[ISHShellExecutionContext alloc] init];
+     ctx.lineCallback = lineCallback;
++    ctx.streamCallback = streamCallback;
+     ctx.completion = completion;
+     ctx.startTime = [NSDate date];
+ 
+@@ -243,66 +462,87 @@ + (int)executeExecutable:(NSString *)executable
+         task->group->fs_context = fsContext;
+     }
+ 
+-    // Setup stdin: pipe if stdinData provided, /dev/null otherwise
++    // Setup stdin: a pipe for batch or persistent input, /dev/null otherwise.
++    BOOL usesStdinPipe = stdinData != nil || keepsStdinOpen;
+     int stdinPipe[2] = {-1, -1};
+-    if (stdinData) {
++    if (usesStdinPipe) {
+         if (pipe(stdinPipe) < 0) {
+             NSLog(@"ISHShellExecutor[stdin]: pipe() failed: %s", strerror(errno));
+             current = saved_current;
+             [ctx cleanup];
+             return ISHShellExecutorErrorProcessCreationFailed;
+         }
+-        NSLog(@"ISHShellExecutor[stdin]: pipe created (read=%d, write=%d), stdinData=%lu bytes",
+-              stdinPipe[0], stdinPipe[1], (unsigned long)stdinData.length);
++        NSLog(@"ISHShellExecutor[stdin]: pipe created (read=%d, write=%d, persistent=%d, batch=%lu bytes)",
++              stdinPipe[0], stdinPipe[1], keepsStdinOpen,
++              (unsigned long)stdinData.length);
+     } else {
+         NSLog(@"ISHShellExecutor[stdin]: no stdinData, will use /dev/null");
+     }
++    int stdinRealFd = usesStdinPipe ? dup(stdinPipe[0]) : open("/dev/null", O_RDONLY);
++    if (stdinRealFd < 0) {
++        NSLog(@"ISHShellExecutor[stdin]: host fd creation failed: %s", strerror(errno));
++        if (usesStdinPipe) { close(stdinPipe[0]); close(stdinPipe[1]); }
++        current = saved_current;
++        [ctx cleanup];
++        return ISHShellExecutorErrorProcessCreationFailed;
++    }
+     struct fd *stdin_fd = adhoc_fd_create(&realfs_fdops);
+-    if (stdin_fd) {
+-        int real_fd = stdinData ? dup(stdinPipe[0]) : open("/dev/null", O_RDONLY);
+-        if (real_fd < 0) {
+-            NSLog(@"ISHShellExecutor[stdin]: fd creation failed: %s", strerror(errno));
+-            if (stdinData) { close(stdinPipe[0]); close(stdinPipe[1]); }
+-            current = saved_current;
+-            [ctx cleanup];
+-            return ISHShellExecutorErrorProcessCreationFailed;
+-        }
+-        stdin_fd->real_fd = real_fd;
+-        NSLog(@"ISHShellExecutor[stdin]: fd0 real_fd=%d (source=%s)", stdin_fd->real_fd, stdinData ? "pipe" : "/dev/null");
+-        task->files->files[0] = stdin_fd;
++    if (stdin_fd == NULL) {
++        NSLog(@"ISHShellExecutor[stdin]: guest fd allocation failed");
++        close(stdinRealFd);
++        if (usesStdinPipe) { close(stdinPipe[0]); close(stdinPipe[1]); }
++        current = saved_current;
++        [ctx cleanup];
++        return ISHShellExecutorErrorProcessCreationFailed;
+     }
+-    if (stdinData) {
++    stdin_fd->real_fd = stdinRealFd;
++    NSLog(@"ISHShellExecutor[stdin]: fd0 real_fd=%d (source=%s)",
++          stdin_fd->real_fd, usesStdinPipe ? "pipe" : "/dev/null");
++    task->files->files[0] = stdin_fd;
++    if (usesStdinPipe) {
+         close(stdinPipe[0]);
+         stdinPipe[0] = -1;
++        [ctx adoptStdinWriteFd:stdinPipe[1]];
++        stdinPipe[1] = -1;
+     }
+ 
+     // Setup stdout to pipe
++    int stdoutRealFd = dup([ctx stdoutPipe][1]);
++    if (stdoutRealFd < 0) {
++        NSLog(@"ISHShellExecutor[stdout]: dup() failed: %s", strerror(errno));
++        current = saved_current;
++        [ctx cleanup];
++        return ISHShellExecutorErrorProcessCreationFailed;
++    }
+     struct fd *stdout_fd = adhoc_fd_create(&realfs_fdops);
+-    if (stdout_fd) {
+-        int real_fd = dup([ctx stdoutPipe][1]);
+-        if (real_fd < 0) {
+-            NSLog(@"ISHShellExecutor[stdout]: dup() failed: %s", strerror(errno));
+-            current = saved_current;
+-            [ctx cleanup];
+-            return ISHShellExecutorErrorProcessCreationFailed;
+-        }
+-        stdout_fd->real_fd = real_fd;
+-        task->files->files[1] = stdout_fd;
++    if (stdout_fd == NULL) {
++        NSLog(@"ISHShellExecutor[stdout]: guest fd allocation failed");
++        close(stdoutRealFd);
++        current = saved_current;
++        [ctx cleanup];
++        return ISHShellExecutorErrorProcessCreationFailed;
+     }
++    stdout_fd->real_fd = stdoutRealFd;
++    task->files->files[1] = stdout_fd;
+ 
+     // Setup stderr to pipe
++    int stderrRealFd = dup([ctx stderrPipe][1]);
++    if (stderrRealFd < 0) {
++        NSLog(@"ISHShellExecutor[stderr]: dup() failed: %s", strerror(errno));
++        current = saved_current;
++        [ctx cleanup];
++        return ISHShellExecutorErrorProcessCreationFailed;
++    }
+     struct fd *stderr_fd = adhoc_fd_create(&realfs_fdops);
+-    if (stderr_fd) {
+-        int real_fd = dup([ctx stderrPipe][1]);
+-        if (real_fd < 0) {
+-            NSLog(@"ISHShellExecutor[stderr]: dup() failed: %s", strerror(errno));
+-            current = saved_current;
+-            [ctx cleanup];
+-            return ISHShellExecutorErrorProcessCreationFailed;
+-        }
+-        stderr_fd->real_fd = real_fd;
+-        task->files->files[2] = stderr_fd;
++    if (stderr_fd == NULL) {
++        NSLog(@"ISHShellExecutor[stderr]: guest fd allocation failed");
++        close(stderrRealFd);
++        current = saved_current;
++        [ctx cleanup];
++        return ISHShellExecutorErrorProcessCreationFailed;
+     }
++    stderr_fd->real_fd = stderrRealFd;
++    task->files->files[2] = stderr_fd;
+ 
+     // Close write ends in parent
+     close([ctx stdoutPipe][1]);
+@@ -478,33 +718,46 @@ + (int)executeExecutable:(NSString *)executable
+         return ISHShellExecutorErrorProcessCreationFailed;
+     }
+ 
+-    // Write stdinData to pipe in background, then close write end
+-    if (stdinData && stdinPipe[1] >= 0) {
++    if (keepsStdinOpen) {
++        ISHShellProcess *persistentProcess =
++            [[ISHShellProcess alloc] initWithContext:ctx];
++        if (process) *process = persistentProcess;
++        NSLog(@"ISHShellExecutor[stdin]: persistent stdin open for pid=%d",
++              ctx.guestPid);
++    } else if (stdinData) {
++        // Preserve the existing one-shot behavior: write all supplied stdin
++        // on a background queue, then deliver EOF.
+         NSData *dataToWrite = [stdinData copy];
+-        int writeFd = stdinPipe[1];
+-        stdinPipe[1] = -1; // ownership transferred
++        int writeFd = [ctx takeStdinWriteFd];
+         int guestPid = ctx.guestPid;
+-        NSLog(@"ISHShellExecutor[stdin]: scheduling stdinData write (%lu bytes) to fd=%d for pid=%d",
+-              (unsigned long)dataToWrite.length, writeFd, guestPid);
+-        dispatch_async(_readerQueue, ^{
+-            const uint8_t *bytes = dataToWrite.bytes;
+-            size_t remaining = dataToWrite.length;
+-            size_t totalWritten = 0;
+-            while (remaining > 0) {
+-                ssize_t written = write(writeFd, bytes, remaining);
+-                if (written <= 0) {
+-                    NSLog(@"ISHShellExecutor[stdin]: write returned %zd (errno=%d) for pid=%d, stopping", written, errno, guestPid);
+-                    break;
++        if (writeFd < 0) {
++            NSLog(@"ISHShellExecutor[stdin]: missing batch write fd for pid=%d", guestPid);
++        } else {
++            int flags = fcntl(writeFd, F_GETFL);
++            if (flags >= 0) fcntl(writeFd, F_SETFL, flags & ~O_NONBLOCK);
++            NSLog(@"ISHShellExecutor[stdin]: scheduling stdinData write (%lu bytes) to fd=%d for pid=%d",
++                  (unsigned long)dataToWrite.length, writeFd, guestPid);
++            dispatch_async(_readerQueue, ^{
++                const uint8_t *bytes = dataToWrite.bytes;
++                size_t remaining = dataToWrite.length;
++                size_t totalWritten = 0;
++                while (remaining > 0) {
++                    ssize_t written = write(writeFd, bytes, remaining);
++                    if (written < 0 && errno == EINTR) continue;
++                    if (written <= 0) {
++                        NSLog(@"ISHShellExecutor[stdin]: write returned %zd (errno=%d) for pid=%d, stopping", written, errno, guestPid);
++                        break;
++                    }
++                    bytes += written;
++                    remaining -= written;
++                    totalWritten += written;
+                 }
+-                bytes += written;
+-                remaining -= written;
+-                totalWritten += written;
+-            }
+-            close(writeFd);
+-            NSLog(@"ISHShellExecutor[stdin]: pipe write complete and closed — wrote %zu/%lu bytes for pid=%d",
+-                  totalWritten, (unsigned long)dataToWrite.length, guestPid);
+-        });
+-    } else if (!stdinData) {
++                close(writeFd);
++                NSLog(@"ISHShellExecutor[stdin]: pipe write complete and closed — wrote %zu/%lu bytes for pid=%d",
++                      totalWritten, (unsigned long)dataToWrite.length, guestPid);
++            });
++        }
++    } else {
+         NSLog(@"ISHShellExecutor[stdin]: stdin is /dev/null for pid=%d", ctx.guestPid);
+     }
+ 
+@@ -679,6 +932,9 @@ + (void)processDidExit:(NSNotification *)notification {
+ 
+     if (ctx.isCompleted) return;
+ 
++    ctx.hasExited = YES;
++    [ctx closeStdin];
++
+     // Record exit code and duration immediately
+     ctx.result.exitCode = exitCode;
+     ctx.result.duration = -[ctx.startTime timeIntervalSinceNow];
+@@ -713,10 +969,13 @@ + (void)processDidExit:(NSNotification *)notification {
+ 
+         [ctx cleanup];
+ 
+-        // Call completion callback
+-        if (ctx.completion) {
+-            ctx.completion(ctx.result);
+-        }
++        // Clear callbacks after capturing completion so a retained process
++        // handle cannot keep caller-owned closure graphs alive indefinitely.
++        ISHShellCompletionCallback completion = ctx.completion;
++        ctx.completion = nil;
++        ctx.lineCallback = nil;
++        ctx.streamCallback = nil;
++        if (completion) completion(ctx.result);
+ 
+         // Signal semaphore for sync execution
+         if (ctx.waitSemaphore) {
+@@ -813,6 +1072,13 @@ + (void)readPipe:(int)fd context:(ISHShellExecutionContext *)ctx isStdErr:(BOOL)
+         ssize_t bytesRead = read(fd, buffer, sizeof(buffer) - 1);
+ 
+         if (bytesRead > 0) {
++            ISHShellStreamCallback streamCallback = ctx.streamCallback;
++            if (streamCallback) {
++                NSData *chunk = [NSData dataWithBytes:buffer length:(NSUInteger)bytesRead];
++                dispatch_async(dispatch_get_main_queue(), ^{
++                    streamCallback(chunk, isStdErr);
++                });
++            }
+             [pendingBytes appendBytes:buffer length:bytesRead];
+ 
+             NSUInteger safeLen = [self lastCompleteUTF8Length:(const uint8_t *)pendingBytes.bytes
+

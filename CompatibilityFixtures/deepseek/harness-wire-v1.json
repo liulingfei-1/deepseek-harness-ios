@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "project": "deepseek-ai/deepseek-harness",
+    "commit": "47f943859bef60e4160492346772ded9b24f765a"
+  },
+  "stream": {
+    "payloads": [
+      "{\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"I should inspect the clock.\"}}]}",
+      "{\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-clock\",\"type\":\"function\",\"function\":{\"name\":\"device_time\",\"arguments\":\"{\\\"format\\\":\"}}]}}]}",
+      "{\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"iso8601\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":4,\"total_tokens\":16,\"prompt_tokens_details\":{\"cached_tokens\":3},\"completion_tokens_details\":{\"reasoning_tokens\":2}}}"
+    ],
+    "expectedEvents": [
+      "reasoning:I should inspect the clock.",
+      "tool:0:call-clock:function:device_time:{\"format\":",
+      "tool:0:-:-:-:\"iso8601\"}",
+      "finish:tool_calls",
+      "usage:12:4:16:3:2"
+    ]
+  },
+  "requestReplay": {
+    "replayEmptyReasoning": true,
+    "assistantContent": "",
+    "assistantReasoning": null,
+    "toolCall": {
+      "id": "call-clock",
+      "name": "device_time",
+      "arguments": "{\"format\":\"iso8601\"}"
+    },
+    "toolResult": "2026-08-15T12:00:00+08:00",
+    "expectedAssistantReasoning": "",
+    "expectedRoles": [
+      "system",
+      "assistant",
+      "tool"
+    ]
+  }
+}

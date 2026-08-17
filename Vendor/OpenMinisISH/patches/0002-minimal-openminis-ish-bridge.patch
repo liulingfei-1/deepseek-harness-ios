@@ -1,0 +1,248 @@
+diff --git a/src/ios/iSH/ISHKernel.h b/src/ios/iSH/ISHKernel.h
+index 396a8b6..97c7a4e 100644
+--- a/src/ios/iSH/ISHKernel.h
++++ b/src/ios/iSH/ISHKernel.h
+@@ -11,6 +11,6 @@ extern NSNotificationName const ISHTerminalOutputNotification;
+ 
+ typedef void (^ISHOutputCallback)(NSData *data);
+-typedef void (^ISHCommandCompletionCallback)(NSString *output, NSError * _Nullable error);
++typedef void (^ISHCommandCompletionCallback)(NSString * _Nullable output, NSError * _Nullable error);
+ 
+ @interface ISHKernel : NSObject
+ 
+@@ -23,6 +23,10 @@ typedef void (^ISHCommandCompletionCallback)(NSString *output, NSError * _Nullab
+ /// Whether the kernel has been booted
+ @property (nonatomic, readonly) BOOL isBooted;
+ 
++/// Whether new guest AF_INET/AF_INET6 sockets are allowed.
++/// This is disabled by default for the embedded Harness sandbox.
++@property (nonatomic) BOOL guestNetworkEnabled;
++
+ /// Output callback for terminal output
+ @property (nonatomic, copy, nullable) ISHOutputCallback outputCallback;
+ 
+diff --git a/src/ios/iSH/ISHKernel.m b/src/ios/iSH/ISHKernel.m
+index 1a4fe75..94c78e3 100644
+--- a/src/ios/iSH/ISHKernel.m
++++ b/src/ios/iSH/ISHKernel.m
+@@ -17,6 +17,8 @@
+ #include "ish/fs/devices.h"
+ #include "ish/fs/path.h"
+ #include "ish/fs/fd.h"
++#include "ish/fs/sock.h"
+ #include "ish/emu/cpu.h"
++#include "ish/asbestos/frame.h"
+ #include <pthread.h>
+ #include <stdatomic.h>
+@@ -31,33 +32,6 @@
+ #include <netdb.h>
+ #include <resolv.h>
+ #import <SystemConfiguration/SystemConfiguration.h>
+-#import "FFmpegOffload.h"
+-#import "CalendarOffload.h"
+-#import "LocationOffload.h"
+-#import "WeatherOffload.h"
+-#import "VisionOffload.h"
+-#import "OpenOffload.h"
+-#import "ClipboardOffload.h"
+-#import "HealthKitOffload.h"
+-#import "PhotosOffload.h"
+-#import "MapsOffload.h"
+-#import "NLPOffload.h"
+-#import "AlarmOffload.h"
+-#import "MediaOffload.h"
+-#import "SpeakOffload.h"
+-#import "SpeechOffload.h"
+-#import "DeviceOffload.h"
+-#import "HomeKitOffload.h"
+-#import "NotificationOffload.h"
+-#import "PlayerOffload.h"
+-#import "ModelUseOffload.h"
+-#import "RemindersOffload.h"
+-#import "BluetoothOffload.h"
+-#import "NFCOffload.h"
+-#import "SessionsOffload.h"
+-#import "ConfigOffload.h"
+-#import "BrowserUseOffload.h"
+-#import "DebugOffload.h"
+ 
+ NSNotificationName const ISHProcessExitedNotification = @"ISHProcessExited";
+ NSNotificationName const ISHTerminalOutputNotification = @"ISHTerminalOutput";
+@@ -77,12 +52,6 @@ extern __thread volatile uint64_t jit_saved_pc;
+ // Assembly trampoline: returns INT_JIT_CRASH via fiber_exit (defined in entry.S)
+ extern void jit_crash_trampoline(void);
+ 
+-// cpu_state field offsets (must match cpu-offsets.h)
+-#define CRASH_CPU_pc 272
+-#define CRASH_CPU_segfault_addr 832
+-#define CRASH_CPU_segfault_was_write 840
+-#define CRASH_LOCAL_jit_exit_sp 920
+-
+ /// Handles SIGSEGV/SIGBUS from JIT code (stale TLB pointers from concurrent CoW).
+ /// Uses ucontext PC manipulation to redirect to jit_crash_trampoline.
+ static void jit_crash_handler(int sig, siginfo_t *info, void *ctx) {
+@@ -91,7 +61,8 @@ static void jit_crash_handler(int sig, siginfo_t *info, void *ctx) {
+         ucontext_t *uc = (ucontext_t *)ctx;
+ 
+         // _cpu is in x1 — pointer to cpu_state within fiber_frame
+-        uint64_t cpu_ptr = uc->uc_mcontext->__ss.__x[1];
++        struct cpu_state *cpu = (struct cpu_state *)uc->uc_mcontext->__ss.__x[1];
++        struct fiber_frame *frame = container_of(cpu, struct fiber_frame, cpu);
+ 
+         // Reconstruct guest segfault_addr from registers
+         uint64_t x7 = uc->uc_mcontext->__ss.__x[7];
+@@ -103,12 +74,12 @@ static void jit_crash_handler(int sig, siginfo_t *info, void *ctx) {
+         int was_write = (esr & 0x40) != 0;
+ 
+         // Write crash info directly to cpu_state
+-        *(uint64_t *)(cpu_ptr + CRASH_CPU_segfault_addr) = guest_addr;
+-        *(int *)(cpu_ptr + CRASH_CPU_segfault_was_write) = was_write;
+-        *(uint64_t *)(cpu_ptr + CRASH_CPU_pc) = (uint64_t)jit_saved_pc;
++        cpu->segfault_addr = guest_addr;
++        cpu->segfault_was_write = was_write;
++        cpu->pc = (uint64_t)jit_saved_pc;
+ 
+         // Restore SP to the value saved by fiber_enter
+-        uint64_t exit_sp = *(uint64_t *)(cpu_ptr + CRASH_LOCAL_jit_exit_sp);
++        uint64_t exit_sp = frame->jit_exit_sp;
+         uc->uc_mcontext->__ss.__sp = exit_sp;
+ 
+         // Redirect execution to crash trampoline
+@@ -331,6 +305,14 @@ - (BOOL)isBooted {
+     return _isBooted;
+ }
+ 
++- (BOOL)guestNetworkEnabled {
++    return ish_is_guest_network_enabled();
++}
++
++- (void)setGuestNetworkEnabled:(BOOL)enabled {
++    ish_set_guest_network_enabled(enabled);
++}
++
+ - (int)bootWithRootPath:(NSString *)rootPath {
+     if (_isBooted) {
+         NSLog(@"ISHKernel: Already booted");
+@@ -410,40 +392,6 @@ - (int)bootWithRootPath:(NSString *)rootPath {
+         NSLog(@"ISHKernel: stdio created for init process");
+     }
+ 
+-    // 9. Register native binary bindings (ffmpeg, etc.)
+-    ffmpeg_offload_register();
+-    calendar_offload_register();
+-    location_offload_register();
+-    weather_offload_register();
+-    vision_offload_register();
+-    open_offload_register();
+-    clipboard_offload_register();
+-    healthkit_offload_register();
+-    photos_offload_register();
+-    maps_offload_register();
+-    nlp_offload_register();
+-    alarm_offload_register();
+-    media_offload_register();
+-    speak_offload_register();
+-    speech_offload_register();
+-    device_offload_register();
+-    homekit_offload_register();
+-    notification_offload_register();
+-    player_offload_register();
+-    model_use_offload_register();
+-    reminders_offload_register();
+-    bluetooth_offload_register();
+-    nfc_offload_register();
+-    sessions_offload_register();
+-    browser_use_offload_register();
+-    config_offload_register();
+-    // Registered in every build: the `minis-debug logs` subcommand reads the
+-    // app's own runtime log in-process (OSLogStore + LoggingManager) and must
+-    // work on Release devices (T-ios-minis-debug-logs-oslogstore). The
+-    // RPC-backed subcommands inside the handler stay DEBUG-gated and
+-    // self-report as unavailable in Release.
+-    debug_offload_register();
+-
+     _isBooted = YES;
+     NSLog(@"ISHKernel: Kernel initialized successfully");
+ 
+@@ -584,14 +532,14 @@ - (void)writeResolvConf:(NSString *)content {
+ 
+ /// Set up /etc/resolv.conf as a file-level bind mount pointing to a host file.
+ /// Called once during boot, after the root filesystem and init process are ready.
+-/// The host file lives in Library/MinisChat/dns/resolv.conf and can be freely
++/// The host file lives in Library/HarnessMobile/iSH/dns/resolv.conf and can be freely
+ /// updated by the app at any time — changes are instantly visible inside iSH.
+ - (void)mountDnsConfig {
+     NSFileManager *fm = [NSFileManager defaultManager];
+ 
+-    // Determine host path: Library/MinisChat/dns/resolv.conf
++    // Determine host path: Library/HarnessMobile/iSH/dns/resolv.conf
+     NSString *library = [NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES) firstObject];
+-    NSString *dnsDir = [library stringByAppendingPathComponent:@"MinisChat/dns"];
++    NSString *dnsDir = [library stringByAppendingPathComponent:@"HarnessMobile/iSH/dns"];
+     _dnsHostPath = [dnsDir stringByAppendingPathComponent:@"resolv.conf"];
+ 
+     // Ensure directory and seed file exist before bind mount
+@@ -605,7 +553,7 @@ - (void)mountDnsConfig {
+         NSLog(@"ISHKernel: [DNS] seeded host resolv.conf at %@", _dnsHostPath);
+     }
+ 
+-    // Bind mount: /etc/resolv.conf -> Library/MinisChat/dns/resolv.conf
++    // Bind mount: /etc/resolv.conf -> Library/HarnessMobile/iSH/dns/resolv.conf
+     int err = fakefs_bind_mount("/etc/resolv.conf", _dnsHostPath.fileSystemRepresentation, false);
+     if (err < 0) {
+         NSLog(@"ISHKernel: [DNS] bind mount FAILED (%d) — writing via VFS fallback", err);
+diff --git a/src/ios/iSH/ISHShellExecutor.m b/src/ios/iSH/ISHShellExecutor.m
+index c385bac..e66e6a3 100644
+--- a/src/ios/iSH/ISHShellExecutor.m
++++ b/src/ios/iSH/ISHShellExecutor.m
+@@ -98,6 +98,26 @@ @implementation ISHShellExecutor
+ static NSMutableDictionary<NSNumber *, ISHShellExecutionContext *> *_activeExecutions;
+ static dispatch_queue_t _readerQueue;
+ static dispatch_once_t _onceToken;
++static const NSUInteger ISHMaxCapturedOutputCharacters = 1024 * 1024;
++static NSString *const ISHOutputTruncationMarker = @"\n[output truncated]\n";
++
+++ (void)appendCapturedString:(NSString *)string toBuffer:(NSMutableString *)buffer {
++    @synchronized(buffer) {
++        if ([buffer hasSuffix:ISHOutputTruncationMarker]) return;
++        NSUInteger contentLimit = ISHMaxCapturedOutputCharacters - ISHOutputTruncationMarker.length;
++        if (buffer.length >= contentLimit) {
++            [buffer appendString:ISHOutputTruncationMarker];
++            return;
++        }
++        NSUInteger remaining = contentLimit - buffer.length;
++        if (string.length <= remaining) {
++            [buffer appendString:string];
++            return;
++        }
++        [buffer appendString:[string substringToIndex:remaining]];
++        [buffer appendString:ISHOutputTruncationMarker];
++    }
++}
+ 
+ + (void)initialize {
+     if (self == [ISHShellExecutor class]) {
+@@ -833,9 +853,7 @@ + (void)readPipe:(int)fd context:(ISHShellExecutionContext *)ctx isStdErr:(BOOL)
+ 
+     // Process any remaining partial line
+     if (lineBuffer.length > 0) {
+-        @synchronized(outputBuffer) {
+-            [outputBuffer appendString:lineBuffer];
+-        }
++        [self appendCapturedString:lineBuffer toBuffer:outputBuffer];
+ 
+         if (ctx.lineCallback) {
+             dispatch_async(dispatch_get_main_queue(), ^{
+@@ -863,10 +881,8 @@ + (void)processLines:(NSMutableString *)lineBuffer
+         [lineBuffer deleteCharactersInRange:NSMakeRange(0, newlineRange.location + 1)];
+ 
+         // Add to output buffer
+-        @synchronized(outputBuffer) {
+-            [outputBuffer appendString:line];
+-            [outputBuffer appendString:@"\n"];
+-        }
++        [self appendCapturedString:[line stringByAppendingString:@"\n"]
++                          toBuffer:outputBuffer];
+ 
+         // Call line callback
+         if (ctx.lineCallback) {
