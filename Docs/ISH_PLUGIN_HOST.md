@@ -11,6 +11,7 @@ The mobile plugin Host is a long-lived Node.js process inside the embedded iSH A
 - The Host loads the published `@deepseek-ai/dsh-tool-cordis` namespace plugin. The model therefore uses the upstream self-inspection and lifecycle tools rather than mobile reimplementations of those tools.
 - Every active Package is a real Cordis Fiber, so effects are disposed by upstream Cordis on stop, update, failure, or process exit.
 - Host-half Packages may use Tools, Prompt sections/contexts/variables, Cordis services/events, and private `harness.handle` methods inside the Host process. The bundled Host publishes Tool/Prompt contributions plus active handler/service metadata. The Swift DTO/bridge maps only a fixed handler/service allowlist to native Memory, Orchestration, Agent, Sandbox and Tool checkpoints.
+- The Host mounts the published Session store, Agent registry, Skill registry, and SessionQuery service. Swift incrementally synchronizes the active mobile session log and current Skill catalog through `context/sync`; hosted tool execution is wrapped by `ctx.agents.withInitiator()`, so `exec.agent.session`, `ctx.agents.currentInitiator()`, `ctx.skills`, `ctx.sessionQuery.readSurface()`, and committed `session/event` observations match the desktop service contracts.
 - Browser Client halves are rejected by both the RPC adapter and the model-facing Tool guard until a native mobile Client runner is available.
 
 ## Model-facing self modification
@@ -25,7 +26,7 @@ The Host contributes the official DSH tools to the native Agent after a successf
 - `cordis_stop`
 - `cordis_undefine`
 
-The official `tool:cordis` prompt section is preserved. A second mobile policy section states that this deployment has no browser Client runner, has no desktop Skill registry mounted inside the minimal Host, keeps definitions only in process memory, and never accepts provider credentials. This policy prevents the upstream dual-plane tool from entering a Client-pending state that the native app cannot complete. The model uses Inspect as the exact contract for the services actually mounted on the phone.
+The official `tool:cordis` prompt section is preserved. A second mobile policy section states that this deployment has no browser Client runner, does not mount the desktop `cordis-plugin-development` Skill bundle, keeps definitions only in process memory, and never accepts provider credentials. The native app does synchronize its own current Skill catalog into the official Host Skill registry. This policy prevents the upstream dual-plane tool from entering a Client-pending state that the native app cannot complete. The model uses Inspect as the exact contract for the services actually mounted on the phone.
 
 Lifecycle actions issued through `AppModel` synchronize inventory and contributions immediately. After a successful model-facing `cordis_define`, `cordis_run`, `cordis_stop`, or `cordis_undefine`, `ISHHostedCordisTool` waits for the aggregate native bridge to synchronize before it returns control to the next Agent step. Ordinary hosted tools do not trigger a redundant refresh.
 
@@ -45,6 +46,7 @@ Supported methods:
 | `run` | Start or update a Host-only Package through `DynamicCordisRunnerService` |
 | `stop` | Dispose the active Fiber but keep Package definitions |
 | `undefine` | Stop and forget a Plugin and every Package version |
+| `context/sync` | Incrementally append the active mobile Session events and replace the synchronized Skill catalog |
 | `contributions` | Current Tool/Prompt snapshot and active handler/service directory |
 | `invoke` | Execute a dynamic Tool, registered `harness.handle` method, or plugin-owned service method |
 | `settings/describe` | Secret-redacted official Settings namespace/schema/layer/revision snapshot |
@@ -65,17 +67,39 @@ The typed iSH bridge currently forwards these waterfall checkpoints:
 - `memory/recall`, `orchestration/pre-step`, and `agent/pre-step`;
 - `orchestration/request` and `agent/request`;
 - `orchestration/request-error` and `agent/request-error`;
+- credential-firewalled `llm/stream` event bridge (start, per-event decision,
+  and terminal notification);
 - `sandbox/pre-execute`, `tools/pre-execute`, `tools/execute`, and `tools/post-execute`.
 
 It also forwards `memory/record`, `orchestration/turn-stopping`, and `agent/turn-stopping`, plus the official read-only lifecycle events `agent/created`, `agent/disposed`, `agent/status`, `agent/session-start`, `agent/error`, `tools/result`, and `tools/change`. Payloads expose only fields actually owned by the corresponding Swift type. In particular, `memory/record` has no invented agent or turn coordinate, while turn-stopping payloads include their agent, run, turn, step, and messages.
 
-The following upstream surfaces are deliberately not advertised as Host-half compatible:
+The inbox lifecycle is also observable through three typed, observe-only events:
 
-- `llm/stream` is an `AsyncIterable<StreamChunk>` waterfall. A one-response JSON-RPC invocation cannot preserve incremental `next()`, per-chunk yield, cancellation, or backpressure, so the bridge does not invent a lookalike stream protocol. Native Swift plugins can still intercept the in-process `llm/stream` checkpoint.
-- `tools/code-dispatch-log` belongs to real `run_code` child dispatch. The mobile Agent has no production `run_code` producer yet, so forwarding the event alone would expose an inert capability.
-- `agent/inbox/inserted`, `agent/inbox/claimed`, and `agent/inbox/discarded` are not yet represented by the native Agent inbox.
+- `agent/inbox/inserted` is emitted after the native AppModel successfully inserts a queued user, child-report, or job-completion message for the active run;
+- `agent/inbox/claimed` is emitted after the MessageId-addressed committer durably removes a pending occurrence for the next safe turn/step;
+- `agent/inbox/discarded` is emitted after an `agent/inbox/pre-claim` plugin decision discards that exact MessageId and the committer succeeds.
 
-The maximum Swift-to-iSH request frame is 512 KiB, below the persistent bridge's 1 MiB pending stdin bound. Responses are framed up to 4 MiB.
+Each event carries the stable message ID, text, disposition, creation time, source, boundary, agent ID, and run ID. `discarded` additionally carries a bounded reason. Plugins cannot mutate identity, source, disposition, timestamp, or queue ownership after insertion/claim/discard. Event listeners are fail-isolated: a throwing observer is traced locally and never aborts the native Agent loop. These events are runtime observations, not a persisted conversation checkpoint.
+
+The following upstream surfaces have explicit mobile boundary notes:
+
+- `llm/stream` is exposed through an event-acknowledged Host bridge. Swift keeps
+  the provider client, API key, URLSession, and source `AsyncThrowingStream`;
+  the Host receives a `phase: "start"` envelope followed by one `phase:
+  "event"` envelope per chunk. The Host must return `{kind: "next"}` (or
+  `"observe"`) to release the chunk, `{kind: "drop"}` to consume it, or
+  `{kind: "replace", event: ...}` to replace it. Swift awaits each response,
+  so Host processing supplies real backpressure. `finish`, `error`, and
+  `cancel` terminal envelopes are best-effort notifications. Host failures
+  fail open for the native stream, while cancellation still propagates through
+  the Swift `AsyncThrowingStream`. No provider credential or authorization
+  header is present in any envelope.
+- `tools/code-dispatch-log` belongs to the native `run_code` child-dispatch
+  producer. The mobile bridge forwards it only for an active Code Mode call;
+  it is never advertised as a standalone Host capability.
+- The three inbox lifecycle events above are represented by the native Agent inbox and are included in the Host allowlist. The inserted projection intentionally omits a turn coordinate because insertion may occur while the session is idle; claimed/discarded are emitted only after the durable committer succeeds.
+
+The maximum Swift-to-iSH request frame is 512 KiB, below the persistent bridge's 1 MiB pending stdin bound. Responses are framed up to 4 MiB. Swift submits outbound frames through one FIFO writer, with a bounded 2 MiB client queue and bounded backoff when iSH reports stdin backpressure. A rejected frame fails only its RPC after the retry window; it does not tear down an otherwise-running Host. Transport/process failures still invalidate the Host so the next lifecycle refresh can restart it.
 
 ### Plugin settings
 

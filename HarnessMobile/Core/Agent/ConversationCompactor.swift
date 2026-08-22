@@ -2,9 +2,89 @@ import Foundation
 
 struct ConversationContextProjection: Sendable, Equatable {
     let stateSummary: String?
+    let omittedMessages: [AgentMessage]
     let messages: [AgentMessage]
     let omittedMessageCount: Int
     let encodedUTF8Bytes: Int
+}
+
+struct ConversationTokenMeasurement: Sendable, Equatable {
+    let systemTokens: Int
+    let toolsTokens: Int
+    let messageTokens: Int
+
+    var totalTokens: Int {
+        systemTokens + toolsTokens + messageTokens
+    }
+}
+
+struct ConversationTokenCompactionPlan: Sendable, Equatable {
+    let measurement: ConversationTokenMeasurement
+    let omittedMessages: [AgentMessage]
+    let retainedMessages: [AgentMessage]
+    let omittedTokens: Int
+    let retainedTokens: Int
+}
+
+/// Swift port of the upstream token-meter's fixed heuristic: four UTF-16
+/// code units per token plus role/block framing. It is deliberately only a
+/// request-boundary pressure meter; provider usage remains the source of truth
+/// for the UI's billed-token and cache statistics.
+enum ConversationTokenMeter {
+    private static let charactersPerToken = 4
+    private static let blockOverhead = 4
+    private static let roleOverhead = 4
+
+    static func measure(_ request: ModelRequest) -> ConversationTokenMeasurement {
+        ConversationTokenMeasurement(
+            systemTokens: estimateText(request.systemPrompt) + roleOverhead,
+            toolsTokens: estimateTools(request.tools),
+            messageTokens: estimateMessages(request.messages)
+        )
+    }
+
+    static func estimateMessages(_ messages: [AgentMessage]) -> Int {
+        messages.reduce(into: 0) { total, message in
+            total += estimateMessage(message)
+        }
+    }
+
+    static func estimateMessage(_ message: AgentMessage) -> Int {
+        var tokens = roleOverhead
+        if !message.content.isEmpty {
+            tokens += estimateText(message.content) + blockOverhead
+            if message.role == .tool { tokens += blockOverhead }
+        }
+        if let reasoning = message.reasoning, !reasoning.isEmpty {
+            tokens += estimateText(reasoning) + blockOverhead
+        }
+        for call in message.toolCalls {
+            // These identifiers are part of the provider wire envelope and
+            // remain in every replayed tool transaction. Counting them keeps
+            // tool-heavy histories from being underestimated until the
+            // provider rejects an already-too-large request.
+            tokens += estimateText(call.id)
+                + estimateText(call.name)
+                + estimateText(call.arguments)
+                + blockOverhead
+        }
+        if let toolCallID = message.toolCallID, !toolCallID.isEmpty {
+            tokens += estimateText(toolCallID) + blockOverhead
+        }
+        return tokens
+    }
+
+    private static func estimateTools(_ tools: [ModelToolDefinition]) -> Int {
+        guard !tools.isEmpty,
+              let data = try? JSONEncoder().encode(tools),
+              let text = String(data: data, encoding: .utf8) else { return 0 }
+        return estimateText(text) + blockOverhead
+    }
+
+    private static func estimateText(_ text: String) -> Int {
+        let count = text.utf16.count
+        return (count + charactersPerToken - 1) / charactersPerToken
+    }
 }
 
 enum ConversationCompactionError: LocalizedError, Sendable {
@@ -30,6 +110,62 @@ enum ConversationCompactor {
     private struct MessageUnit {
         let messages: [AgentMessage]
         let isToolTransaction: Bool
+
+        var estimatedTokens: Int {
+            ConversationTokenMeter.estimateMessages(messages)
+        }
+    }
+
+    /// Selects the oldest balanced surface prefix for durable checkpoint
+    /// replacement. The default policy mirrors upstream compaction-basic:
+    /// trigger at 80% of the routed model window and retain at least 16% of the
+    /// window as recent, verbatim message units. A provider-confirmed overflow
+    /// bypasses the pressure threshold and keeps the newest indivisible unit.
+    static func tokenCompactionPlan(
+        for request: ModelRequest,
+        contextWindow: Int?,
+        force: Bool = false,
+        thresholdRatio: Double = 0.8,
+        retainRatio: Double = 0.16
+    ) -> ConversationTokenCompactionPlan? {
+        let measurement = ConversationTokenMeter.measure(request)
+        if !force {
+            guard let contextWindow, contextWindow > 0 else { return nil }
+            let thresholdTokens = Int((Double(contextWindow) * thresholdRatio).rounded(.down))
+            guard measurement.totalTokens >= thresholdTokens else { return nil }
+        }
+
+        let repaired = repairIncompleteToolTurn(request.messages)
+        guard repaired == request.messages else { return nil }
+        let units = makeUnits(repaired)
+        guard units.count > 1 else { return nil }
+
+        let minimumRetainedTokens: Int
+        if force {
+            minimumRetainedTokens = 0
+        } else {
+            guard let contextWindow else { return nil }
+            minimumRetainedTokens = Int((Double(contextWindow) * retainRatio).rounded(.down))
+        }
+        var retainedUnitStart = units.count
+        var retainedTokens = 0
+        for index in units.indices.reversed() {
+            retainedTokens += units[index].estimatedTokens
+            retainedUnitStart = index
+            if retainedTokens >= minimumRetainedTokens { break }
+        }
+        guard retainedUnitStart > 0 else { return nil }
+
+        let omitted = units[..<retainedUnitStart].flatMap(\.messages)
+        let retained = units[retainedUnitStart...].flatMap(\.messages)
+        guard !omitted.isEmpty, !retained.isEmpty else { return nil }
+        return ConversationTokenCompactionPlan(
+            measurement: measurement,
+            omittedMessages: omitted,
+            retainedMessages: retained,
+            omittedTokens: ConversationTokenMeter.estimateMessages(omitted),
+            retainedTokens: ConversationTokenMeter.estimateMessages(retained)
+        )
     }
 
     static func project(
@@ -57,6 +193,7 @@ enum ConversationCompactor {
         guard !units.isEmpty else {
             let summary = makeStateSummary(workState: workState, omittedMessageCount: 0)
             return try fittedProjection(
+                omittedMessages: [],
                 messages: [],
                 fullSummary: summary,
                 omittedMessageCount: 0,
@@ -89,7 +226,8 @@ enum ConversationCompactor {
                 .reduce(0) { $0 + $1.messages.count }
             let summary = makeStateSummary(
                 workState: workState,
-                omittedMessageCount: omittedCount
+                omittedMessageCount: omittedCount,
+                omittedMessages: units[..<candidateStart].flatMap(\.messages)
             )
             let candidateBytes = try encodedSize(
                 summary: summary,
@@ -102,11 +240,14 @@ enum ConversationCompactor {
 
         let omittedCount = units[..<selectedStart]
             .reduce(0) { $0 + $1.messages.count }
+        let omittedMessages = units[..<selectedStart].flatMap(\.messages)
         let fullSummary = makeStateSummary(
             workState: workState,
-            omittedMessageCount: omittedCount
+            omittedMessageCount: omittedCount,
+            omittedMessages: omittedMessages
         )
         return try fittedProjection(
+            omittedMessages: omittedMessages,
             messages: selectedMessages,
             fullSummary: fullSummary,
             omittedMessageCount: omittedCount,
@@ -182,11 +323,17 @@ enum ConversationCompactor {
 
     private static func makeStateSummary(
         workState: ConversationWorkState,
-        omittedMessageCount: Int
+        omittedMessageCount: Int,
+        omittedMessages: [AgentMessage] = []
     ) -> String? {
         var lines: [String] = []
         if omittedMessageCount > 0 {
             lines.append("Omitted transcript messages: \(omittedMessageCount)")
+            let facts = summaryFacts(from: omittedMessages)
+            if !facts.isEmpty {
+                lines.append("Earlier transcript facts:")
+                lines.append(contentsOf: facts)
+            }
         }
         if let goal = workState.goal {
             lines.append("Goal [\(goal.status.rawValue)]: \(goal.title)")
@@ -206,7 +353,47 @@ enum ConversationCompactor {
         return lines.isEmpty ? nil : lines.joined(separator: "\n")
     }
 
+    /// Preserve a small deterministic set of old user/tool facts when history
+    /// is compacted. This is deliberately extractive: it never invents facts
+    /// and keeps tool transactions intact in the live message tail.
+    private static func summaryFacts(from messages: [AgentMessage]) -> [String] {
+        let candidates = messages.filter { !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        guard !candidates.isEmpty else { return [] }
+        var selected: [AgentMessage] = []
+        if let firstUser = candidates.first(where: { $0.role == .user }) {
+            selected.append(firstUser)
+        }
+        for message in candidates.reversed() where selected.count < 4 {
+            guard !selected.contains(where: { $0.id == message.id }) else { continue }
+            selected.append(message)
+        }
+        return selected.prefix(4).map { message in
+            let role: String
+            switch message.role {
+            case .user: role = "user"
+            case .assistant: role = "assistant"
+            case .tool: role = "tool"
+            }
+            return "- [\(role)] \(boundedPrefix(message.content, maximumUTF8Bytes: 420))"
+        }
+    }
+
+    private static func boundedPrefix(_ value: String, maximumUTF8Bytes: Int) -> String {
+        guard value.utf8.count > maximumUTF8Bytes else { return value }
+        var result = ""
+        var used = 0
+        for scalar in value.unicodeScalars {
+            let fragment = String(scalar)
+            let bytes = fragment.utf8.count
+            guard used + bytes <= maximumUTF8Bytes - 3 else { break }
+            result.unicodeScalars.append(scalar)
+            used += bytes
+        }
+        return result + "..."
+    }
+
     private static func fittedProjection(
+        omittedMessages: [AgentMessage],
         messages: [AgentMessage],
         fullSummary: String?,
         omittedMessageCount: Int,
@@ -235,6 +422,7 @@ enum ConversationCompactor {
         }
         return ConversationContextProjection(
             stateSummary: fittedSummary,
+            omittedMessages: omittedMessages,
             messages: messages,
             omittedMessageCount: omittedMessageCount,
             encodedUTF8Bytes: bytes

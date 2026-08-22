@@ -54,13 +54,27 @@ scan_files() {
   while IFS= read -r swift_path; do
     case "$scan_mode:$swift_path" in
       outside-network:*/Core/Network/OpenAICompatibleClient.swift) continue ;;
+      outside-network:*/Core/Network/DeepSeekFilesClient.swift) continue ;;
+      # Provider adapters own request URL/header/body construction, while the
+      # client remains the only component that actually performs URLSession I/O.
+      outside-network:*/Core/Network/ModelProviderAdapter.swift) continue ;;
       outside-network:*/Core/Tools/WebFetchTool.swift) continue ;;
       outside-network:*/Core/Tools/ISH/ISHGuestNetworkMonitor.swift) continue ;;
+      # MCP is a byte-framed client over the already audited on-device iSH
+      # stdio bridge. It contains protocol names such as MCP and connect(), but
+      # owns no URLSession, socket, NWConnection, or host Process primitive.
+      outside-network:*/Core/Tools/MCP/*.swift) continue ;;
       outside-network:*/Core/Agent/MobileHarnessPrompt.swift) continue ;;
       # URLProtocol is used here only to provide an in-process fixture for the
       # native web-fetch tests; it does not create a production network path.
       outside-network:*/HarnessMobileTests/WebFetchToolTests.swift) continue ;;
+      # In-process URLProtocol fixture for provider discovery status/body/size
+      # contracts. Production provider networking remains in Core/Network.
+      outside-network:*/HarnessMobileTests/ProviderModelDiscoveryTests.swift) continue ;;
+      outside-network:*/HarnessMobileTests/MCPClientTests.swift) continue ;;
       inside-provider:*/Core/Network/OpenAICompatibleClient.swift) ;;
+      inside-provider:*/Core/Network/DeepSeekFilesClient.swift) ;;
+      inside-provider:*/Core/Network/ModelProviderAdapter.swift) ;;
       inside-provider:*) continue ;;
       inside-web-fetch:*/Core/Tools/WebFetchTool.swift) ;;
       inside-web-fetch:*) continue ;;
@@ -91,8 +105,8 @@ fi
 
 scan_files "$network_pattern" inside-provider
 provider_files_with_network="$(cut -d: -f1 "$audit_hits_file" | sort -u | wc -l | tr -d ' ')"
-if [ "$provider_files_with_network" -ne 1 ]; then
-  printf '%s\n' 'error: exactly one audited model-provider file must own network I/O'
+if [ "$provider_files_with_network" -ne 3 ]; then
+  printf '%s\n' 'error: exactly three audited model-provider files must own request construction or network I/O (adapters + chat + DeepSeek Files)'
   exit 1
 fi
 
@@ -148,7 +162,12 @@ if [ "$framework_scan_exit" -gt 1 ]; then
 fi
 unset framework_scan_exit
 
-if rg -v 'HarnessISH\.xcframework|SystemConfiguration\.framework|libsqlite3\.tbd|libresolv\.tbd' \
+# HealthKit is a signed Apple system framework used only by the audited
+# on-device permission/status surface and the statically linked OpenMinis
+# `apple-healthkit` handler. It introduces no dynamic code or remote execution
+# boundary, so keep it in the explicit framework allowlist rather than
+# weakening this fail-closed audit.
+if rg -v 'HarnessISH\.xcframework|HealthKit\.framework|SystemConfiguration\.framework|libsqlite3\.tbd|libresolv\.tbd' \
   "$framework_hits_file" > "$audit_hits_file"; then
   sed -n '1,120p' "$audit_hits_file"
   printf '%s\n' 'error: an unreviewed framework or native library was added'

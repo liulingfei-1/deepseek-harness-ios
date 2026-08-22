@@ -3,11 +3,14 @@ import UIKit
 
 struct MessageBubble: View, Equatable {
     nonisolated let message: AgentMessage
+    let canRerunUserMessage: Bool
+    let onRetryUserMessage: (UUID) -> Void
+    let onEditUserMessage: (AgentMessage) -> Void
     let onToggleFeedback: (UUID, MessageFeedbackRating) -> Void
     let onUpdateFeedbackNote: (UUID, String) -> Void
 
     @State private var feedbackNoteEditor: FeedbackNoteEditor?
-    @State private var isToolResultPresented = false
+    @State private var showsFullContent = false
 
     var body: some View {
         HStack {
@@ -17,20 +20,13 @@ struct MessageBubble: View, Equatable {
 
             VStack(alignment: .leading, spacing: 8) {
                 if message.role == .assistant {
-                    Label("Harness", systemImage: "sparkles")
+                    Label("DeepSeek Harness", systemImage: "sparkles")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
 
                 if let reasoning = message.reasoning, !reasoning.isEmpty {
-                    DisclosureGroup("思考过程") {
-                        Text(reasoning)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                            .padding(.top, 4)
-                    }
-                    .font(.caption)
+                    ReasoningDisclosure(reasoning: reasoning, isStreaming: false)
                 }
 
                 if message.role == .assistant, !message.toolEvents.isEmpty {
@@ -53,9 +49,17 @@ struct MessageBubble: View, Equatable {
                 }
 
                 if !message.content.isEmpty, message.role != .tool {
-                    Text(limited(message.content))
-                        .font(.body)
-                        .textSelection(.enabled)
+                    VStack(alignment: .leading, spacing: 6) {
+                        NativeMarkdownText(source: presentedContent)
+                        if message.content.count > Self.collapsedContentCharacters {
+                            Button(showsFullContent ? "收起长回复" : "展开完整回复") {
+                                showsFullContent.toggle()
+                            }
+                            .font(.caption.weight(.medium))
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+                        }
+                    }
                 }
 
                 if message.isIncomplete {
@@ -65,52 +69,16 @@ struct MessageBubble: View, Equatable {
                 }
 
                 if message.role == .tool {
-                    Button {
-                        isToolResultPresented = true
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(
-                                systemName: message.isToolError == true
-                                    ? "exclamationmark.triangle.fill"
-                                    : "checkmark.circle.fill"
-                            )
-                            .foregroundStyle(message.isToolError == true ? .red : .green)
-
-                            Text(toolResultLabel)
-                                .font(.footnote.weight(.medium))
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-
-                            if message.isToolError == true,
-                               let summary = compactToolResultSummary {
-                                Text(summary)
-                                    .font(.caption)
-                                    .foregroundStyle(.red)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                            }
-
-                            Spacer(minLength: 6)
-
-                            Image(systemName: "info.circle")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        .frame(minHeight: 28)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(.rect)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("\(toolResultLabel)，查看完整返回值")
+                    ToolEventCard(event: legacyToolEvent, isLive: false) {}
                 }
 
                 if message.role == .assistant {
                     assistantActions
                 }
             }
-            .padding(message.role == .assistant ? 0 : 12)
+            .padding(message.role == .user ? 12 : 0)
             .background {
-                if message.role != .assistant {
+                if message.role == .user {
                     RoundedRectangle(cornerRadius: 12)
                         .fill(background)
                 }
@@ -126,19 +94,29 @@ struct MessageBubble: View, Equatable {
         }
         .frame(maxWidth: .infinity)
         .accessibilityIdentifier("message-\(message.role.rawValue)")
+        .contextMenu {
+            if message.role == .user {
+                Button {
+                    onRetryUserMessage(message.id)
+                } label: {
+                    Label("重试此消息", systemImage: "arrow.clockwise")
+                }
+                .disabled(!canRerunUserMessage)
+
+                Button {
+                    onEditUserMessage(message)
+                } label: {
+                    Label("编辑并重新运行", systemImage: "pencil")
+                }
+                .disabled(!canRerunUserMessage)
+            }
+        }
         .sheet(item: $feedbackNoteEditor) { editor in
             MessageFeedbackNoteSheet(
                 editor: editor,
                 onSave: { note in
                     onUpdateFeedbackNote(message.id, note)
                 }
-            )
-        }
-        .sheet(isPresented: $isToolResultPresented) {
-            ToolResultInspectorView(
-                title: toolResultLabel,
-                content: message.content,
-                isError: message.isToolError == true
             )
         }
     }
@@ -204,19 +182,33 @@ struct MessageBubble: View, Equatable {
         .help(label)
     }
 
-    private var toolResultLabel: String {
-        let name = message.toolName.map { ToolEventPresentation.title(for: $0) } ?? "本地工具"
-        return message.isToolError == true ? "\(name) 执行失败" : "\(name) 已完成"
+    private var legacyToolEvent: AgentToolEvent {
+        let call = AgentToolCall(
+            id: message.toolCallID ?? message.id.uuidString,
+            name: message.toolName ?? "local_tool",
+            arguments: "{}"
+        )
+        let status: AgentToolEventStatus = message.isToolError == true ? .failed : .succeeded
+        return AgentToolEvent(
+            id: message.id,
+            call: call,
+            summary: firstResultLine,
+            status: status,
+            result: message.content,
+            errorMessage: message.isToolError == true ? message.content : nil,
+            createdAt: message.createdAt,
+            startedAt: message.createdAt,
+            finishedAt: message.createdAt
+        )
     }
 
-    private var compactToolResultSummary: String? {
-        let firstLine = message.content
+    private var firstResultLine: String {
+        message.content
             .split(whereSeparator: \Character.isNewline)
             .first
             .map(String.init)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-        guard let firstLine, !firstLine.isEmpty else { return nil }
-        return firstLine
+            ?? ""
     }
 
     private var background: Color {
@@ -230,40 +222,49 @@ struct MessageBubble: View, Equatable {
         }
     }
 
-    private func limited(_ text: String) -> String {
-        guard text.count > 8_000 else { return text }
-        return String(text.prefix(8_000)) + "\n\n…（界面已截断，完整结果仍保存在本地会话）"
+    private static let collapsedContentCharacters = 2_400
+    private static let expandedContentCharacters = 16_000
+
+    private var presentedContent: String {
+        let limit = showsFullContent
+            ? Self.expandedContentCharacters
+            : Self.collapsedContentCharacters
+        guard message.content.count > limit else { return message.content }
+        return String(message.content.prefix(limit))
+            + (showsFullContent
+                ? "\n\n…（界面显示已达上限，完整结果仍保存在本地会话）"
+                : "\n\n…")
     }
 
     nonisolated static func == (lhs: MessageBubble, rhs: MessageBubble) -> Bool {
         lhs.message == rhs.message
+            && lhs.canRerunUserMessage == rhs.canRerunUserMessage
     }
 }
 
-private struct ToolResultInspectorView: View {
+struct EditUserMessageView: View {
     @Environment(\.dismiss) private var dismiss
-
-    let title: String
-    let content: String
-    let isError: Bool
+    @Binding var text: String
+    let onRerun: () -> Void
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                Text(content.isEmpty ? "工具没有返回文本。" : content)
-                    .font(.footnote.monospaced())
-                    .foregroundStyle(isError ? .red : .primary)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding()
-            }
-            .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") { dismiss() }
+            TextEditor(text: $text)
+                .padding(.horizontal, 12)
+                .navigationTitle("编辑消息")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("取消") { dismiss() }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("重新运行") {
+                            onRerun()
+                            dismiss()
+                        }
+                        .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
                 }
-            }
         }
         .presentationDetents([.medium, .large])
     }
@@ -330,26 +331,88 @@ struct StreamingMessageBubble: View {
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 8) {
-                Label("Harness", systemImage: "sparkles")
+                Label("DeepSeek Harness", systemImage: "sparkles")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
 
                 if !reasoning.isEmpty {
-                    DisclosureGroup("正在思考…") {
-                        Text(reasoning)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                    .font(.caption)
+                    ReasoningDisclosure(reasoning: reasoning, isStreaming: true)
                 }
-                if text.isEmpty {
-                    ProgressView()
-                } else {
+                if !text.isEmpty {
                     Text(text)
                 }
             }
             .frame(maxWidth: 620, alignment: .leading)
             Spacer(minLength: 12)
         }
+    }
+}
+
+private struct ReasoningDisclosure: View {
+    let reasoning: String
+    let isStreaming: Bool
+
+    @State private var isExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Button {
+                isExpanded.toggle()
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "brain.head.profile")
+                        .foregroundStyle(.secondary)
+                    Text("Think")
+                        .fontWeight(.semibold)
+                    Text(summary)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer(minLength: 6)
+                    if isStreaming {
+                        ProgressView()
+                            .controlSize(.mini)
+                    }
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .font(.caption)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isStreaming ? "正在思考" : "思考过程")
+            .accessibilityValue(summary)
+            .accessibilityHint(isExpanded ? "折叠完整思考过程" : "展开完整思考过程")
+
+            if isExpanded {
+                Text(reasoning)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 23)
+            }
+        }
+    }
+
+    private var summary: String {
+        let sample = isStreaming
+            ? String(reasoning.suffix(800))
+            : String(reasoning.prefix(1_600))
+        let lines = sample
+            .split(whereSeparator: \Character.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !lines.isEmpty else { return isStreaming ? "正在推理" : "已完成" }
+        let value: String
+        if isStreaming {
+            value = lines.last ?? "正在推理"
+        } else {
+            value = lines.first(where: { !$0.hasPrefix("[") }) ?? lines[0]
+        }
+        guard value.count > 160 else { return value }
+        return String(value.prefix(160)) + "…"
     }
 }

@@ -118,6 +118,27 @@ struct TrajectoryView: View {
         } else {
             ScrollView {
                 LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                    if model.canLoadOlderTrajectory {
+                        Button {
+                            Task { await model.loadOlderTrajectory() }
+                        } label: {
+                            HStack(spacing: 8) {
+                                if model.isLoadingOlderTrajectory {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                } else {
+                                    Image(systemName: "clock.arrow.trianglehead.counterclockwise.rotate.90")
+                                }
+                                Text(model.isLoadingOlderTrajectory ? "正在加载" : "加载更早轨迹")
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(model.isLoadingOlderTrajectory)
+                        Divider()
+                    }
+
                     switch state.mode {
                     case .duration:
                         ForEach(projection.filteredEvents) { event in
@@ -613,7 +634,12 @@ private struct TrajectoryTurnSection: Identifiable {
     }
 
     var detail: String {
-        String(events.count) + " events"
+        String(events.count) + " events · " + TrajectoryFormat.duration(durationMilliseconds)
+    }
+
+    private var durationMilliseconds: Double {
+        guard let first = events.first?.time, let last = events.last?.time else { return 0 }
+        return Double(max(0, last - first))
     }
 
     func replacingEvents(_ events: [SessionEvent]) -> Self {
@@ -633,7 +659,13 @@ private struct TrajectoryCallSection: Identifiable {
 
     var detail: String {
         let status = isError ? "Error" : events.contains { $0.toolResultData != nil } ? "Complete" : "Running"
-        return status + " · " + callID
+        return status + " · " + TrajectoryFormat.duration(durationMilliseconds) + " · " + callID
+    }
+
+    private var durationMilliseconds: Double {
+        guard let start = events.first(where: { $0.toolCallData != nil })?.time else { return 0 }
+        let end = events.last(where: { $0.toolResultData != nil })?.time ?? events.last?.time ?? start
+        return Double(max(0, end - start))
     }
 
     var isError: Bool {
@@ -783,6 +815,33 @@ private struct TrajectoryEventPresentation {
             }
             systemImage = "brain.head.profile"
             tint = .teal
+
+        case SessionEventVocabulary.questionRequested:
+            kind = "QUESTION"
+            if let request = event.questionRequestedData {
+                title = request.questions.first?.question ?? "Agent requested input"
+                subtitle = String(request.questionCount) + " question(s) · waiting"
+            } else {
+                title = "Agent requested input"
+                subtitle = nil
+            }
+            systemImage = "questionmark.bubble.fill"
+            tint = .orange
+
+        case SessionEventVocabulary.questionResolved:
+            kind = "QUESTION"
+            if let resolved = event.questionResolvedData {
+                title = resolved.outcome == "answered" ? "User answered" : "Question cancelled"
+                let skipped = resolved.skippedIDs.isEmpty
+                    ? nil
+                    : "skipped: " + resolved.skippedIDs.joined(separator: ", ")
+                subtitle = [resolved.requestID, skipped].compactMap { $0 }.joined(separator: " · ")
+            } else {
+                title = "Question resolved"
+                subtitle = nil
+            }
+            systemImage = "checkmark.bubble.fill"
+            tint = .green
 
         case SessionEventVocabulary.userMessage:
             kind = "USER"
@@ -1172,6 +1231,10 @@ private struct TrajectoryEventInspectorView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var formattedEnvelope: String?
     @State private var formattedArguments: String?
+    @State private var formattedRequestHeader: String?
+    @State private var formattedUserMessage: String?
+    @State private var formattedAssistantMessage: String?
+    @State private var formattedToolResult: String?
 
     let event: SessionEvent
 
@@ -1237,6 +1300,16 @@ private struct TrajectoryEventInspectorView: View {
         if let header = event.requestHeaderData {
             Section("Request header") {
                 LabeledContent("Reason", value: header.reason.rawValue)
+                if let formattedRequestHeader {
+                    inspectorPayload(formattedRequestHeader)
+                }
+            }
+        }
+
+        if event.type == SessionEventVocabulary.userMessage,
+           let formattedUserMessage {
+            Section("User") {
+                inspectorPayload(formattedUserMessage)
             }
         }
 
@@ -1255,12 +1328,17 @@ private struct TrajectoryEventInspectorView: View {
                 LabeledContent("Turn", value: String(assistant.turn))
                 LabeledContent("Step", value: String(assistant.step))
                 if let usage = assistant.usage {
-                    LabeledContent("Input", value: TrajectoryFormat.count(usage.inputTokens))
-                    LabeledContent("Output", value: TrajectoryFormat.count(usage.outputTokens))
-                    if let reasoning = usage.reasoningTokens {
-                        LabeledContent("Thinking", value: TrajectoryFormat.count(reasoning))
-                    }
+                    usageDetails(usage)
                 }
+                if let formattedAssistantMessage {
+                    inspectorPayload(formattedAssistantMessage)
+                }
+            }
+        }
+
+        if let usage = event.assistantChunkData?.usage {
+            Section("Usage") {
+                usageDetails(usage)
             }
         }
 
@@ -1296,7 +1374,35 @@ private struct TrajectoryEventInspectorView: View {
                     Label("工具返回错误", systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.red)
                 }
+                if let formattedToolResult {
+                    inspectorPayload(formattedToolResult)
+                }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func usageDetails(_ usage: SessionTokenUsage) -> some View {
+        LabeledContent("Uncached input", value: TrajectoryFormat.count(usage.inputTokens))
+        LabeledContent("Output", value: TrajectoryFormat.count(usage.outputTokens))
+        if let cacheRead = usage.cacheReadTokens {
+            LabeledContent("Cache read", value: TrajectoryFormat.count(cacheRead))
+        }
+        if let cacheWrite = usage.cacheWriteTokens {
+            LabeledContent("Cache write", value: TrajectoryFormat.count(cacheWrite))
+        }
+        LabeledContent("Cache hit", value: TrajectoryFormat.cachePercent(usage) ?? "—")
+        if let reasoning = usage.reasoningTokens {
+            LabeledContent("Thinking", value: TrajectoryFormat.count(reasoning))
+        }
+    }
+
+    private func inspectorPayload(_ text: String) -> some View {
+        ScrollView(.horizontal) {
+            Text(text)
+                .font(.footnote.monospaced())
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -1307,12 +1413,22 @@ private struct TrajectoryEventInspectorView: View {
         let result = await Task.detached(priority: .userInitiated) {
             (
                 TrajectoryJSONFormatter.event(event),
-                callArguments.map(TrajectoryJSONFormatter.embeddedJSON)
+                callArguments.map(TrajectoryJSONFormatter.embeddedJSON),
+                event.requestHeaderData.map { TrajectoryJSONFormatter.value($0.header) },
+                event.type == SessionEventVocabulary.userMessage
+                    ? TrajectoryJSONFormatter.value(event.data)
+                    : nil,
+                event.assistantMessageData.map { TrajectoryJSONFormatter.value($0.message) },
+                event.toolResultData.map { TrajectoryJSONFormatter.value($0.message) }
             )
         }.value
         guard !Task.isCancelled else { return }
         formattedEnvelope = result.0
         formattedArguments = result.1
+        formattedRequestHeader = result.2
+        formattedUserMessage = result.3
+        formattedAssistantMessage = result.4
+        formattedToolResult = result.5
     }
 }
 
@@ -1335,6 +1451,14 @@ private enum TrajectoryJSONFormatter {
             return raw
         }
         return String(decoding: formatted, as: UTF8.self)
+    }
+
+    static func value(_ value: JSONValue) -> String {
+        if case let .string(text) = value { return text }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        guard let data = try? encoder.encode(value) else { return value.displayText }
+        return String(decoding: data, as: UTF8.self)
     }
 }
 
@@ -1363,7 +1487,16 @@ private enum TrajectoryFormat {
 
     static func percent(_ value: Double) -> String {
         guard value.isFinite else { return "—" }
-        return value.formatted(.percent.precision(.fractionLength(0)))
+        // Keep sub-percent differences visible. Rounding 99.4% to 99% made
+        // provider cache behavior look materially worse than the raw tokens.
+        return value.formatted(.percent.precision(.fractionLength(1)))
+    }
+
+    static func cachePercent(_ usage: SessionTokenUsage) -> String? {
+        let read = Double(usage.cacheReadTokens ?? 0)
+        let billed = Double(usage.inputTokens) + read + Double(usage.cacheWriteTokens ?? 0)
+        guard billed > 0 else { return nil }
+        return percent(read / billed)
     }
 }
 

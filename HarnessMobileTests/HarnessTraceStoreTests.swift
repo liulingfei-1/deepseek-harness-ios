@@ -7,6 +7,31 @@ import XCTest
 #endif
 
 final class HarnessTraceStoreTests: XCTestCase {
+    func testAgentDiagnosticsToolBoundsScopeAndRedactsCredentials() async throws {
+        let tool = AgentDiagnosticsTool { query in
+            .object([
+                "scope": .string(query.scope.rawValue),
+                "limit": .number(Double(query.limit)),
+                "apiKey": .string("sk-abcdefghijklmnopqrstuvwxyz"),
+                "message": .string("Bearer abcdefghijklmnopqrstuvwxyz")
+            ])
+        }
+
+        let output = try await tool.execute(arguments: [
+            "scope": .string("errors"),
+            "limit": .number(12)
+        ])
+
+        XCTAssertTrue(output.contains("errors"))
+        XCTAssertTrue(output.contains("12"))
+        XCTAssertFalse(output.contains("sk-abcdefghijklmnopqrstuvwxyz"))
+        XCTAssertFalse(output.contains("Bearer abcdefghijklmnopqrstuvwxyz"))
+        XCTAssertTrue(output.contains("redacted"))
+        XCTAssertThrowsError(
+            try tool.validate(arguments: ["limit": .number(33)])
+        )
+    }
+
     func testIncrementalReadsAdvancePastBoundedStoreEviction() async {
         let store = HarnessTraceStore(capacity: 2)
         for index in 1...4 {
@@ -101,5 +126,87 @@ final class HarnessTraceStoreTests: XCTestCase {
         XCTAssertTrue(text.contains("streamingDeltaOmissionCount"))
         XCTAssertTrue(text.contains("tool result retained"))
         XCTAssertTrue(text.contains("inputTokens"))
+    }
+
+    func testDiagnosticReportCompactsRepeatedLargeToolAndWebPayloads() throws {
+        let repeatedPage = String(repeating: "<html>large fetched page</html>", count: 8_000)
+        var traces: [HarnessTraceEvent] = []
+        var sessionEvents: [SessionEvent] = []
+        for sequence in 1...300 {
+            traces.append(
+                HarnessTraceEvent(
+                    id: UUID(),
+                    sequence: UInt64(sequence),
+                    kind: .toolFinished,
+                    timestamp: Date(timeIntervalSince1970: TimeInterval(sequence)),
+                    runID: nil,
+                    turn: 1,
+                    step: sequence,
+                    callID: "web-\(sequence)",
+                    pluginID: nil,
+                    name: "web_fetch",
+                    durationMilliseconds: 10,
+                    attributes: [:],
+                    payload: .tool(
+                        HarnessTraceTool(
+                            callID: "web-\(sequence)",
+                            name: "web_fetch",
+                            arguments: "{\"url\":\"https://example.com\"}",
+                            output: repeatedPage,
+                            isError: false
+                        )
+                    ),
+                    error: nil
+                )
+            )
+            sessionEvents.append(
+                try SessionEvent(
+                    type: SessionEventVocabulary.toolResult,
+                    seq: UInt64(sequence),
+                    time: Int64(sequence),
+                    data: .object([
+                        "tool": .string("web_fetch"),
+                        "output": .string(repeatedPage)
+                    ])
+                )
+            )
+        }
+        traces.append(
+            HarnessTraceEvent(
+                id: UUID(),
+                sequence: 301,
+                kind: .error,
+                timestamp: Date(timeIntervalSince1970: 301),
+                runID: nil,
+                turn: 1,
+                step: 301,
+                callID: nil,
+                pluginID: nil,
+                name: "terminal.error",
+                durationMilliseconds: nil,
+                attributes: [:],
+                payload: nil,
+                error: "terminal diagnostic sentinel"
+            )
+        )
+
+        let report = try HarnessDiagnosticReportBuilder.build(
+            HarnessDiagnosticReportInput(
+                metadata: [:],
+                pluginHostStderr: "",
+                pluginSnapshots: [],
+                pluginHostInventory: [],
+                pluginPackageVersions: [:],
+                toolContributionNames: [],
+                nativeClientFailures: [],
+                traceEvents: traces,
+                sessionEvents: sessionEvents
+            )
+        )
+        let text = String(decoding: report, as: UTF8.self)
+
+        XCTAssertLessThan(report.count, 1 * 1_024 * 1_024)
+        XCTAssertTrue(text.contains("terminal diagnostic sentinel"))
+        XCTAssertTrue(text.contains("boundedOmissionCount"))
     }
 }

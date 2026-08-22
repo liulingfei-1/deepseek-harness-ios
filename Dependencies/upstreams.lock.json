@@ -3,7 +3,7 @@
   "deepseekHarness": {
     "kind": "git",
     "repository": "https://github.com/deepseek-ai/deepseek-harness.git",
-    "commit": "47f943859bef60e4160492346772ded9b24f765a",
+    "commit": "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
     "license": "MIT",
     "role": "Agent semantics and desktop compatibility reference"
   },

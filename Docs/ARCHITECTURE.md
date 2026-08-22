@@ -78,6 +78,6 @@ Camera/photo bytes are staged in the app container. Vision performs OCR locally;
 
 - Remote Executor, E2B, MCP, server-hosted execution tools and server scheduler.
 - Host-process execution, LSP, and a persistent interactive PTY UI. Linux commands and installed guest runtimes execute inside iSH.
-- Browser Client-half Cordis Packages, subagents, desktop worker-thread workflows/jobs, and desktop Skill registry integration.
-- General web/HTTP tool, downloaded Swift/native code and unrestricted native dynamic loading. The community marketplace installs validated Host-half JavaScript packages only inside the on-device iSH Cordis process; Browser Client-half packages, native addons, unsafe patches, symlinks and archive traversal are rejected, and npm lifecycle scripts are disabled.
+- Browser Client-half Cordis Packages, desktop worker-thread workflows/jobs, and desktop Skill registry integration. Mobile subagents are implemented as durable local sessions; optional Codex/Claude Code bundles invoke only fixed CLIs inside iSH.
+- General web/HTTP tool, downloaded Swift/native code and unrestricted native dynamic loading. The community marketplace installs validated Host-half JavaScript packages only inside the on-device iSH Cordis process; Browser Client-half packages, native addons, unsafe patches and archive traversal are rejected. Repository-internal ZIP symlinks are resolved inside the selected source and copied as ordinary files; escaping, missing or cyclic links remain rejected. npm lifecycle scripts are disabled.
 - Local LLM weights or model-image downloads.

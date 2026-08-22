@@ -62,7 +62,9 @@ enum ConversationExportBuilder {
             providerID: input.providerID,
             model: input.model,
             exportedAt: input.exportedAt,
-            messages: input.messages.map(exportMessage)
+            messages: input.messages
+                .filter(\.isChatVisible)
+                .map(exportMessage)
         )
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -82,7 +84,7 @@ enum ConversationExportBuilder {
             "- Privacy: sensitive token patterns are redacted; raw tool arguments are omitted",
         ]
 
-        for message in input.messages {
+        for message in input.messages where message.isChatVisible {
             lines.append("")
             lines.append("## \(roleTitle(message.role))")
             lines.append("")

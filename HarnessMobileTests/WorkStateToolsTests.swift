@@ -54,6 +54,29 @@ final class WorkStateToolsTests: XCTestCase {
         XCTAssertNil(state.goal)
     }
 
+    func testTodoStatusErrorNamesFieldAndAllowedValues() async {
+        let tool = WorkStateReplaceTodosTool(coordinator: WorkStateCoordinator())
+
+        do {
+            _ = try await tool.execute(arguments: [
+                "items": .array([
+                    .object([
+                        "title": .string("测试"),
+                        "status": .string("in_progress")
+                    ])
+                ])
+            ])
+            XCTFail("Invalid status should be rejected")
+        } catch {
+            let message = error.localizedDescription
+            XCTAssertTrue(message.contains("status"))
+            XCTAssertTrue(message.contains("in_progress"))
+            XCTAssertTrue(message.contains("pending"))
+            XCTAssertTrue(message.contains("active"))
+            XCTAssertFalse(message.contains("不是有效的 JSON 对象"))
+        }
+    }
+
     func testGoalLifecyclePreservesIdentityAcrossEditAndStatusTransitions() async throws {
         let original = ConversationGoal(title: "完成手机端移植", status: .active)
         let coordinator = WorkStateCoordinator(

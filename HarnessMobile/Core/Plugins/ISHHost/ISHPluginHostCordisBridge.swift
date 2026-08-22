@@ -32,12 +32,14 @@ struct ISHHostedCordisTool: LocalAgentTool {
 
     private let sessionID: String
     private let client: ISHPluginHostClient
+    private let synchronizeMobileContext: @Sendable () async throws -> Void
     private let synchronizeContributions: @Sendable () async throws -> Void
 
     init(
         contribution: ISHPluginHostToolContribution,
         sessionID: String,
         client: ISHPluginHostClient,
+        synchronizeMobileContext: @escaping @Sendable () async throws -> Void = {},
         synchronizeContributions: @escaping @Sendable () async throws -> Void = {}
     ) {
         definition = ModelToolDefinition(
@@ -47,6 +49,7 @@ struct ISHHostedCordisTool: LocalAgentTool {
         )
         self.sessionID = sessionID
         self.client = client
+        self.synchronizeMobileContext = synchronizeMobileContext
         self.synchronizeContributions = synchronizeContributions
     }
 
@@ -59,6 +62,7 @@ struct ISHHostedCordisTool: LocalAgentTool {
     }
 
     func execute(arguments: [String: JSONValue]) async throws -> String {
+        try await synchronizeMobileContext()
         let response = try await client.invoke(
             .tool(
                 sessionId: sessionID,
@@ -95,6 +99,8 @@ enum ISHPluginHostCordisBridge {
         contributions: ISHPluginHostContributions,
         sessionID: String,
         client: ISHPluginHostClient,
+        commandRegistry: SlashCommandRegistry? = nil,
+        synchronizeMobileContext: @escaping @Sendable () async throws -> Void = {},
         synchronizeContributions: @escaping @Sendable () async throws -> Void = {}
     ) -> CordisPluginDefinition {
         let tools = contributions.tools
@@ -115,9 +121,92 @@ enum ISHPluginHostCordisBridge {
                         contribution: contribution,
                         sessionID: sessionID,
                         client: client,
+                        synchronizeMobileContext: synchronizeMobileContext,
                         synchronizeContributions: synchronizeContributions
                     )
                 )
+            }
+            if let commandRegistry, !contributions.commands.isEmpty {
+                try await context.effect("host-command-generation") {
+                    var registrations: [SlashCommandRegistration] = []
+                    do {
+                        for command in contributions.commands {
+                            let input = try command.input.map {
+                                try SlashCommandInputDescriptor(hint: $0.hint)
+                            }
+                            let definition = try SlashCommandDefinition(
+                                name: command.name,
+                                description: command.description,
+                                input: input,
+                                // The Host command runtime has no attachment
+                                // store in the mobile composition. Plain calls
+                                // remain available; staged images fail closed
+                                // at native admission instead of disappearing.
+                                imagePolicy: .rejected,
+                                recordInput: command.recordInput
+                            ) { invocation in
+                                try await synchronizeMobileContext()
+                                let response = try await client.request(
+                                    method: .commandExecute,
+                                    params: .object([
+                                        "sessionId": .string(sessionID),
+                                        "name": .string(command.name),
+                                        "commandId": .string(invocation.commandID),
+                                        "rawInput": .string(invocation.parsed.rawInput)
+                                    ])
+                                )
+                                guard let object = response.objectValue,
+                                      object["ok"] == .bool(true),
+                                      let value = object["value"]?.objectValue,
+                                      let kind = value["kind"]?.stringValue else {
+                                    let message = response.objectValue?["message"]?.displayText
+                                        ?? response.displayText
+                                    return .failure(.handlerFailed, text: message)
+                                }
+                                if kind == "error" {
+                                    return .failure(
+                                        .handlerFailed,
+                                        text: value["text"]?.stringValue ?? "Host command failed."
+                                    )
+                                }
+                                guard kind == "success" else {
+                                    return .failure(
+                                        .handlerFailed,
+                                        text: "Host command returned an unknown result kind."
+                                    )
+                                }
+                                let sequence: Int?
+                                if case let .number(rawSequence)? = value["sourceEventSeq"] {
+                                    sequence = Int(rawSequence)
+                                } else {
+                                    sequence = nil
+                                }
+                                return .success(
+                                    text: value["text"]?.stringValue,
+                                    sourceEventSequence: sequence
+                                )
+                            }
+                            registrations.append(
+                                try await commandRegistry.register(
+                                    definition,
+                                    scope: sessionID,
+                                    origin: .host
+                                )
+                            )
+                        }
+                    } catch {
+                        for registration in registrations.reversed() {
+                            _ = await commandRegistry.unregister(registration)
+                        }
+                        throw error
+                    }
+                    let committedRegistrations = registrations
+                    return {
+                        for registration in committedRegistrations.reversed() {
+                            _ = await commandRegistry.unregister(registration)
+                        }
+                    }
+                }
             }
             for (index, contribution) in sections.enumerated() {
                 try await context.promptSection(
@@ -147,6 +236,7 @@ enum ISHPluginHostCordisBridge {
                 contributions: contributions,
                 sessionID: sessionID,
                 client: client,
+                synchronizeMobileContext: synchronizeMobileContext,
                 context: context
             )
         }

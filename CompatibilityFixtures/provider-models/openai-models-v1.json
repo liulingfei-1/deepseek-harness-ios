@@ -21,6 +21,13 @@
         "max_tokens": 8192
       },
       {
+        "id": "deepseek-v4-flash-vision-exp",
+        "display_name": "DeepSeek V4 Flash Vision",
+        "context_window": 1000000,
+        "max_output_tokens": 262144,
+        "input_modalities": ["text", "image"]
+      },
+      {
         "name": "missing-id"
       },
       {

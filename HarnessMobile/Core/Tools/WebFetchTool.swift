@@ -1,11 +1,14 @@
 import CoreFoundation
 import Foundation
+#if canImport(FoundationXML)
+import FoundationXML
+#endif
 
 struct WebFetchLimits: Sendable, Equatable {
     static let standard = WebFetchLimits(
         maximumURLBytes: 2_048,
         maximumResponseBytes: 5_000_000,
-        maximumBodyCharacters: 100_000,
+        maximumBodyCharacters: 32_000,
         timeoutSeconds: 30,
         maximumRedirects: 5,
         userAgent: "harness-mobile/0.1 (on-device web_fetch)"
@@ -199,7 +202,7 @@ struct WebFetchTool: LocalAgentTool {
     }
 
     private static func encodeBounded(_ result: WebFetchResult) throws -> String {
-        let maximumResultBytes = 128 * 1_024
+        let maximumResultBytes = 48 * 1_024
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
 
@@ -234,6 +237,568 @@ struct WebFetchTool: LocalAgentTool {
             throw LocalToolError.resultTooLarge
         }
         return String(decoding: bestData, as: UTF8.self)
+    }
+}
+
+/// A small on-device search adapter for the upstream `web_search` capability.
+/// Search is deliberately separate from `web_fetch`: providers may return
+/// ranked sources without granting the model arbitrary request construction.
+/// The provider seam keeps the tool contract independent from any particular
+/// public search endpoint while all implementations still execute on-device.
+protocol WebSearchProvider: Sendable {
+    var identifier: String { get }
+    var approvalResources: Set<String> { get }
+    func search(query: String, maximumResults: Int) async throws -> [WebSearchProviderSource]
+}
+
+struct WebSearchProviderSource: Sendable, Equatable {
+    let title: String
+    let url: String
+    let snippet: String
+}
+
+struct WebSearchTool: LocalAgentTool {
+    struct Limits: Sendable, Equatable {
+        var timeout: TimeInterval = 30
+        var maximumQueryBytes = 2 * 1_024
+        var maximumResults = 8
+        var maximumQueries = 4
+        var maximumResponseBytes = 512 * 1_024
+    }
+
+    private struct DuckDuckGoResponse: Decodable, Sendable {
+        let heading: String?
+        let abstractText: String?
+        let abstractURL: String?
+        let relatedTopics: [RelatedTopic]?
+
+        enum CodingKeys: String, CodingKey {
+            case heading = "Heading"
+            case abstractText = "AbstractText"
+            case abstractURL = "AbstractURL"
+            case relatedTopics = "RelatedTopics"
+        }
+    }
+
+    private struct RelatedTopic: Decodable, Sendable {
+        let text: String?
+        let firstURL: String?
+        let topics: [RelatedTopic]?
+
+        enum CodingKeys: String, CodingKey {
+            case text = "Text"
+            case firstURL = "FirstURL"
+            case topics = "Topics"
+        }
+    }
+
+    private struct ProviderResult: Sendable, Equatable {
+        let provider: String
+        let sources: [WebSearchProviderSource]
+    }
+
+    let limits: Limits
+    private let provider: any WebSearchProvider
+    let definition = ModelToolDefinition(
+        name: "web_search",
+        description: "Search the web from the iPhone and return bounded ranked sources. Search runs over the phone network, never on a remote command executor; use web_fetch to inspect a selected result in detail.",
+        parameters: .object([
+            "type": .string("object"),
+            "properties": .object([
+                "queries": .object([
+                    "type": .string("array"),
+                    "items": .object(["type": .string("string")]),
+                    "minItems": .number(1),
+                    "maxItems": .number(4),
+                    "description": .string("Required non-empty search queries. One to four queries run concurrently on the phone.")
+                ])
+            ]),
+            "required": .array([.string("queries")]),
+            "additionalProperties": .bool(false)
+        ])
+    )
+    let risk: ToolRisk = .sensitiveRead
+
+    init(
+        limits: Limits = Limits(),
+        protocolClasses: [AnyClass]? = nil,
+        provider: (any WebSearchProvider)? = nil
+    ) {
+        self.limits = limits
+        if let provider {
+            self.provider = provider
+        } else {
+            self.provider = OnDeviceWebSearchProvider(
+                limits: limits,
+                protocolClasses: protocolClasses
+            )
+        }
+    }
+
+    func validate(arguments: [String: JSONValue]) throws {
+        try arguments.requireOnlyKeys(["queries"])
+        _ = try parsedQueries(arguments: arguments)
+    }
+
+    func summary(arguments: [String: JSONValue]) -> String {
+        let queries = (try? parsedQueries(arguments: arguments)) ?? []
+        return "联网搜索：\(String(queries.joined(separator: ", ").prefix(72)))"
+    }
+
+    func concurrencyResources(arguments: [String: JSONValue]) throws -> Set<String> {
+        ["web-search:phone"]
+    }
+
+    func approvalResources(arguments: [String: JSONValue]) throws -> Set<String> {
+        provider.approvalResources
+    }
+
+    func execute(arguments: [String: JSONValue]) async throws -> String {
+        try validate(arguments: arguments)
+        let queries = try parsedQueries(arguments: arguments)
+        let batch = try await withThrowingTaskGroup(of: (Int, ProviderResult).self) { group in
+            for (index, query) in queries.enumerated() {
+                group.addTask {
+                    let sources = try await self.provider.search(
+                        query: query,
+                        maximumResults: self.limits.maximumResults
+                    )
+                    return (index, ProviderResult(provider: self.provider.identifier, sources: sources))
+                }
+            }
+            var values: [(Int, ProviderResult)] = []
+            for try await value in group { values.append(value) }
+            return values.sorted { $0.0 < $1.0 }
+        }
+        let merged = Self.roundRobinMerge(batch, queries: queries, maximumResults: limits.maximumResults)
+        return JSONValue.object([
+            "queries": .array(queries.map { .string($0) }),
+            "sources": .array(merged.sources.map { item in
+                .object([
+                    "query": .string(item.query),
+                    "provider": .string(item.provider),
+                    "title": .string(item.source.title),
+                    "url": .string(item.source.url),
+                    "snippet": .string(String(item.source.snippet.prefix(1_000)))
+                ])
+            }),
+            "source_count": .number(Double(merged.sources.count)),
+            "truncated": .bool(merged.truncated),
+            "query_count": .number(Double(queries.count)),
+            "note": .string("搜索在手机上并发执行；结果按查询 round-robin 合并并按 URL 去重。使用 web_fetch 获取页面正文并核对来源。")
+        ]).displayText
+    }
+
+    private func parsedQueries(arguments: [String: JSONValue]) throws -> [String] {
+        guard case let .array(values)? = arguments["queries"],
+              !values.isEmpty,
+              values.count <= limits.maximumQueries else {
+            throw LocalToolError.invalidArguments
+        }
+        var seen = Set<String>()
+        var queries: [String] = []
+        for value in values {
+            guard let query = value.stringValue,
+                  !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  query.utf8.count <= limits.maximumQueryBytes else {
+                throw LocalToolError.invalidArguments
+            }
+            if seen.insert(query).inserted { queries.append(query) }
+        }
+        return queries
+    }
+
+    private struct MergedSource: Sendable, Equatable {
+        let query: String
+        let provider: String
+        let source: WebSearchProviderSource
+    }
+
+    private struct MergedResult: Sendable, Equatable {
+        let sources: [MergedSource]
+        let truncated: Bool
+    }
+
+    private static func roundRobinMerge(
+        _ batch: [(Int, ProviderResult)],
+        queries: [String],
+        maximumResults: Int
+    ) -> MergedResult {
+        var sources: [MergedSource] = []
+        var seenURLs = Set<String>()
+        var rank = 0
+        while sources.count < maximumResults {
+            var appended = false
+            for (index, result) in batch {
+                guard let source = result.sources[safe: rank] else { continue }
+                appended = true
+                guard seenURLs.insert(source.url).inserted else { continue }
+                sources.append(MergedSource(query: queries[index], provider: result.provider, source: source))
+                if sources.count == maximumResults { break }
+            }
+            guard appended else { break }
+            rank += 1
+        }
+        let hadMore = batch.contains { result in
+            result.1.sources.contains { !seenURLs.contains($0.url) }
+        }
+        return MergedResult(sources: sources, truncated: sources.count == maximumResults && hadMore)
+    }
+
+    private struct OnDeviceWebSearchProvider: WebSearchProvider {
+        let identifier = "bing-rss+duckduckgo-instant"
+        let approvalResources: Set<String> = [
+            "web:search:www.bing.com",
+            "web:search:api.duckduckgo.com"
+        ]
+        let limits: Limits
+        let client: WebSearchHTTPClient
+
+        init(limits: Limits, protocolClasses: [AnyClass]?) {
+            self.limits = limits
+            client = WebSearchHTTPClient(
+                timeout: limits.timeout,
+                protocolClasses: protocolClasses
+            )
+        }
+
+        func search(query: String, maximumResults: Int) async throws -> [WebSearchProviderSource] {
+            var failures: [String] = []
+            do {
+                let sources = try await searchBingRSS(
+                    terms: query,
+                    maximumResults: maximumResults
+                )
+                if !sources.isEmpty { return sources }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                failures.append("Bing RSS: \(error.localizedDescription)")
+            }
+
+            do {
+                let sources = try await searchDuckDuckGo(
+                    terms: query,
+                    maximumResults: maximumResults
+                )
+                if !sources.isEmpty { return sources }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                failures.append("DuckDuckGo: \(error.localizedDescription)")
+            }
+
+            guard failures.isEmpty else {
+                throw WebFetchError.networkFailure(
+                    "手机直连搜索源均不可用（\(failures.joined(separator: "; "))）"
+                )
+            }
+            return []
+        }
+
+        private func searchBingRSS(
+            terms: String,
+            maximumResults: Int
+        ) async throws -> [WebSearchProviderSource] {
+            var components = URLComponents(string: "https://www.bing.com/search")!
+            components.queryItems = [
+                URLQueryItem(name: "q", value: terms),
+                URLQueryItem(name: "format", value: "rss")
+            ]
+            guard let url = components.url else { throw WebFetchError.invalidURL }
+            var request = URLRequest(url: url)
+            request.httpMethod = "GET"
+            request.timeoutInterval = min(limits.timeout, 12)
+            request.setValue("application/rss+xml, application/xml;q=0.9", forHTTPHeaderField: "Accept")
+            request.setValue("harness-mobile/0.1 (on-device web_search)", forHTTPHeaderField: "User-Agent")
+            let (data, response) = try await client.data(for: request)
+            guard (200..<300).contains(response.statusCode) else {
+                throw WebFetchError.invalidResponse
+            }
+            guard data.count <= limits.maximumResponseBytes else {
+                throw WebFetchError.responseTooLarge(limits.maximumResponseBytes)
+            }
+            return try BingSearchRSSParser.parse(data).compactMap { item in
+                guard let url = WebSearchTool.normalizedPublicResultURL(item.link) else { return nil }
+                let title = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                return WebSearchProviderSource(
+                    title: title.isEmpty ? url : title,
+                    url: url,
+                    snippet: WebSearchTool.plainSearchSnippet(item.description)
+                )
+            }.uniqued(by: \.url, maximumCount: maximumResults)
+        }
+
+        private func searchDuckDuckGo(
+            terms: String,
+            maximumResults: Int
+        ) async throws -> [WebSearchProviderSource] {
+            var components = URLComponents(string: "https://api.duckduckgo.com/")!
+            components.queryItems = [
+                URLQueryItem(name: "q", value: terms),
+                URLQueryItem(name: "format", value: "json"),
+                URLQueryItem(name: "no_html", value: "1"),
+                URLQueryItem(name: "no_redirect", value: "1"),
+                URLQueryItem(name: "skip_disambig", value: "1")
+            ]
+            guard let url = components.url else { throw WebFetchError.invalidURL }
+            var request = URLRequest(url: url)
+            request.httpMethod = "GET"
+            request.timeoutInterval = min(limits.timeout, 12)
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            let data: Data
+            let response: HTTPURLResponse
+            do {
+                (data, response) = try await client.data(for: request)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch let error as WebFetchError {
+                throw error
+            } catch {
+                throw WebFetchError.networkFailure(error.localizedDescription)
+            }
+            guard (200..<300).contains(response.statusCode) else {
+                throw WebFetchError.invalidResponse
+            }
+            guard data.count <= limits.maximumResponseBytes else {
+                throw WebFetchError.responseTooLarge(limits.maximumResponseBytes)
+            }
+            let payload: DuckDuckGoResponse
+            do {
+                payload = try JSONDecoder().decode(DuckDuckGoResponse.self, from: data)
+            } catch {
+                throw WebFetchError.decodingFailed("JSON")
+            }
+            var sources: [WebSearchProviderSource] = []
+            var seenURLs = Set<String>()
+            func appendSource(title: String, rawURL: String, snippet: String) {
+                guard sources.count < maximumResults,
+                      let url = WebSearchTool.normalizedPublicResultURL(rawURL),
+                      seenURLs.insert(url).inserted else { return }
+                let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+                sources.append(WebSearchProviderSource(
+                    title: normalizedTitle.isEmpty ? url : normalizedTitle,
+                    url: url,
+                    snippet: snippet
+                ))
+            }
+            if let heading = payload.heading,
+               let abstractURL = payload.abstractURL,
+               !abstractURL.isEmpty {
+                appendSource(
+                    title: heading,
+                    rawURL: abstractURL,
+                    snippet: payload.abstractText ?? ""
+                )
+            }
+            func flatten(_ topics: [RelatedTopic]) {
+                for topic in topics where sources.count < maximumResults {
+                    if let nested = topic.topics, !nested.isEmpty {
+                        flatten(nested)
+                    } else if let firstURL = topic.firstURL,
+                              !firstURL.isEmpty,
+                              let text = topic.text,
+                              !text.isEmpty {
+                        let title = text.split(separator: " - ", maxSplits: 1).first.map(String.init) ?? text
+                        appendSource(title: title, rawURL: firstURL, snippet: text)
+                    }
+                }
+            }
+            flatten(payload.relatedTopics ?? [])
+            return Array(sources.prefix(maximumResults))
+        }
+    }
+
+    private static func integer(
+        _ value: JSONValue?,
+        defaultValue: Int? = nil,
+        range: ClosedRange<Int>
+    ) throws -> Int {
+        guard let value else {
+            if let defaultValue { return defaultValue }
+            throw LocalToolError.invalidArguments
+        }
+        guard case let .number(number) = value,
+              number.isFinite,
+              number.rounded() == number,
+              number >= Double(Int.min),
+              number <= Double(Int.max) else {
+            throw LocalToolError.invalidArguments
+        }
+        let integer = Int(number)
+        guard range.contains(integer) else { throw LocalToolError.invalidArguments }
+        return integer
+    }
+
+    private static func isValidDomain(_ value: String) -> Bool {
+        let value = value.lowercased()
+        guard value.utf8.count <= 253,
+              !value.contains("/"),
+              !value.contains(":") else { return false }
+        return value.split(separator: ".").count >= 2
+            && value.unicodeScalars.allSatisfy {
+                CharacterSet.alphanumerics.contains($0) || $0 == "." || $0 == "-"
+            }
+    }
+
+    private static func normalizedPublicResultURL(_ rawValue: String) -> String? {
+        guard rawValue.utf8.count <= 4 * 1_024,
+              let components = URLComponents(string: rawValue),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              components.host?.isEmpty == false,
+              components.user == nil,
+              components.password == nil,
+              let url = components.url else { return nil }
+        return url.absoluteString
+    }
+
+    private static func plainSearchSnippet(_ value: String) -> String {
+        var output = ""
+        var isInsideTag = false
+        for character in value {
+            switch character {
+            case "<": isInsideTag = true
+            case ">":
+                isInsideTag = false
+                output.append(" ")
+            default:
+                if !isInsideTag { output.append(character) }
+            }
+        }
+        return output.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+}
+
+private struct BingSearchRSSItem: Sendable, Equatable {
+    let title: String
+    let link: String
+    let description: String
+}
+
+private final class BingSearchRSSParser: NSObject, XMLParserDelegate {
+    private var items: [BingSearchRSSItem] = []
+    private var currentElement = ""
+    private var title = ""
+    private var link = ""
+    private var itemDescription = ""
+    private var isInsideItem = false
+
+    static func parse(_ data: Data) throws -> [BingSearchRSSItem] {
+        let delegate = BingSearchRSSParser()
+        let parser = XMLParser(data: data)
+        parser.delegate = delegate
+        guard parser.parse() else {
+            throw WebFetchError.decodingFailed("RSS XML")
+        }
+        return delegate.items
+    }
+
+    func parser(
+        _ parser: XMLParser,
+        didStartElement elementName: String,
+        namespaceURI: String?,
+        qualifiedName qName: String?,
+        attributes attributeDict: [String: String] = [:]
+    ) {
+        currentElement = elementName.lowercased()
+        if currentElement == "item" {
+            isInsideItem = true
+            title = ""
+            link = ""
+            itemDescription = ""
+        }
+    }
+
+    func parser(_ parser: XMLParser, foundCharacters string: String) {
+        guard isInsideItem else { return }
+        switch currentElement {
+        case "title": title.append(string)
+        case "link": link.append(string)
+        case "description": itemDescription.append(string)
+        default: break
+        }
+    }
+
+    func parser(
+        _ parser: XMLParser,
+        didEndElement elementName: String,
+        namespaceURI: String?,
+        qualifiedName qName: String?
+    ) {
+        if elementName.lowercased() == "item" {
+            items.append(BingSearchRSSItem(
+                title: title,
+                link: link.trimmingCharacters(in: .whitespacesAndNewlines),
+                description: itemDescription
+            ))
+            isInsideItem = false
+        }
+        currentElement = ""
+    }
+}
+
+private extension Array {
+    subscript(safe index: Index) -> Element? {
+        indices.contains(index) ? self[index] : nil
+    }
+
+    func uniqued<Key: Hashable>(
+        by keyPath: KeyPath<Element, Key>,
+        maximumCount: Int
+    ) -> [Element] {
+        var seen = Set<Key>()
+        var output: [Element] = []
+        for element in self where output.count < maximumCount {
+            guard seen.insert(element[keyPath: keyPath]).inserted else { continue }
+            output.append(element)
+        }
+        return output
+    }
+}
+
+/// Isolates URLSession construction so web search can be tested without making
+/// a real network request. No cookies, credentials, or provider key storage are
+/// attached to this phone-direct search session.
+final class WebSearchHTTPClient: @unchecked Sendable {
+    private let session: URLSession
+
+    init(timeout: TimeInterval, protocolClasses: [AnyClass]? = nil) {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        configuration.timeoutIntervalForRequest = timeout
+        configuration.timeoutIntervalForResource = timeout
+        configuration.httpShouldSetCookies = false
+        configuration.httpCookieStorage = nil
+        configuration.urlCredentialStorage = nil
+        configuration.waitsForConnectivity = false
+        if let protocolClasses {
+            configuration.protocolClasses = protocolClasses
+        }
+        session = URLSession(configuration: configuration)
+    }
+
+    deinit {
+        session.invalidateAndCancel()
+    }
+
+    func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        do {
+            let (data, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                throw WebFetchError.invalidResponse
+            }
+            return (data, http)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as URLError where error.code == .timedOut {
+            throw WebFetchError.timedOut
+        } catch let error as WebFetchError {
+            throw error
+        } catch {
+            throw WebFetchError.networkFailure(error.localizedDescription)
+        }
     }
 }
 

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "source": {
     "project": "deepseek-ai/deepseek-harness",
-    "commit": "47f943859bef60e4160492346772ded9b24f765a"
+    "commit": "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e"
   },
   "stream": {
     "payloads": [

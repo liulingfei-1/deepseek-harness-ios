@@ -4,7 +4,7 @@ struct WorkspaceListTool: LocalAgentTool {
     let store: WorkspaceStore
     let definition = ModelToolDefinition(
         name: "workspace_list_files",
-        description: "List UTF-8 text files in the on-device workspace, including active external folders under mounts/<name>/. The same mounts are visible to iSH at /workspace/mounts/<name>/.",
+        description: "List visible regular files in the on-device workspace, including active external folders under mounts/<name>/. File contents are not inspected here; workspace_read_text or read validates UTF-8 and can reject a listed binary file. Dot-prefixed paths such as .harness-mobile are intentionally omitted. Never use this listing as an existence check for a hidden path; probe a known hidden file directly with workspace_read_text or read and handle not-found. The same mounts are visible to iSH at /workspace/mounts/<name>/.",
         parameters: .object([
             "type": .string("object"),
             "properties": .object([:]),
@@ -31,7 +31,7 @@ struct WorkspaceListTool: LocalAgentTool {
 }
 
 struct WorkspaceReadTextTool: LocalAgentTool {
-    let store: WorkspaceStore
+    let environment: FileSystemToolEnvironment
     let definition = ModelToolDefinition(
         name: "workspace_read_text",
         description: "Read one UTF-8 text file from the on-device workspace or an active external mount. Mounted paths use mounts/<name>/... . The result is sent to the configured model API as tool output.",
@@ -65,17 +65,40 @@ struct WorkspaceReadTextTool: LocalAgentTool {
 
     func execute(arguments: [String: JSONValue]) async throws -> String {
         try validate(arguments: arguments)
-        return try await store.readText(
-            path: arguments.requiredString("path", maximumUTF8Bytes: 512)
-        )
+        let path = try arguments.requiredString("path", maximumUTF8Bytes: 512)
+        let target = try await environment.fileSystem.resolve(path, cwd: "/workspace")
+        guard let info = try await environment.fileSystem.stat(target) else {
+            try await environment.observe(CordisFsObservedInput(
+                target: target,
+                observation: .absent,
+                actor: environment.actor
+            ))
+            throw HarnessFsError(
+                code: .notFound,
+                message: "cannot read \"\(target.displayPath)\": not found"
+            )
+        }
+        guard info.type == .file else {
+            throw HarnessFsError(
+                code: .notRegularFile,
+                message: "cannot read \"\(target.displayPath)\": not a regular file"
+            )
+        }
+        let text = try await environment.fileSystem.readText(target)
+        try await environment.observe(CordisFsObservedInput(
+            target: target,
+            observation: .present(info.version),
+            actor: environment.actor
+        ))
+        return text
     }
 }
 
 struct WorkspaceWriteTextTool: LocalAgentTool {
-    let store: WorkspaceStore
+    let environment: FileSystemToolEnvironment
     let definition = ModelToolDefinition(
         name: "workspace_write_text",
-        description: "Create or replace one UTF-8 text file in the on-device workspace or a read-write external mount under mounts/<name>/... . Read-only mounts reject writes.",
+        description: "Create or replace one UTF-8 text file in the on-device workspace or a read-write external mount under mounts/<name>/... . Missing parent directories are created automatically. Read-only mounts reject writes.",
         parameters: .object([
             "type": .string("object"),
             "properties": .object([
@@ -123,11 +146,30 @@ struct WorkspaceWriteTextTool: LocalAgentTool {
             maximumUTF8Bytes: 60 * 1_024,
             allowEmpty: true
         )
-        try await store.writeText(path: path, text: text)
-        return JSONValue.object([
-            "status": .string("written"),
-            "path": .string(path)
-        ]).displayText
+        let target = try await environment.fileSystem.resolve(path, cwd: "/workspace")
+        do {
+            let intent = try await environment.writeIntent(CordisFsIntentInput(
+                target: target,
+                actor: environment.actor
+            ))
+            let outcome = try await environment.fileSystem.writeText(
+                target,
+                content: text,
+                expected: intent
+            )
+            try await environment.observe(CordisFsObservedInput(
+                target: target,
+                observation: .present(outcome.version),
+                actor: environment.actor
+            ))
+            return JSONValue.object([
+                "status": .string("written"),
+                "path": .string(target.displayPath),
+                "operation": .string(outcome.operation == .create ? "create" : "update")
+            ]).displayText
+        } catch {
+            throw remediateFileMutationError(error)
+        }
     }
 }
 

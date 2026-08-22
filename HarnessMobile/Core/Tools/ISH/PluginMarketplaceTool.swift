@@ -1,13 +1,17 @@
 import Foundation
 
 /// The marketplace operations that are safe to expose to the on-device Agent.
-/// Source preparation stays in the iSH Host, native adaptation is attempted by
-/// the configured phone Agent, and npm/Cordis installation is only a fallback.
+/// Source preparation stays in the iSH Host. The main conversation Agent reads
+/// that bounded snapshot and authors the declarative native manifest directly;
+/// signed Swift validation remains the commit authority.
 struct PluginMarketplaceToolRequest: Sendable, Equatable {
     enum Action: String, Sendable, Equatable {
         case catalog
         case list
         case install
+        case readSource = "read_source"
+        case installNative = "install_native"
+        case installISH = "install_ish"
         case enable
         case disable
         case uninstall
@@ -21,6 +25,9 @@ struct PluginMarketplaceToolRequest: Sendable, Equatable {
     let replace: Bool
     let forceRefresh: Bool
     let includeNPM: Bool
+    let preparedToken: String?
+    let sourcePath: String?
+    let nativeManifest: JSONValue?
     let query: String?
     let offset: Int
     let limit: Int
@@ -38,20 +45,21 @@ typealias PluginMarketplaceToolExecutor = @MainActor @Sendable (
 struct PluginMarketplaceTool: LocalAgentTool {
     private static let allowedKeys: Set<String> = [
         "action", "source_kind", "location", "id", "replace",
-        "force_refresh", "include_npm", "query", "offset", "limit"
+        "force_refresh", "include_npm", "prepared_token", "source_path",
+        "native_manifest", "query", "offset", "limit"
     ]
 
     let definition = ModelToolDefinition(
         name: "plugin_marketplace",
-        description: "Manage Cordis and Agent-compiled native plugins on this iPhone. Query the catalog or installed list, install/update a market or GitHub plugin, enable/disable/uninstall it, or clear the local cache. Every install first downloads a bounded source snapshot on the phone and asks the configured phone Agent to compile it into a Swift-validated declarative native tool manifest. Only sources the Agent marks unadaptable, manifests rejected by native validation, or packages without usable source fall back to the on-device iSH/Cordis runtime. Provider API keys never enter the plugin host. Local ZIP import remains available from the Plugins screen, where iOS stages the file safely.",
+        description: "Manage Cordis and Agent-compiled native plugins on this iPhone. For a conversation install, the main Agent owns compilation: call action=install to download and inspect a bounded source preview, use read_source for any omitted file, then submit the declarative manifest with install_native. A validation failure returns a stable NATIVE_* code and the same prepared_token remains available; inspect diagnostics_read(scope=compilation) when the failure needs more context, then repair and retry. If the source cannot be represented honestly with signed native tools, call install_ish for the prepared source. No compiler sub-agent is started and provider API keys never enter the plugin host. Local ZIP import remains available from the Plugins screen.",
         parameters: .object([
             "type": .string("object"),
             "properties": .object([
                 "action": .object([
                     "type": .string("string"),
                     "enum": .array([
-                        "catalog", "list", "install", "enable", "disable",
-                        "uninstall", "clear_cache"
+                        "catalog", "list", "install", "read_source", "install_native",
+                        "install_ish", "enable", "disable", "uninstall", "clear_cache"
                     ].map(JSONValue.string)),
                     "description": .string("Operation to perform.")
                 ]),
@@ -82,6 +90,17 @@ struct PluginMarketplaceTool: LocalAgentTool {
                     "type": .string("boolean"),
                     "description": .string("For clear_cache, also remove the local npm cache.")
                 ]),
+                "prepared_token": .object([
+                    "type": .string("string"),
+                    "maxLength": .number(64),
+                    "description": .string("Opaque token returned by install. Required for read_source, install_native, and install_ish.")
+                ]),
+                "source_path": .object([
+                    "type": .string("string"),
+                    "maxLength": .number(512),
+                    "description": .string("Exact path from the prepared source file index. Required for read_source.")
+                ]),
+                "native_manifest": NativeAgentPluginCompiler.manifestSchema,
                 "query": .object([
                     "type": .string("string"),
                     "maxLength": .number(256),
@@ -96,8 +115,8 @@ struct PluginMarketplaceTool: LocalAgentTool {
                 "limit": .object([
                     "type": .string("integer"),
                     "minimum": .number(1),
-                    "maximum": .number(25),
-                    "description": .string("For catalog, page size. Defaults to 20 and cannot exceed 25.")
+                    "maximum": .number(12),
+                    "description": .string("For catalog, compact page size. Defaults to 8 and cannot exceed 12; use next_offset for another page instead of requesting a large model-visible result.")
                 ])
             ]),
             "required": .array([.string("action")]),
@@ -126,7 +145,10 @@ struct PluginMarketplaceTool: LocalAgentTool {
         case .catalog: return "查询本机插件市场目录"
         case .list: return "列出本机已安装插件"
         case .install:
-            return "在手机上安装或自动原生编译插件：\(request.location ?? "未知来源")"
+            return "为主 Agent 准备插件源码：\(request.location ?? "未知来源")"
+        case .readSource: return "读取已准备的插件源码：\(request.sourcePath ?? "未知文件")"
+        case .installNative: return "校验并安装主 Agent 编译的原生插件"
+        case .installISH: return "将已准备的插件安装到本机 iSH"
         case .enable: return "在手机上启用插件：\(request.id ?? "未知插件")"
         case .disable: return "在手机上停用插件：\(request.id ?? "未知插件")"
         case .uninstall: return "在手机上卸载插件：\(request.id ?? "未知插件")"
@@ -173,18 +195,42 @@ struct PluginMarketplaceTool: LocalAgentTool {
         let replace = try optionalBool(arguments["replace"])
         let forceRefresh = try optionalBool(arguments["force_refresh"])
         let includeNPM = try optionalBool(arguments["include_npm"])
+        let preparedToken = try optionalString(arguments["prepared_token"], maximumUTF8Bytes: 64)
+        let sourcePath = try optionalString(arguments["source_path"], maximumUTF8Bytes: 512)
+        let nativeManifest = arguments["native_manifest"]
         let query = try optionalString(arguments["query"], maximumUTF8Bytes: 256)
         let offset = try optionalInteger(
             arguments["offset"],
             defaultValue: 0,
             range: 0...1_000_000
         )
-        let limit = try optionalInteger(arguments["limit"], defaultValue: 20, range: 1...25)
+        let limit = try optionalInteger(arguments["limit"], defaultValue: 8, range: 1...12)
+
+        if let nativeManifest {
+            guard action == .installNative,
+                  case .object = nativeManifest,
+                  try JSONEncoder().encode(nativeManifest).count <= 96 * 1_024 else {
+                throw LocalToolError.invalidArguments
+            }
+        }
 
         switch action {
         case .install:
             guard sourceKind != nil, let location, !location.isEmpty else {
                 throw LocalToolError.missingArgument("source_kind/location")
+            }
+        case .readSource:
+            guard let preparedToken, !preparedToken.isEmpty,
+                  let sourcePath, !sourcePath.isEmpty else {
+                throw LocalToolError.missingArgument("prepared_token/source_path")
+            }
+        case .installNative:
+            guard let preparedToken, !preparedToken.isEmpty, nativeManifest != nil else {
+                throw LocalToolError.missingArgument("prepared_token/native_manifest")
+            }
+        case .installISH:
+            guard let preparedToken, !preparedToken.isEmpty else {
+                throw LocalToolError.missingArgument("prepared_token")
             }
         case .enable, .disable, .uninstall:
             guard let id, !id.isEmpty else {
@@ -202,6 +248,9 @@ struct PluginMarketplaceTool: LocalAgentTool {
             replace: replace,
             forceRefresh: forceRefresh,
             includeNPM: includeNPM,
+            preparedToken: preparedToken,
+            sourcePath: sourcePath,
+            nativeManifest: nativeManifest,
             query: query,
             offset: offset,
             limit: limit

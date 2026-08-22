@@ -89,6 +89,10 @@ private final class ISHCommandConsoleViewModel: ObservableObject {
                     sessionID: sessionID,
                     command: command,
                     workspaceURL: workspaceURL,
+                    policy: ISHSandboxExecutionPolicy(
+                        mode: .dangerFullAccess,
+                        workspaceRoot: workspaceURL
+                    ),
                     onOutput: { [weak self] chunk in
                         await self?.enqueue(chunk, for: recordID)
                     }

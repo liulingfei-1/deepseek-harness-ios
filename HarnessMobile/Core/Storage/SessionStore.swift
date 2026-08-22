@@ -88,6 +88,12 @@ struct ConversationCheckpoint: Sendable, Equatable {
     }
 }
 
+enum ConversationSessionTitleSource: Codable, Sendable, Equatable {
+    case fallback
+    case provider(id: String, provider: String, model: String)
+    case user
+}
+
 struct ConversationSession: Codable, Sendable, Equatable, Identifiable {
     let id: UUID
     var title: String
@@ -97,6 +103,7 @@ struct ConversationSession: Codable, Sendable, Equatable, Identifiable {
     let createdAt: Date
     var updatedAt: Date
     var revision: Int
+    var titleSource: ConversationSessionTitleSource?
     var archivedAt: Date?
     let forkedFromSessionID: UUID?
 
@@ -109,6 +116,7 @@ struct ConversationSession: Codable, Sendable, Equatable, Identifiable {
         createdAt: Date,
         updatedAt: Date,
         revision: Int,
+        titleSource: ConversationSessionTitleSource? = nil,
         archivedAt: Date? = nil,
         forkedFromSessionID: UUID? = nil
     ) {
@@ -120,6 +128,7 @@ struct ConversationSession: Codable, Sendable, Equatable, Identifiable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.revision = revision
+        self.titleSource = titleSource
         self.archivedAt = archivedAt
         self.forkedFromSessionID = forkedFromSessionID
     }
@@ -135,7 +144,7 @@ struct ConversationSession: Codable, Sendable, Equatable, Identifiable {
         ConversationSessionSummary(
             id: id,
             title: title,
-            messageCount: messages.count,
+            messageCount: messages.lazy.filter(\.isChatVisible).count,
             createdAt: createdAt,
             updatedAt: updatedAt,
             revision: revision,
@@ -391,9 +400,10 @@ actor SessionStore {
                     session.title,
                     query: normalizedQuery
                 )
-                let messageMatch = session.messages.reversed().lazy.compactMap { message in
-                    Self.messageSearchMatch(message, query: normalizedQuery)
-                }.first
+                let messageMatch = session.messages.reversed().lazy
+                    .filter(\.isChatVisible)
+                    .compactMap { Self.messageSearchMatch($0, query: normalizedQuery) }
+                    .first
                 guard titleMatched || messageMatch != nil else { return nil }
                 return ConversationSessionSearchResult(
                     session: session.summary,
@@ -419,7 +429,9 @@ actor SessionStore {
 
     @discardableResult
     func createSession(
+        id: UUID = UUID(),
         title: String = "新会话",
+        titleSource: ConversationSessionTitleSource? = nil,
         workState: ConversationWorkState = ConversationWorkState(),
         controlState: ConversationControlState = ConversationControlState(),
         makeActive: Bool = true
@@ -427,15 +439,17 @@ actor SessionStore {
         var snapshot = try readSnapshot()
         let now = Date.now
         let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedTitle = normalizedTitle.isEmpty ? "新会话" : normalizedTitle
         let session = ConversationSession(
-            id: UUID(),
-            title: normalizedTitle.isEmpty ? "新会话" : normalizedTitle,
+            id: id,
+            title: resolvedTitle,
             messages: [],
             workState: workState,
             controlState: controlState,
             createdAt: now,
             updatedAt: now,
-            revision: 0
+            revision: 0,
+            titleSource: titleSource ?? (resolvedTitle == "新会话" ? .fallback : .user)
         )
         snapshot.sessions.append(session)
         if makeActive || snapshot.activeSessionID == nil {
@@ -462,7 +476,11 @@ actor SessionStore {
     }
 
     @discardableResult
-    func renameSession(id: UUID, title: String) throws -> ConversationSession {
+    func renameSession(
+        id: UUID,
+        title: String,
+        source: ConversationSessionTitleSource = .user
+    ) throws -> ConversationSession {
         var snapshot = try readSnapshot()
         guard let index = snapshot.sessions.firstIndex(where: { $0.id == id }) else {
             throw SessionStoreError.sessionNotFound(id)
@@ -473,6 +491,7 @@ actor SessionStore {
         }
         let now = Date.now
         snapshot.sessions[index].title = String(normalizedTitle.prefix(80))
+        snapshot.sessions[index].titleSource = source
         snapshot.sessions[index].updatedAt = now
         snapshot.sessions[index].revision += 1
         snapshot.updatedAt = now
@@ -826,6 +845,8 @@ actor SessionStore {
                 isToolError: message.isToolError,
                 isIncomplete: message.isIncomplete,
                 toolEvents: message.toolEvents.map(forkToolEvent),
+                source: message.source,
+                imageAttachments: message.imageAttachments,
                 createdAt: message.createdAt
             )
         }
@@ -930,7 +951,7 @@ actor SessionStore {
             ?? compact.endIndex
         let prefix = start == compact.startIndex ? "" : "…"
         let suffix = end == compact.endIndex ? "" : "…"
-        return prefix + compact[start..<end] + suffix
+        return prefix + String(compact[start..<end]) + suffix
     }
 }
 

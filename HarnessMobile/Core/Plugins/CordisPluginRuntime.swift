@@ -356,6 +356,23 @@ struct CordisPluginContext: Sendable {
         try await runtime.bail(event, input: input, target: target)
     }
 
+    /// Invoke a plugin-defined waterfall from an active plugin context. This is
+    /// the consumer-side counterpart to `intercept` and keeps optional policy
+    /// plugins decoupled from the service or tool that emits the decision point.
+    func waterfall<Input: Sendable, Output: Sendable>(
+        _ checkpoint: CordisCheckpointKey<Input, Output>,
+        input: Input,
+        target: CordisDispatchTarget = .global,
+        default defaultHandler: @escaping @Sendable () async throws -> Output
+    ) async throws -> Output {
+        try await runtime.run(
+            checkpoint,
+            input: input,
+            target: target,
+            default: defaultHandler
+        )
+    }
+
     @discardableResult
     func intercept<Input: Sendable, Output: Sendable>(
         _ checkpoint: CordisCheckpointKey<Input, Output>,

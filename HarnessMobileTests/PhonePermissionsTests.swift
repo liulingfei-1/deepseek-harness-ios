@@ -9,6 +9,7 @@ final class PhonePermissionsTests: XCTestCase {
     func testRefreshQueriesStatusesWithoutRequestingPermissions() async {
         let provider = PermissionStatusProviderFake(statuses: [
             DevicePermissionSnapshot(capability: .contacts, status: .authorized),
+            DevicePermissionSnapshot(capability: .healthKit, status: .systemManaged),
             DevicePermissionSnapshot(capability: .nfc, status: .sessionOnly),
         ])
         let center = DevicePermissionCenter(provider: provider)
@@ -24,6 +25,10 @@ final class PhonePermissionsTests: XCTestCase {
         XCTAssertEqual(
             snapshots.first(where: { $0.capability == .nfc })?.status,
             .sessionOnly
+        )
+        XCTAssertEqual(
+            snapshots.first(where: { $0.capability == .healthKit })?.status,
+            .systemManaged
         )
         XCTAssertEqual(
             snapshots.first(where: { $0.capability == .camera })?.status,

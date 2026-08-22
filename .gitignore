@@ -14,3 +14,4 @@ Vendor/UpstreamSources/
 Vendor/OpenMinisISH/Artifacts/
 Vendor/OpenMinisISH/downloads/
 /HarnessMobile [0-9]*.xcodeproj/
+.workbuddy/

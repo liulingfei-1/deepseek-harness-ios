@@ -1,0 +1,18 @@
+{
+  "source": {
+    "project": "deepseek-ai/deepseek-harness",
+    "tag": "dsh-v0.1.1-rc.2",
+    "commit": "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e"
+  },
+  "userMessage": "Inspect the workspace without rewriting the stable request prefix.",
+  "toolDescription": "Read one UTF-8 workspace file.",
+  "changedToolDescription": "Read one bounded UTF-8 workspace file.",
+  "instruction": {
+    "content": "<system-reminder>\nAdditional instructions from: AGENTS.md\n\nUse the project rule.\n</system-reminder>"
+  },
+  "expected": {
+    "unchanged": "identical",
+    "instructionAppend": "messagesAppended:1:workspaceInstructions",
+    "toolSchemaChange": "toolSchemaChanged"
+  }
+}

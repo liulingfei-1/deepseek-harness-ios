@@ -8,14 +8,19 @@ enum HarnessTraceRedactor {
         "refreshtoken",
         "secretkey",
         "clientsecret",
-        "password"
+        "password",
+        // Plugin process diagnostics may contain inherited environment values
+        // or provider-owned request dumps. Session-query surfaces never expose
+        // raw stderr, even when a plugin chose a harmless-looking field name.
+        "stderr"
     ]
 
     static func string(_ value: String, maximumUTF8Bytes: Int = 16 * 1_024) -> String {
         var redacted = value
         for pattern in [
             #"\bsk-[A-Za-z0-9_-]{12,}\b"#,
-            #"\bBearer\s+[A-Za-z0-9._~-]{12,}\b"#
+            #"\bBearer\s+[A-Za-z0-9._~-]{12,}\b"#,
+            #"(?i)\b(?:api[_-]?key|token|secret|password)\s*[:=]\s*[^\s,;]+"#
         ] {
             guard let expression = try? NSRegularExpression(
                 pattern: pattern,

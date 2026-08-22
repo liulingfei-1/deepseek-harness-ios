@@ -76,6 +76,7 @@ struct AppRootView: View {
                 onConversationOpened: openChat,
                 onOpenSettings: { navigationPath.append(.settings) },
                 onOpenTerminal: { navigationPath.append(.terminal) },
+                onOpenWorkspace: { navigationPath.append(.workspace) },
                 onOpenTools: { navigationPath.append(.tools) }
             )
             .navigationDestination(for: AppRoute.self) { route in

@@ -6,6 +6,7 @@ struct SessionsView: View {
     private let onConversationOpened: () -> Void
     private let onOpenSettings: () -> Void
     private let onOpenTerminal: () -> Void
+    private let onOpenWorkspace: () -> Void
     private let onOpenTools: () -> Void
 
     @State private var sessionToRename: ConversationSessionSummary?
@@ -17,16 +18,19 @@ struct SessionsView: View {
     @State private var isSearching = false
     @State private var collectionScope = SessionCollectionScope.active
     @State private var sortOrder = SessionSortOrder.updatedNewest
+    @State private var isWorkspaceExpanded = true
 
     init(
         onConversationOpened: @escaping () -> Void = {},
         onOpenSettings: @escaping () -> Void = {},
         onOpenTerminal: @escaping () -> Void = {},
+        onOpenWorkspace: @escaping () -> Void = {},
         onOpenTools: @escaping () -> Void = {}
     ) {
         self.onConversationOpened = onConversationOpened
         self.onOpenSettings = onOpenSettings
         self.onOpenTerminal = onOpenTerminal
+        self.onOpenWorkspace = onOpenWorkspace
         self.onOpenTools = onOpenTools
     }
 
@@ -36,6 +40,17 @@ struct SessionsView: View {
                 if let errorMessage = model.errorMessage {
                     SessionErrorSection(message: errorMessage)
                 }
+
+                WorkspaceHierarchySection(
+                    isExpanded: $isWorkspaceExpanded,
+                    files: model.workspaceFiles,
+                    mounts: model.workspaceMounts,
+                    activeSessionTitle: model.sessions.first(where: {
+                        $0.id == model.activeSessionID
+                    })?.title,
+                    isRunning: model.isRunning,
+                    onOpenWorkspace: onOpenWorkspace
+                )
 
                 if visibleSessions.isEmpty {
                     emptyState
@@ -241,6 +256,7 @@ struct SessionsView: View {
         Section(title) {
             ForEach(sessions) { session in
                 sessionRow(session)
+                    .padding(.leading, 12)
             }
         }
     }
@@ -295,6 +311,12 @@ struct SessionsView: View {
             } label: {
                 Label("重命名", systemImage: "pencil")
             }
+
+            Button {
+                regenerateConversationTitle(session)
+            } label: {
+                Label("重新生成标题", systemImage: "text.badge.star")
+            }
             .tint(.blue)
         }
         .contextMenu {
@@ -324,11 +346,25 @@ struct SessionsView: View {
                 Label("重命名", systemImage: "pencil")
             }
 
+            Button {
+                regenerateConversationTitle(session)
+            } label: {
+                Label("重新生成标题", systemImage: "text.badge.star")
+            }
+
             Button(role: .destructive) {
                 requestDeletion(of: session)
             } label: {
                 Label("删除", systemImage: "trash")
             }
+        }
+    }
+
+    private func regenerateConversationTitle(_ session: ConversationSessionSummary) {
+        operation = .titling(session.id)
+        Task { @MainActor in
+            await model.regenerateConversationTitle(id: session.id)
+            operation = nil
         }
     }
 
@@ -509,6 +545,143 @@ struct SessionsView: View {
     }
 }
 
+private struct WorkspaceHierarchySection: View {
+    @Binding var isExpanded: Bool
+    let files: [WorkspaceStore.FileEntry]
+    let mounts: [WorkspaceStore.MountSnapshot]
+    let activeSessionTitle: String?
+    let isRunning: Bool
+    let onOpenWorkspace: () -> Void
+
+    var body: some View {
+        Section("Workspace") {
+            DisclosureGroup(isExpanded: $isExpanded) {
+                if let activeSessionTitle {
+                    hierarchyRow(
+                        title: activeSessionTitle,
+                        detail: isRunning ? "当前会话 · Agent 运行中" : "当前会话 · 等待输入",
+                        systemImage: isRunning ? "waveform" : "bubble.left",
+                        tint: isRunning ? .green : .blue,
+                        depth: 1
+                    )
+                }
+
+                Button(action: onOpenWorkspace) {
+                    hierarchyRow(
+                        title: "文件",
+                        detail: "\(files.count) 个本机文件",
+                        systemImage: "folder",
+                        tint: .orange,
+                        depth: 1,
+                        showsChevron: true
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("workspace-hierarchy-files")
+
+                ForEach(mounts.prefix(4)) { mount in
+                    hierarchyRow(
+                        title: mount.name,
+                        detail: "\(mount.effectiveWritable ? "读写" : "只读") · \(mountStatusTitle(mount.status))",
+                        systemImage: mountStatusIcon(mount.status),
+                        tint: mountStatusColor(mount.status),
+                        depth: 2
+                    )
+                }
+
+                if mounts.count > 4 {
+                    Text("另有 \(mounts.count - 4) 个挂载目录")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 52)
+                }
+
+                Button(action: onOpenWorkspace) {
+                    Label("打开完整工作区", systemImage: "arrow.up.forward.app")
+                        .font(.subheadline.weight(.medium))
+                        .padding(.leading, 28)
+                }
+                .accessibilityIdentifier("workspace-hierarchy-open")
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "folder.fill")
+                        .foregroundStyle(.orange)
+                        .frame(width: 38, height: 38)
+                        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("/workspace")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(.primary)
+                        Text("\(files.count) 个文件 · \(mounts.count) 个挂载 · \(isRunning ? "正在运行" : "本机就绪")")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                .accessibilityIdentifier("workspace-hierarchy-root")
+            }
+        }
+    }
+
+    private func hierarchyRow(
+        title: String,
+        detail: String,
+        systemImage: String,
+        tint: Color,
+        depth: Int,
+        showsChevron: Bool = false
+    ) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .foregroundStyle(tint)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 6)
+            if showsChevron {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.leading, CGFloat(depth) * 12)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+
+    private func mountStatusTitle(_ status: WorkspaceStore.MountStatus) -> String {
+        switch status {
+        case .active: "已连接"
+        case .staleBookmark: "需重新授权"
+        case .permissionDenied: "权限被拒绝"
+        case .unavailable: "不可用"
+        }
+    }
+
+    private func mountStatusIcon(_ status: WorkspaceStore.MountStatus) -> String {
+        switch status {
+        case .active: "externaldrive.badge.checkmark"
+        case .staleBookmark: "externaldrive.badge.exclamationmark"
+        case .permissionDenied, .unavailable: "externaldrive.badge.xmark"
+        }
+    }
+
+    private func mountStatusColor(_ status: WorkspaceStore.MountStatus) -> Color {
+        switch status {
+        case .active: .green
+        case .staleBookmark: .orange
+        case .permissionDenied, .unavailable: .red
+        }
+    }
+}
+
 private enum SessionOperation: Equatable {
     case creating
     case switching(UUID)
@@ -516,13 +689,14 @@ private enum SessionOperation: Equatable {
     case forking(UUID)
     case archiving(UUID)
     case restoring(UUID)
+    case titling(UUID)
 
     var sessionID: UUID? {
         switch self {
         case .creating:
             nil
         case let .switching(id), let .deleting(id), let .forking(id),
-             let .archiving(id), let .restoring(id):
+             let .archiving(id), let .restoring(id), let .titling(id):
             id
         }
     }

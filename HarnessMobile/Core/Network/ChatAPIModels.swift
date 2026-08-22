@@ -37,6 +37,7 @@ struct ChatCompletionsRequest: Encodable, Sendable {
 struct ChatRequestMessage: Encodable, Sendable {
     let role: String
     let content: String?
+    let imageParts: [ImagePart]?
     let reasoningContent: String?
     let toolCalls: [ChatRequestToolCall]?
     let toolCallID: String?
@@ -47,6 +48,65 @@ struct ChatRequestMessage: Encodable, Sendable {
         case reasoningContent = "reasoning_content"
         case toolCalls = "tool_calls"
         case toolCallID = "tool_call_id"
+    }
+
+    struct ImagePart: Encodable, Sendable {
+        let type: String
+        let text: String?
+        let imageURL: ImageURL?
+        let fileID: String?
+
+        struct ImageURL: Encodable, Sendable {
+            let url: String
+        }
+
+        static func text(_ value: String) -> ImagePart {
+            ImagePart(type: "text", text: value, imageURL: nil, fileID: nil)
+        }
+
+        static func image(url: String) -> ImagePart {
+            ImagePart(type: "image_url", text: nil, imageURL: .init(url: url), fileID: nil)
+        }
+
+        static func file(id: String) -> ImagePart {
+            ImagePart(type: "file", text: nil, imageURL: nil, fileID: id)
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case type
+            case text
+            case imageURL = "image_url"
+            case fileID = "file_id"
+        }
+    }
+
+    init(
+        role: String,
+        content: String?,
+        reasoningContent: String?,
+        toolCalls: [ChatRequestToolCall]?,
+        toolCallID: String?,
+        imageParts: [ImagePart]? = nil
+    ) {
+        self.role = role
+        self.content = content
+        self.reasoningContent = reasoningContent
+        self.toolCalls = toolCalls
+        self.toolCallID = toolCallID
+        self.imageParts = imageParts
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        if let imageParts, !imageParts.isEmpty {
+            try container.encode(imageParts, forKey: .content)
+        } else {
+            try container.encodeIfPresent(content, forKey: .content)
+        }
+        try container.encode(role, forKey: .role)
+        try container.encodeIfPresent(reasoningContent, forKey: .reasoningContent)
+        try container.encodeIfPresent(toolCalls, forKey: .toolCalls)
+        try container.encodeIfPresent(toolCallID, forKey: .toolCallID)
     }
 }
 
@@ -117,6 +177,7 @@ struct ChatStreamChunk: Decodable, Sendable {
         let completionTokens: Int?
         let totalTokens: Int?
         let promptCacheHitTokens: Int?
+        let promptCacheMissTokens: Int?
         let promptTokensDetails: PromptTokensDetails?
         let completionTokensDetails: CompletionTokensDetails?
 
@@ -125,6 +186,7 @@ struct ChatStreamChunk: Decodable, Sendable {
             case completionTokens = "completion_tokens"
             case totalTokens = "total_tokens"
             case promptCacheHitTokens = "prompt_cache_hit_tokens"
+            case promptCacheMissTokens = "prompt_cache_miss_tokens"
             case promptTokensDetails = "prompt_tokens_details"
             case completionTokensDetails = "completion_tokens_details"
         }
@@ -165,6 +227,7 @@ enum ChatWireSerializer {
             messages: makeMessages(
                 systemPrompt: request.systemPrompt,
                 messages: request.messages,
+                imagePayloads: request.imagePayloads,
                 replayEmptyReasoningForToolCalls: configuration.requiresDeepSeekReasoningReplay
             ),
             tools: request.tools.isEmpty ? nil : request.tools.map {
@@ -185,6 +248,7 @@ enum ChatWireSerializer {
     static func makeMessages(
         systemPrompt: String,
         messages: [AgentMessage],
+        imagePayloads: [ModelImagePayload] = [],
         replayEmptyReasoningForToolCalls: Bool = false
     ) -> [ChatRequestMessage] {
         var result = [
@@ -197,17 +261,37 @@ enum ChatWireSerializer {
             )
         ]
         result.reserveCapacity(messages.count + 1)
+        let payloads = Dictionary(uniqueKeysWithValues: imagePayloads.map { ($0.id, $0) })
 
         for message in messages {
             switch message.role {
             case .user:
+                let attachments = message.imageAttachments.compactMap { ref -> ChatRequestMessage.ImagePart? in
+                    guard let payload = payloads[ref.id] else { return nil }
+                    if let fileID = payload.fileID, !fileID.isEmpty {
+                        return .file(id: fileID)
+                    }
+                    return .image(url: "data:\(payload.mimeType);base64,\(payload.data.base64EncodedString())")
+                }
+                let omittedCount = max(0, message.imageAttachments.count - attachments.count)
+                let parts: [ChatRequestMessage.ImagePart]?
+                if message.imageAttachments.isEmpty {
+                    parts = nil
+                } else {
+                    parts = [.text(message.content)]
+                        + attachments
+                        + (omittedCount > 0
+                            ? [.text("[\(omittedCount) earlier image(s) omitted because the request image limit was reached.]")]
+                            : [])
+                }
                 result.append(
                     ChatRequestMessage(
                         role: "user",
                         content: message.content,
                         reasoningContent: nil,
                         toolCalls: nil,
-                        toolCallID: nil
+                        toolCallID: nil,
+                        imageParts: parts
                     )
                 )
             case .assistant:
@@ -221,10 +305,11 @@ enum ChatWireSerializer {
                     ChatRequestMessage(
                         role: "assistant",
                         content: message.content,
-                        reasoningContent: message.toolCalls.isEmpty
-                            ? nil
-                            : (message.reasoning
-                                ?? (replayEmptyReasoningForToolCalls ? "" : nil)),
+                        reasoningContent: message.reasoning.flatMap { reasoning in
+                            reasoning.isEmpty ? nil : reasoning
+                        } ?? (!message.toolCalls.isEmpty && replayEmptyReasoningForToolCalls
+                            ? ""
+                            : nil),
                         toolCalls: toolCalls,
                         toolCallID: nil
                     )
@@ -252,13 +337,15 @@ enum ChatWireSerializer {
             return nil
         case .off:
             return .init(type: "disabled")
-        case .high, .max:
+        case .low, .high, .max:
             return .init(type: "enabled")
         }
     }
 
     private static func makeReasoningEffort(_ mode: ReasoningMode) -> String? {
         switch mode {
+        case .low:
+            return "low"
         case .high:
             return "high"
         case .max:

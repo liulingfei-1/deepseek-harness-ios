@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "project": "deepseek-ai/deepseek-harness",
+    "tag": "dsh-v0.1.1-rc.2",
+    "commit": "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
+    "contracts": [
+      "packages/subagent/subagent/src/descriptor.ts",
+      "packages/subagent/subagent/src/types.ts",
+      "packages/jobs/jobs/src/types.ts"
+    ]
+  },
+  "subagent": {
+    "descriptor": {
+      "version": 2,
+      "mode": "continuable",
+      "provider": "spawn",
+      "label": "audit child",
+      "agentProvider": "deepseek",
+      "agentModel": "deepseek-v4-flash",
+      "persona": "Review changes carefully.",
+      "toolFilter": {
+        "allow": ["workspace_read_text", "report"],
+        "deny": ["shell_execute"]
+      }
+    },
+    "mobileProjection": {
+      "id": "55555555-5555-5555-5555-555555555555",
+      "parentSession": "44444444-4444-4444-4444-444444444444",
+      "label": "audit child",
+      "model": "deepseek-v4-flash",
+      "contextMode": "fork-completed-parent",
+      "delegationDepth": 1,
+      "maximumDepth": 3,
+      "persona": "Review changes carefully.",
+      "toolFilter": {
+        "allow": ["workspace_read_text", "report"],
+        "deny": ["shell_execute"]
+      },
+      "reportDelivery": "wakeup",
+      "status": "completed"
+    }
+  },
+  "job": {
+    "snapshot": {
+      "id": "bash-1",
+      "kind": "bash",
+      "label": "make test",
+      "outputLimitBytes": 114688,
+      "ownerSession": "44444444-4444-4444-4444-444444444444",
+      "status": "completed",
+      "detail": "exit code: 0",
+      "startedAt": 1777777777000,
+      "finishedAt": 1777777780000,
+      "reported": false
+    },
+    "completionNotice": {
+      "id": "bash-1",
+      "ownerSession": "44444444-4444-4444-4444-444444444444",
+      "kind": "bash",
+      "label": "make test",
+      "status": "completed",
+      "detail": "exit code: 0",
+      "finishedAt": 1777777780000
+    },
+    "expectedCompletionText": "background job bash-1 (bash: make test) finished [status: completed, exit code: 0]. Read its output with job_output."
+  }
+}

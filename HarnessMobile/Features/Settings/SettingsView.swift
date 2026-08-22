@@ -38,6 +38,11 @@ struct SettingsView: View {
 
             Section("系统能力") {
                 NavigationLink {
+                    AgentProviderBundlesView()
+                } label: {
+                    Label("Agent 编排 Bundle", systemImage: "arrow.triangle.branch")
+                }
+                NavigationLink {
                     PhonePermissionsView()
                 } label: {
                     Label("手机权限", systemImage: "hand.raised")
@@ -52,17 +57,16 @@ struct SettingsView: View {
                 } label: {
                     Label("Cordis 插件", systemImage: "puzzlepiece.extension")
                 }
-                NavigationLink {
-                    ToolApprovalSettingsView()
-                } label: {
-                    HStack {
-                        Label("工具授权", systemImage: "checkmark.shield")
-                        Spacer()
-                        Text("\(model.trustedToolApprovals.count)")
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
+                    NavigationLink {
+                        ToolApprovalSettingsView()
+                    } label: {
+                        HStack {
+                            Label("工具授权", systemImage: "checkmark.shield")
+                            Spacer()
+                            Text("仅本次")
+                                .foregroundStyle(.secondary)
+                        }
                     }
-                }
                 LabeledContent("本机工具", value: "\(ProductionToolCatalog.approvedNames.count) 项")
                 LabeledContent("快捷指令", value: "已启用")
             }
@@ -162,6 +166,25 @@ private struct DiagnosticLogView: View {
 
                 if let diagnostics = model.ishPluginHostDiagnostics {
                     LabeledContent("等待中的 RPC", value: "\(diagnostics.pendingRequestCount)")
+                    LabeledContent(
+                        "待写入 stdin",
+                        value: ByteCountFormatter.string(
+                            fromByteCount: Int64(diagnostics.outboundQueuedBytes),
+                            countStyle: .memory
+                        )
+                    )
+                    LabeledContent(
+                        "stdin 写入",
+                        value: diagnostics.outboundWriteInFlight ? "进行中" : "空闲"
+                    )
+                    LabeledContent("stdin 拒绝次数", value: "\(diagnostics.rejectedWriteCount)")
+                    if let failure = diagnostics.lastTransportFailure {
+                        LabeledContent("最近传输错误") {
+                            Text(failure)
+                                .font(.caption.monospaced())
+                                .multilineTextAlignment(.trailing)
+                        }
+                    }
                     if !diagnostics.stderrTail.isEmpty {
                         DisclosureGroup("stderr 最近输出") {
                             Text(diagnostics.stderrTail)
@@ -257,31 +280,25 @@ private struct ToolApprovalSettingsView: View {
 
     var body: some View {
         Form {
-            if model.trustedToolApprovals.isEmpty {
-                Section {
-                    ContentUnavailableView(
-                        "尚未记录设备授权",
-                        systemImage: "checkmark.shield",
-                        description: Text("本机工具首次运行会自动记录当前模型 API 的设备级授权；系统隐私权限和 Cordis 检查仍独立生效。")
-                    )
-                }
-            } else {
+            Section {
+                ContentUnavailableView(
+                    "已记住的工具授权",
+                    systemImage: "checkmark.shield",
+                    description: Text("只有你在首次弹窗中明确选择“始终允许”才会保存。iOS 系统隐私权限仍由系统单独管理。")
+                )
+            }
+            if !model.trustedToolApprovals.isEmpty {
                 Section {
                     ForEach(model.trustedToolApprovals) { grant in
                         ToolApprovalGrantRow(grant: grant) {
                             model.revokeToolApproval(id: grant.id)
                         }
                     }
-                } header: {
-                    Text("已记住")
-                } footer: {
-                    Text("“本机工具”授权会覆盖当前模型 API 下的所有本机工具和风险级别。系统隐私权限、目标 App 是否存在以及 Cordis 检查仍由系统或插件决定。")
-                }
-
-                Section {
-                    Button("撤销全部授权", role: .destructive) {
+                    Button("撤销全部工具授权", role: .destructive) {
                         isRevokeAllConfirmationPresented = true
                     }
+                } header: {
+                    Text("长期授权")
                 }
             }
         }
@@ -295,7 +312,7 @@ private struct ToolApprovalSettingsView: View {
                 model.revokeAllToolApprovals()
             }
         } message: {
-            Text("之后的匹配工具调用会按当前无拦截策略自动记录新的设备授权。")
+            Text("删除后，下次命中相同范围的工具调用会再次询问。")
         }
     }
 }

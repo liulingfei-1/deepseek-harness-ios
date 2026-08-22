@@ -6,6 +6,47 @@ enum AgentRole: String, Codable, Sendable {
     case tool
 }
 
+/// Provider/model provenance plus adapter-private JSON needed to replay one
+/// assistant response. This mirrors the upstream model message source while
+/// keeping the envelope open for signed-thinking and future provider state.
+struct AgentModelSource: Sendable, Equatable {
+    let provider: String
+    let model: String
+    let replayState: JSONValue?
+
+    init(provider: String, model: String, replayState: JSONValue? = nil) {
+        self.provider = provider
+        self.model = model
+        self.replayState = replayState
+    }
+
+    init?(jsonValue: JSONValue?) {
+        guard let object = jsonValue?.objectValue,
+              object["kind"] == .string("model"),
+              let provider = object["provider"]?.stringValue,
+              !provider.isEmpty,
+              let model = object["model"]?.stringValue,
+              !model.isEmpty else {
+            return nil
+        }
+        self.provider = provider
+        self.model = model
+        replayState = object["replayState"]
+    }
+
+    var jsonValue: JSONValue {
+        var object: [String: JSONValue] = [
+            "kind": .string("model"),
+            "provider": .string(provider),
+            "model": .string(model)
+        ]
+        if let replayState {
+            object["replayState"] = replayState
+        }
+        return .object(object)
+    }
+}
+
 enum MessageFeedbackRating: String, Codable, Sendable, Equatable, CaseIterable {
     case positive
     case negative
@@ -136,6 +177,16 @@ struct AgentToolEvent: Identifiable, Codable, Sendable, Equatable {
     }
 
     mutating func appendOutput(_ chunk: AgentToolOutputChunk) {
+        Self.appendOutput(chunk, to: &output)
+    }
+
+    /// Shared bounded reducer for live presentation batches and durable tool
+    /// events. Keeping one reducer prevents the throttled UI path from having
+    /// different truncation or channel-merging semantics.
+    static func appendOutput(
+        _ chunk: AgentToolOutputChunk,
+        to output: inout [AgentToolOutputChunk]
+    ) {
         guard !chunk.text.isEmpty else { return }
         let usedBytes = output.reduce(into: 0) { total, item in
             total += item.text.utf8.count
@@ -169,6 +220,10 @@ struct AgentToolEvent: Identifiable, Codable, Sendable, Equatable {
                 )
             )
         }
+    }
+
+    func containsRecursively(callID candidate: String) -> Bool {
+        callID == candidate || children.contains { $0.containsRecursively(callID: candidate) }
     }
 
     mutating func replaceRecursively(_ replacement: AgentToolEvent) -> Bool {
@@ -237,7 +292,48 @@ struct AgentToolEvent: Identifiable, Codable, Sendable, Equatable {
     }
 }
 
+struct AgentImageAttachmentRef: Codable, Sendable, Equatable, Hashable {
+    let id: UUID
+    let path: String
+    let mimeType: String
+    let byteCount: Int
+
+    init(id: UUID = UUID(), path: String, mimeType: String, byteCount: Int) {
+        self.id = id
+        self.path = path
+        self.mimeType = mimeType
+        self.byteCount = byteCount
+    }
+}
+
+/// Request-local image bytes. This is intentionally not part of AgentMessage
+/// persistence or trace payloads; the durable message stores only a workspace
+/// attachment reference.
+struct ModelImagePayload: Sendable, Equatable {
+    let id: UUID
+    let mimeType: String
+    let data: Data
+    /// Provider-owned file reference, when the request was prepared through a
+    /// provider Files API. It is intentionally request-local and never
+    /// persisted in AgentMessage or trace state.
+    let fileID: String?
+
+    init(
+        id: UUID,
+        mimeType: String,
+        data: Data,
+        fileID: String? = nil
+    ) {
+        self.id = id
+        self.mimeType = mimeType
+        self.data = data
+        self.fileID = fileID
+    }
+}
+
 struct AgentMessage: Identifiable, Codable, Sendable, Equatable {
+    static let runtimeContextPluginID = "@deepseek-ai/dsh-system-prompt"
+
     let id: UUID
     let role: AgentRole
     var content: String
@@ -249,6 +345,8 @@ struct AgentMessage: Identifiable, Codable, Sendable, Equatable {
     var isIncomplete: Bool
     var toolEvents: [AgentToolEvent]
     var feedback: MessageFeedback?
+    var source: JSONValue?
+    var imageAttachments: [AgentImageAttachmentRef]
     let createdAt: Date
 
     private enum CodingKeys: String, CodingKey {
@@ -263,6 +361,8 @@ struct AgentMessage: Identifiable, Codable, Sendable, Equatable {
         case isIncomplete
         case toolEvents
         case feedback
+        case source
+        case imageAttachments
         case createdAt
     }
 
@@ -278,6 +378,8 @@ struct AgentMessage: Identifiable, Codable, Sendable, Equatable {
         isIncomplete: Bool = false,
         toolEvents: [AgentToolEvent] = [],
         feedback: MessageFeedback? = nil,
+        source: JSONValue? = nil,
+        imageAttachments: [AgentImageAttachmentRef] = [],
         createdAt: Date = .now
     ) {
         self.id = id
@@ -291,6 +393,8 @@ struct AgentMessage: Identifiable, Codable, Sendable, Equatable {
         self.isIncomplete = isIncomplete
         self.toolEvents = toolEvents
         self.feedback = feedback
+        self.source = source
+        self.imageAttachments = imageAttachments
         self.createdAt = createdAt
     }
 
@@ -307,6 +411,11 @@ struct AgentMessage: Identifiable, Codable, Sendable, Equatable {
         isIncomplete = try container.decodeIfPresent(Bool.self, forKey: .isIncomplete) ?? false
         toolEvents = try container.decodeIfPresent([AgentToolEvent].self, forKey: .toolEvents) ?? []
         feedback = try container.decodeIfPresent(MessageFeedback.self, forKey: .feedback)
+        source = try container.decodeIfPresent(JSONValue.self, forKey: .source)
+        imageAttachments = try container.decodeIfPresent(
+            [AgentImageAttachmentRef].self,
+            forKey: .imageAttachments
+        ) ?? []
         createdAt = try container.decode(Date.self, forKey: .createdAt)
     }
 
@@ -323,11 +432,34 @@ struct AgentMessage: Identifiable, Codable, Sendable, Equatable {
         try container.encode(isIncomplete, forKey: .isIncomplete)
         try container.encode(toolEvents, forKey: .toolEvents)
         try container.encodeIfPresent(feedback, forKey: .feedback)
+        try container.encodeIfPresent(source, forKey: .source)
+        try container.encode(imageAttachments, forKey: .imageAttachments)
         try container.encode(createdAt, forKey: .createdAt)
     }
 
-    static func user(_ text: String) -> AgentMessage {
-        AgentMessage(role: .user, content: text)
+    var isRuntimeContextSnapshot: Bool {
+        guard role == .user,
+              let envelope = source?.objectValue else { return false }
+        return envelope["kind"] == .string("plugin")
+            && envelope["plugin"] == .string(Self.runtimeContextPluginID)
+    }
+
+    /// Context messages are durable and model-visible but must not masquerade
+    /// as chat rows written by the user. Direct user messages either have no
+    /// source (legacy/local snapshot) or the canonical `{ kind: "user" }`
+    /// source emitted by the trajectory.
+    var isHiddenContextMessage: Bool {
+        guard role == .user, let envelope = source?.objectValue else { return false }
+        return envelope["kind"] != .string("user")
+    }
+
+    var isChatVisible: Bool { !isHiddenContextMessage }
+
+    static func user(
+        _ text: String,
+        imageAttachments: [AgentImageAttachmentRef] = []
+    ) -> AgentMessage {
+        AgentMessage(role: .user, content: text, imageAttachments: imageAttachments)
     }
 
     static func assistant(
@@ -335,7 +467,8 @@ struct AgentMessage: Identifiable, Codable, Sendable, Equatable {
         reasoning: String? = nil,
         toolCalls: [AgentToolCall] = [],
         toolEvents: [AgentToolEvent] = [],
-        isIncomplete: Bool = false
+        isIncomplete: Bool = false,
+        source: JSONValue? = nil
     ) -> AgentMessage {
         AgentMessage(
             role: .assistant,
@@ -343,8 +476,13 @@ struct AgentMessage: Identifiable, Codable, Sendable, Equatable {
             reasoning: reasoning,
             toolCalls: toolCalls,
             isIncomplete: isIncomplete,
-            toolEvents: toolEvents
+            toolEvents: toolEvents,
+            source: source
         )
+    }
+
+    var modelSource: AgentModelSource? {
+        AgentModelSource(jsonValue: source)
     }
 
     static func tool(
@@ -359,6 +497,60 @@ struct AgentMessage: Identifiable, Codable, Sendable, Equatable {
             toolCallID: callID,
             toolName: name,
             isToolError: isError
+        )
+    }
+}
+
+struct ConversationRerunPreparation: Sendable, Equatable {
+    let messages: [AgentMessage]
+    let initialUserMessage: AgentMessage
+    let removedMessageCount: Int
+}
+
+enum ConversationRerunError: LocalizedError, Sendable, Equatable {
+    case messageNotFound
+    case notUserMessage
+    case emptyReplacement
+
+    var errorDescription: String? {
+        switch self {
+        case .messageNotFound:
+            "找不到要重新运行的消息。"
+        case .notUserMessage:
+            "只能从用户消息重新运行。"
+        case .emptyReplacement:
+            "编辑后的消息不能为空。"
+        }
+    }
+}
+
+enum ConversationRerunPlanner {
+    static func prepare(
+        messages: [AgentMessage],
+        messageID: UUID,
+        replacementText: String? = nil
+    ) throws -> ConversationRerunPreparation {
+        guard let index = messages.firstIndex(where: { $0.id == messageID }) else {
+            throw ConversationRerunError.messageNotFound
+        }
+        guard messages[index].role == .user else {
+            throw ConversationRerunError.notUserMessage
+        }
+
+        var selected = messages[index]
+        if let replacementText {
+            let trimmed = replacementText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                throw ConversationRerunError.emptyReplacement
+            }
+            selected.content = trimmed
+        }
+        var branch = Array(messages.prefix(index + 1))
+        branch[index] = selected
+        return ConversationRerunPreparation(
+            messages: branch,
+            initialUserMessage: selected,
+            removedMessageCount: messages.count - branch.count
         )
     }
 }

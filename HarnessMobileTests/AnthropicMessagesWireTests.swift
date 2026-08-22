@@ -7,6 +7,115 @@ import XCTest
 #endif
 
 final class AnthropicMessagesWireTests: XCTestCase {
+    func testSerializerPreservesUserImagesAsAnthropicBase64Blocks() throws {
+        let imageID = UUID()
+        let configuration = ModelProviderCatalog.applying(.anthropic, to: AgentConfiguration())
+        let request = ModelRequest(
+            configuration: configuration,
+            apiKey: "test-only",
+            systemPrompt: "system prompt",
+            messages: [
+                .user(
+                    "describe",
+                    imageAttachments: [
+                        AgentImageAttachmentRef(
+                            id: imageID,
+                            path: "Attachments/\(imageID.uuidString).png",
+                            mimeType: "image/png",
+                            byteCount: 3
+                        )
+                    ]
+                )
+            ],
+            tools: [],
+            imagePayloads: [
+                ModelImagePayload(
+                    id: imageID,
+                    mimeType: "image/png",
+                    data: Data([1, 2, 3])
+                )
+            ]
+        )
+
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: try AnthropicWireSerializer.encodeRequest(request))
+                as? [String: Any]
+        )
+        let messages = try XCTUnwrap(object["messages"] as? [[String: Any]])
+        let content = try XCTUnwrap(messages[0]["content"] as? [[String: Any]])
+        XCTAssertEqual(content.map { $0["type"] as? String }, ["text", "image"])
+        let source = try XCTUnwrap(content[1]["source"] as? [String: Any])
+        XCTAssertEqual(source["type"] as? String, "base64")
+        XCTAssertEqual(source["media_type"] as? String, "image/png")
+        XCTAssertEqual(source["data"] as? String, "AQID")
+    }
+
+    func testSerializerRejectsUnsupportedImagePlacementAndMIME() throws {
+        let imageID = UUID()
+        let reference = AgentImageAttachmentRef(
+            id: imageID,
+            path: "Attachments/\(imageID.uuidString).bin",
+            mimeType: "image/tiff",
+            byteCount: 3
+        )
+        let payload = ModelImagePayload(
+            id: imageID,
+            mimeType: "image/tiff",
+            data: Data([1, 2, 3])
+        )
+        XCTAssertThrowsError(
+            try AnthropicWireSerializer.makeMessages(
+                [.user("image", imageAttachments: [reference])],
+                imagePayloads: [payload]
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? AnthropicMessagesWireError,
+                .unsupportedImageMIME("image/tiff")
+            )
+        }
+
+        let assistant = AgentMessage(
+            role: .assistant,
+            content: "",
+            imageAttachments: [reference]
+        )
+        XCTAssertThrowsError(
+            try AnthropicWireSerializer.makeMessages([assistant], imagePayloads: [payload])
+        ) { error in
+            XCTAssertEqual(
+                error as? AnthropicMessagesWireError,
+                .unsupportedImageRole("assistant")
+            )
+        }
+    }
+
+    func testMissingBoundedImagePayloadBecomesVisibleOmissionMarker() throws {
+        let imageID = UUID()
+        let messages = try AnthropicWireSerializer.makeMessages([
+            .user(
+                "",
+                imageAttachments: [
+                    AgentImageAttachmentRef(
+                        id: imageID,
+                        path: "Attachments/\(imageID.uuidString).png",
+                        mimeType: "image/png",
+                        byteCount: 3
+                    )
+                ]
+            )
+        ])
+        let encoded = try JSONEncoder().encode(messages)
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [[String: Any]]
+        )
+        let content = try XCTUnwrap(object[0]["content"] as? [[String: Any]])
+        XCTAssertEqual(content[0]["type"] as? String, "text")
+        XCTAssertTrue(
+            (content[0]["text"] as? String)?.contains("1 earlier image") == true
+        )
+    }
+
     func testSerializerUsesMessagesContentBlocksAndGroupsToolResults() throws {
         let configuration = ModelProviderCatalog.applying(.anthropic, to: AgentConfiguration())
         let request = ModelRequest(
@@ -155,10 +264,21 @@ final class AnthropicMessagesWireTests: XCTestCase {
                 "{\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"busy\"}}"
             )
         ) { error in
-            guard case ModelClientError.streamError("busy") = error else {
+            guard case ModelClientError.providerStreamFailure(
+                code: "overloaded_error",
+                message: "busy"
+            ) = error else {
                 return XCTFail("Unexpected error: \(error)")
             }
         }
+
+        let failure = ModelRetryPolicy.failure(
+            for: ModelClientError.providerStreamFailure(
+                code: "overloaded_error",
+                message: "busy"
+            )
+        )
+        XCTAssertEqual(failure?.code, "SERVER")
 
         XCTAssertThrowsError(
             try decoder.decodeEvents(

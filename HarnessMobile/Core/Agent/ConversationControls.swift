@@ -63,6 +63,8 @@ enum QueuedInputDisposition: String, Codable, Sendable {
 }
 
 struct QueuedAgentInput: Identifiable, Codable, Sendable, Equatable {
+    static let maximumTextUTF8Bytes = 64 * 1_024
+
     let id: UUID
     var text: String
     var disposition: QueuedInputDisposition
@@ -75,7 +77,7 @@ struct QueuedAgentInput: Identifiable, Codable, Sendable, Equatable {
         createdAt: Date = .now
     ) throws {
         let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty, normalized.utf8.count <= 64 * 1_024 else {
+        guard !normalized.isEmpty, normalized.utf8.count <= Self.maximumTextUTF8Bytes else {
             throw ConversationControlError.invalidQueuedInput
         }
         self.id = id

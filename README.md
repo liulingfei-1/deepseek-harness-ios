@@ -50,6 +50,15 @@ DEVELOPER_DIR=/Users/liulingfei/Downloads/Xcode-beta.app/Contents/Developer \
 ./Scripts/audit-no-remote-execution.sh
 ```
 
+检查锁定的 DeepSeek Harness 与手机端工具/命令清单：
+
+```sh
+./Scripts/check-upstream-parity.sh
+```
+
+该检查只读 vendored checkout，不下载或执行上游插件；升级 lock 后应保存输出并逐项更新
+`Docs/DESKTOP_PARITY_REMEDIATION.md`。
+
 `project.yml` 是 XcodeGen 的工程真源；仓库同时保留生成后的 `.xcodeproj`，因此使用者无需安装 XcodeGen。
 
 ## 安全与产品限制
@@ -58,7 +67,7 @@ DEVELOPER_DIR=/Users/liulingfei/Downloads/Xcode-beta.app/Contents/Developer \
 - 文件或 OCR 文字只有在本地工具获批并执行后，才作为工具结果发给模型 API；图片字节本身不上传。
 - iOS 不能直接启动桌面式宿主子进程；本项目使用内嵌 iSH Linux guest 提供本机 `/bin/sh`，不会通过远程服务器模拟命令执行。
 - Cordis Host-half 插件已经可用；社区插件市场支持 awesome-dsh-plugin 目录、GitHub 仓库/子目录和本地 ZIP，并提供安装、默认禁用、启停、更新、卸载及缓存清理。安装在 iSH 内使用锁定依赖、禁用 npm lifecycle script，并在替换失败时回滚；Browser Client-half、原生二进制扩展和下载的 Swift/native code 仍会拒绝。模型动态定义的 Package、handler、service 和活动 Fiber 只保存在 Host 进程内，停止或重启 Host 后需要重新定义。
-- 当前不宣称覆盖 DeepSeek Harness 的 subagent、LSP、桌面持久交互式 PTY 或 workflow/worker 全部功能。
+- 当前不宣称覆盖 DeepSeek Harness 的 subagent 全部功能；手机端已支持受限本地子 Agent、持久 Jobs、父子树导航和 report 回传，LSP、桌面持久交互式 PTY 以及 workflow/worker 仍按清单逐项补齐。
 - Continued Processing 和实时活动都受 iOS 调度、过期与终止规则约束，不承诺永久常驻或精确定时；项目不使用假定位、静音音频、VoIP 或蓝牙冒充后台业务。
 
 架构与威胁边界见 [Docs/ARCHITECTURE.md](Docs/ARCHITECTURE.md)，开源来源见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

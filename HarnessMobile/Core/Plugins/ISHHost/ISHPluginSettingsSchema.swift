@@ -174,6 +174,22 @@ enum ISHPluginSettingsValue {
         guard !path.isEmpty else { return root != nil }
         return value(at: path, in: root) != nil
     }
+
+    static func merging(base: JSONValue, overrides: JSONValue) -> JSONValue {
+        guard case let .object(baseObject) = base,
+              case let .object(overrideObject) = overrides else {
+            return overrides
+        }
+        var result = baseObject
+        for (key, overrideValue) in overrideObject {
+            if let baseValue = result[key] {
+                result[key] = merging(base: baseValue, overrides: overrideValue)
+            } else {
+                result[key] = overrideValue
+            }
+        }
+        return .object(result)
+    }
 }
 
 extension ISHPluginSettingsNamespace {
@@ -196,6 +212,10 @@ extension ISHPluginSettingsNamespace {
 
 private enum ISHPluginSettingsSchemaParser {
     static func parse(_ schema: JSONValue) throws -> ISHPluginSettingsForm {
+        if case let .object(root) = schema,
+           root["type"] == .string("object") {
+            return try parseStandardJSONSchema(root)
+        }
         guard case let .object(envelope) = schema,
               let uid = envelope["uid"]?.schemaReference,
               case let .object(refs)? = envelope["refs"] else {
@@ -208,6 +228,88 @@ private enum ISHPluginSettingsSchemaParser {
             throw ISHPluginSettingsSchemaError.unsupportedType("root")
         }
         return ISHPluginSettingsForm(fields: fields)
+    }
+
+    private static func parseStandardJSONSchema(
+        _ root: [String: JSONValue]
+    ) throws -> ISHPluginSettingsForm {
+        let required = Set(root["required"]?.arrayValue?.compactMap(\.stringValue) ?? [])
+        let properties = root["properties"]?.objectValue ?? [:]
+        let fields = try properties.keys.sorted().compactMap { key in
+            guard case let .object(schema)? = properties[key] else {
+                throw ISHPluginSettingsSchemaError.malformedEnvelope
+            }
+            return try standardField(
+                schema,
+                path: [key],
+                required: required.contains(key)
+            )
+        }
+        return ISHPluginSettingsForm(fields: fields)
+    }
+
+    private static func standardField(
+        _ schema: [String: JSONValue],
+        path: [String],
+        required: Bool
+    ) throws -> ISHPluginSettingsField {
+        guard let type = schema["type"]?.stringValue else {
+            throw ISHPluginSettingsSchemaError.malformedEnvelope
+        }
+        let kind: ISHPluginSettingsField.Kind
+        if let enumValues = schema["enum"]?.arrayValue, !enumValues.isEmpty {
+            kind = .selection(enumValues.enumerated().map { index, value in
+                ISHPluginSettingsOption(
+                    id: "option-\(index)",
+                    value: value,
+                    label: value.displayText
+                )
+            })
+        } else {
+            switch type {
+            case "boolean":
+                kind = .boolean
+            case "integer", "number":
+                kind = .number(
+                    minimum: schema["minimum"]?.numberValue,
+                    maximum: schema["maximum"]?.numberValue,
+                    step: schema["multipleOf"]?.numberValue ?? (type == "integer" ? 1 : nil)
+                )
+            case "string":
+                kind = .string
+            case "object":
+                let childRequired = Set(
+                    schema["required"]?.arrayValue?.compactMap(\.stringValue) ?? []
+                )
+                let properties = schema["properties"]?.objectValue ?? [:]
+                let children = try properties.keys.sorted().map { key -> ISHPluginSettingsField in
+                    guard case let .object(child)? = properties[key] else {
+                        throw ISHPluginSettingsSchemaError.malformedEnvelope
+                    }
+                    return try standardField(
+                        child,
+                        path: path + [key],
+                        required: childRequired.contains(key)
+                    )
+                }
+                kind = .object(children)
+            case "array":
+                throw ISHPluginSettingsSchemaError.unsupportedType(type)
+            default:
+                throw ISHPluginSettingsSchemaError.unsupportedType(type)
+            }
+        }
+        return ISHPluginSettingsField(
+            path: path,
+            name: schema["title"]?.stringValue ?? path.last ?? "setting",
+            description: schema["description"]?.stringValue,
+            comment: nil,
+            defaultValue: schema["default"],
+            required: required,
+            disabled: schema["readOnly"]?.boolValue ?? false,
+            hidden: false,
+            kind: kind
+        )
     }
 
     private struct Parser {
@@ -332,6 +434,11 @@ private enum ISHPluginSettingsSchemaParser {
 }
 
 private extension JSONValue {
+    var arrayValue: [JSONValue]? {
+        guard case let .array(value) = self else { return nil }
+        return value
+    }
+
     var boolValue: Bool? {
         guard case let .bool(value) = self else { return nil }
         return value

@@ -68,4 +68,4 @@ fi
 
 node --check ./host.mjs
 node --check ./marketplace.mjs
-node --input-type=module -e "await import('@deepseek-ai/cordis'); await import('@deepseek-ai/cordis-plugin-loader'); await import('@deepseek-ai/dsh-app-boot'); await import('@deepseek-ai/dsh-atomic-write'); await import('@deepseek-ai/dsh-cordis-host-runner'); await import('@deepseek-ai/dsh-settings'); await import('@deepseek-ai/dsh-settings-file'); await import('@deepseek-ai/dsh-tool-cordis'); await import('yauzl')"
+node --input-type=module -e "await import('@deepseek-ai/cordis'); await import('@deepseek-ai/cordis-plugin-loader'); await import('@deepseek-ai/dsh-agent'); await import('@deepseek-ai/dsh-app-boot'); await import('@deepseek-ai/dsh-atomic-write'); await import('@deepseek-ai/dsh-cordis-host-runner'); await import('@deepseek-ai/dsh-session'); await import('@deepseek-ai/dsh-session-query'); await import('@deepseek-ai/dsh-settings'); await import('@deepseek-ai/dsh-settings-file'); await import('@deepseek-ai/dsh-skill'); await import('@deepseek-ai/dsh-tool-cordis'); await import('yauzl')"

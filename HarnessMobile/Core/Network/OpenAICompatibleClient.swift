@@ -1,28 +1,59 @@
 import Foundation
 
 final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDiscovering, @unchecked Sendable {
+    private static let maximumModelRequestBodyBytes = 24 * 1_024 * 1_024
     private let redirectDelegate: SameHostRedirectDelegate
     private let session: URLSession
     private let modelDiscoveryCache: ModelDiscoveryCache
+    private let filesClient: DeepSeekFilesClient
 
-    override init() {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.urlCache = nil
-        configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-        configuration.timeoutIntervalForRequest = 60
-        configuration.timeoutIntervalForResource = 600
-        configuration.httpShouldSetCookies = false
-        configuration.urlCredentialStorage = nil
+    static func acceptsTerminalMarkers(
+        sawSemanticFinish: Bool,
+        sawDone: Bool
+    ) -> Bool {
+        sawSemanticFinish || sawDone
+    }
+
+    static func isDoneMarker(_ payload: String) -> Bool {
+        payload.trimmingCharacters(in: .whitespacesAndNewlines)
+            .caseInsensitiveCompare("[DONE]") == .orderedSame
+    }
+
+    init(
+        filesClient: DeepSeekFilesClient,
+        sessionConfiguration: URLSessionConfiguration? = nil,
+        modelDiscoveryCache: ModelDiscoveryCache = ModelDiscoveryCache()
+    ) {
+        let configuration = sessionConfiguration ?? Self.makeSessionConfiguration()
 
         let redirectDelegate = SameHostRedirectDelegate()
         self.redirectDelegate = redirectDelegate
-        modelDiscoveryCache = ModelDiscoveryCache()
+        self.modelDiscoveryCache = modelDiscoveryCache
+        self.filesClient = filesClient
         session = URLSession(
             configuration: configuration,
             delegate: redirectDelegate,
             delegateQueue: nil
         )
         super.init()
+    }
+
+    override convenience init() {
+        self.init(filesClient: DeepSeekFilesClient())
+    }
+
+    static func makeSessionConfiguration() -> URLSessionConfiguration {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        // Long DeepSeek reasoning requests can legitimately take more than a
+        // minute before the first SSE byte, especially with a large context.
+        configuration.timeoutIntervalForRequest = 180
+        configuration.timeoutIntervalForResource = 600
+        configuration.waitsForConnectivity = true
+        configuration.httpShouldSetCookies = false
+        configuration.urlCredentialStorage = nil
+        return configuration
     }
 
     deinit {
@@ -99,7 +130,11 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
             throw ModelDiscoveryError.untrustedOrigin
         }
         guard (200..<300).contains(httpResponse.statusCode) else {
-            throw try await makeHTTPError(status: httpResponse.statusCode, bytes: bytes)
+            throw try await makeHTTPError(
+                response: httpResponse,
+                bytes: bytes,
+                adapter: adapter
+            )
         }
         let data = try await readBoundedModelList(
             bytes: bytes,
@@ -132,41 +167,93 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
             apiKey: request.apiKey,
             systemPrompt: request.systemPrompt,
             messages: request.messages,
-            tools: request.tools
+            tools: request.tools,
+            imagePayloads: request.imagePayloads
         )
-        switch ModelProviderCatalog.descriptor(for: configuration.providerID).wireProtocol {
+        let adapter = try ModelProviderAdapterRegistry.adapter(for: configuration.providerID)
+        switch adapter.streamingDialect {
+        case .deepSeekChatCompletions:
+            let prepared = await filesClient.prepare(validatedRequest)
+            do {
+                try await performOpenAI(
+                    prepared,
+                    adapter: adapter,
+                    continuation: continuation
+                )
+            } catch {
+                guard Self.shouldRetryInlineImages(after: error, request: prepared) else {
+                    throw error
+                }
+                for payload in prepared.imagePayloads where payload.fileID != nil {
+                    await filesClient.invalidate(payload, request: validatedRequest)
+                }
+                try await performOpenAI(
+                    Self.inlineImageRequest(prepared),
+                    adapter: adapter,
+                    continuation: continuation
+                )
+            }
         case .openAIChatCompletions:
-            try await performOpenAI(validatedRequest, continuation: continuation)
+            try await performOpenAI(
+                validatedRequest,
+                adapter: adapter,
+                continuation: continuation
+            )
         case .anthropicMessages:
-            try await performAnthropic(validatedRequest, continuation: continuation)
+            try await performAnthropic(
+                validatedRequest,
+                adapter: adapter,
+                continuation: continuation
+            )
         }
+    }
+
+    static func shouldRetryInlineImages(after error: Error, request: ModelRequest) -> Bool {
+        guard request.imagePayloads.contains(where: { $0.fileID != nil }) else { return false }
+        guard case let ModelClientError.httpFailure(metadata, message) = error else { return false }
+        guard [400, 404, 422].contains(metadata.status) else { return false }
+        let text = "\(metadata.code ?? "") \(message)".lowercased()
+        guard text.contains("file") else { return false }
+        return ["expired", "not found", "not_found", "invalid", "unknown", "does not exist", "doesn't exist"]
+            .contains(where: text.contains)
+    }
+
+    private static func inlineImageRequest(_ request: ModelRequest) -> ModelRequest {
+        ModelRequest(
+            configuration: request.configuration,
+            apiKey: request.apiKey,
+            systemPrompt: request.systemPrompt,
+            messages: request.messages,
+            tools: request.tools,
+            imagePayloads: request.imagePayloads.map {
+                ModelImagePayload(id: $0.id, mimeType: $0.mimeType, data: $0.data)
+            }
+        )
     }
 
     private func performOpenAI(
         _ request: ModelRequest,
+        adapter: any ModelProviderAdapter,
         continuation: AsyncThrowingStream<LLMStreamEvent, Error>.Continuation
     ) async throws {
-        let configuration = request.configuration
-        let endpoint = try configuration.chatCompletionsURL()
-        let body = ChatWireSerializer.makeRequest(request)
-
-        var urlRequest = URLRequest(url: endpoint)
-        urlRequest.httpMethod = "POST"
-        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        urlRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-        urlRequest.setValue("Bearer \(request.apiKey)", forHTTPHeaderField: "Authorization")
-        let encodedBody = try JSONEncoder().encode(body)
-        guard encodedBody.count <= 4 * 1_024 * 1_024 else {
+        let urlRequest = try adapter.makeStreamingRequest(request)
+        guard let encodedBody = urlRequest.httpBody else {
+            throw ModelClientError.invalidResponse
+        }
+        guard encodedBody.count <= Self.maximumModelRequestBodyBytes else {
             throw ModelClientError.requestTooLarge
         }
-        urlRequest.httpBody = encodedBody
 
         let (bytes, response) = try await session.bytes(for: urlRequest)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw ModelClientError.invalidResponse
         }
         guard (200..<300).contains(httpResponse.statusCode) else {
-            throw try await makeHTTPError(status: httpResponse.statusCode, bytes: bytes)
+            throw try await makeHTTPError(
+                response: httpResponse,
+                bytes: bytes,
+                adapter: adapter
+            )
         }
         guard let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type"),
               contentType
@@ -181,13 +268,14 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
         var sse = SSEEventDecoder()
         var sawSemanticFinish = false
         var sawDone = false
+        var sawToolCallDelta = false
         try await withTaskCancellationHandler {
             streamLoop: for try await byte in bytes {
                 try Task.checkCancellation()
                 guard let payload = try sse.consume(byte: byte) else {
                     continue
                 }
-                if payload == "[DONE]" {
+                if Self.isDoneMarker(payload) {
                     sawDone = true
                     break streamLoop
                 }
@@ -195,17 +283,23 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
                     if case .finish = event {
                         sawSemanticFinish = true
                     }
+                    if case .toolCallDelta = event {
+                        sawToolCallDelta = true
+                    }
                     continuation.yield(event)
                 }
             }
 
             if !sawDone, let payload = try sse.finish() {
-                if payload == "[DONE]" {
+                if Self.isDoneMarker(payload) {
                     sawDone = true
                 } else {
                     for event in try decodeEvents(payload) {
                         if case .finish = event {
                             sawSemanticFinish = true
+                        }
+                        if case .toolCallDelta = event {
+                            sawToolCallDelta = true
                         }
                         continuation.yield(event)
                     }
@@ -215,36 +309,46 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
             bytes.task.cancel()
         }
 
-        if !sawSemanticFinish || !sawDone {
+        // Some OpenAI-compatible gateways close after a semantic finish and
+        // omit [DONE]; others send only [DONE]. Accept either terminal form,
+        // but synthesize a constrained finish event for the latter so the
+        // Agent loop still has an explicit terminal reason. A stream with
+        // neither marker remains a truncated response.
+        if sawDone, !sawSemanticFinish {
+            continuation.yield(.finish(sawToolCallDelta ? .toolCalls : .stop))
+            sawSemanticFinish = true
+        }
+        if !Self.acceptsTerminalMarkers(
+            sawSemanticFinish: sawSemanticFinish,
+            sawDone: sawDone
+        ) {
             throw ModelClientError.incompleteStream
         }
     }
 
     private func performAnthropic(
         _ request: ModelRequest,
+        adapter: any ModelProviderAdapter,
         continuation: AsyncThrowingStream<LLMStreamEvent, Error>.Continuation
     ) async throws {
-        let endpoint = try request.configuration.chatCompletionsURL()
-        let body = try AnthropicWireSerializer.makeRequest(request)
-
-        var urlRequest = URLRequest(url: endpoint)
-        urlRequest.httpMethod = "POST"
-        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        urlRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-        urlRequest.setValue(request.apiKey, forHTTPHeaderField: "x-api-key")
-        urlRequest.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-        let encodedBody = try JSONEncoder().encode(body)
-        guard encodedBody.count <= 4 * 1_024 * 1_024 else {
+        let urlRequest = try adapter.makeStreamingRequest(request)
+        guard let encodedBody = urlRequest.httpBody else {
+            throw ModelClientError.invalidResponse
+        }
+        guard encodedBody.count <= Self.maximumModelRequestBodyBytes else {
             throw ModelClientError.requestTooLarge
         }
-        urlRequest.httpBody = encodedBody
 
         let (bytes, response) = try await session.bytes(for: urlRequest)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw ModelClientError.invalidResponse
         }
         guard (200..<300).contains(httpResponse.statusCode) else {
-            throw try await makeHTTPError(status: httpResponse.statusCode, bytes: bytes)
+            throw try await makeHTTPError(
+                response: httpResponse,
+                bytes: bytes,
+                adapter: adapter
+            )
         }
         guard let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type"),
               contentType
@@ -287,7 +391,18 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
             bytes.task.cancel()
         }
 
-        if !sawSemanticFinish || !sawMessageStop {
+        // Anthropic normally emits both message_delta(stop_reason) and
+        // message_stop. A few compatible gateways omit one of them; a
+        // semantic stop is still a complete response, while message_stop
+        // without a stop reason is safely interpreted as a normal stop.
+        if sawMessageStop, !sawSemanticFinish {
+            continuation.yield(.finish(.stop))
+            sawSemanticFinish = true
+        }
+        if !Self.acceptsTerminalMarkers(
+            sawSemanticFinish: sawSemanticFinish,
+            sawDone: sawMessageStop
+        ) {
             throw ModelClientError.incompleteStream
         }
     }
@@ -313,6 +428,10 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
                 throw ModelClientError.unexpectedChoice
             }
             if let reasoning = choice.delta?.reasoningContent, !reasoning.isEmpty {
+                events.append(.reasoning(reasoning))
+            } else if let reasoning = OpenAICompatibleWireSerializer.alternateReasoningDelta(
+                in: payload
+            ) {
                 events.append(.reasoning(reasoning))
             }
             if let content = choice.delta?.content, !content.isEmpty {
@@ -340,6 +459,10 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
         return events
     }
 
+    static func encodeOpenAIRequestBody(_ request: ModelRequest) throws -> Data {
+        try OpenAICompatibleWireSerializer.encode(request)
+    }
+
     private func decodeUsage(_ usage: ChatStreamChunk.Usage) throws -> ModelTokenUsage {
         let prompt = usage.promptTokens ?? 0
         let completion = usage.completionTokens ?? 0
@@ -354,13 +477,32 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
             total = sum
         }
 
-        let cached = usage.promptTokensDetails?.cachedTokens
-            ?? usage.promptCacheHitTokens
+        // DeepSeek and OpenAI-compatible gateways sometimes include both
+        // their own cache field and OpenAI's `prompt_tokens_details`. A zero
+        // in one field must not mask a positive value in the other field.
+        let cacheCandidates = [
+            usage.promptCacheHitTokens,
+            usage.promptTokensDetails?.cachedTokens
+        ].compactMap { $0 }
+        let cached = cacheCandidates.max()
+        let uncached: Int?
+        if let reportedMiss = usage.promptCacheMissTokens {
+            uncached = reportedMiss
+        } else if let cached {
+            uncached = max(0, prompt - cached)
+        } else {
+            uncached = nil
+        }
         let reasoning = usage.completionTokensDetails?.reasoningTokens
-        let reportedValues = [prompt, completion, total, cached, reasoning].compactMap { $0 }
+        let reportedValues = [prompt, completion, total, cached, uncached, reasoning].compactMap { $0 }
         guard reportedValues.allSatisfy({
             (0...Self.maximumReportedTokenCount).contains($0)
         }) else {
+            throw ModelClientError.invalidUsage
+        }
+        if let cached, let uncached,
+           cached.addingReportingOverflow(uncached).overflow
+            || cached + uncached > prompt {
             throw ModelClientError.invalidUsage
         }
 
@@ -369,7 +511,8 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
             completionTokens: completion,
             totalTokens: total,
             cachedPromptTokens: cached,
-            reasoningTokens: reasoning
+            reasoningTokens: reasoning,
+            uncachedPromptTokens: uncached
         )
     }
 
@@ -426,7 +569,7 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
         return value
     }
 
-    private static func isSameHTTPSOrigin(_ lhs: URL, _ rhs: URL) -> Bool {
+    static func isSameHTTPSOrigin(_ lhs: URL, _ rhs: URL) -> Bool {
         guard lhs.scheme?.lowercased() == "https",
               rhs.scheme?.lowercased() == "https",
               lhs.user == nil,
@@ -440,8 +583,9 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
     }
 
     private func makeHTTPError(
-        status: Int,
-        bytes: URLSession.AsyncBytes
+        response: HTTPURLResponse,
+        bytes: URLSession.AsyncBytes,
+        adapter: any ModelProviderAdapter
     ) async throws -> ModelClientError {
         var body = Data()
         body.reserveCapacity(4_096)
@@ -452,11 +596,101 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
             body.append(byte)
         }
 
-        if let envelope = try? JSONDecoder().decode(ChatAPIErrorEnvelope.self, from: body) {
-            return .httpStatus(status, envelope.error.message)
+        let envelope = try? JSONDecoder().decode(ChatAPIErrorEnvelope.self, from: body)
+        let message = envelope?.error.message
+            ?? String(data: body.prefix(2_048), encoding: .utf8)
+            ?? "请求失败"
+        let metadata = Self.providerFailureMetadata(
+            response: response,
+            code: adapter.httpFailureCode(
+                status: response.statusCode,
+                errorCode: envelope?.error.code?.stringValue,
+                errorType: envelope?.error.type,
+                message: message
+            ),
+            requestID: adapter.requestID(from: response)
+        )
+        return .httpFailure(metadata, message)
+    }
+
+    static func providerFailureMetadata(
+        response: HTTPURLResponse,
+        errorCode: String?,
+        errorType: String?,
+        now: Date = .now
+    ) -> ModelProviderHTTPFailureMetadata {
+        providerFailureMetadata(
+            response: response,
+            code: errorCode ?? errorType,
+            requestID: response.value(forHTTPHeaderField: "X-Request-ID")
+                ?? response.value(forHTTPHeaderField: "X-DeepSeek-Request-ID"),
+            now: now
+        )
+    }
+
+    static func providerFailureMetadata(
+        response: HTTPURLResponse,
+        code: String?,
+        requestID: String?,
+        now: Date = .now
+    ) -> ModelProviderHTTPFailureMetadata {
+        ModelProviderHTTPFailureMetadata(
+            status: response.statusCode,
+            code: normalizedMetadataValue(code, maximumUTF8Bytes: 256),
+            retryAfterMilliseconds: retryAfterMilliseconds(
+                response.value(forHTTPHeaderField: "Retry-After"),
+                now: now
+            ),
+            requestID: normalizedMetadataValue(requestID, maximumUTF8Bytes: 1_024)
+        )
+    }
+
+    /// Parse both RFC 7231 delta-seconds and HTTP-date Retry-After values.
+    /// Invalid, zero, negative, or unreasonably large values are ignored.
+    static func retryAfterMilliseconds(
+        _ value: String?,
+        now: Date = .now
+    ) -> Int? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else { return nil }
+
+        let milliseconds: Int?
+        if let seconds = Int64(value), seconds > 0 {
+            let (result, overflow) = seconds.multipliedReportingOverflow(by: 1_000)
+            milliseconds = overflow ? nil : Int(exactly: result)
+        } else {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = TimeZone(secondsFromGMT: 0)
+            formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+            guard let date = formatter.date(from: value) else { return nil }
+            let interval = date.timeIntervalSince(now)
+            guard interval > 0, interval.isFinite else { return nil }
+            let rounded = interval * 1_000
+            milliseconds = rounded <= Double(Int.max) ? Int(rounded.rounded()) : nil
         }
-        let fallback = String(data: body.prefix(2_048), encoding: .utf8) ?? "请求失败"
-        return .httpStatus(status, fallback)
+
+        guard let milliseconds,
+              milliseconds > 0,
+              milliseconds <= 86_400_000 else {
+            return nil
+        }
+        return milliseconds
+    }
+
+    private static func normalizedMetadataValue(
+        _ rawValue: String?,
+        maximumUTF8Bytes: Int
+    ) -> String? {
+        guard let value = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty,
+              value.utf8.count <= maximumUTF8Bytes,
+              value.unicodeScalars.allSatisfy({ scalar in
+                  scalar.value >= 0x20 && scalar.value != 0x7F
+              }) else {
+            return nil
+        }
+        return value
     }
 }
 
@@ -470,34 +704,18 @@ private final class SameHostRedirectDelegate: NSObject, URLSessionTaskDelegate, 
     ) {
         guard let originalURL = task.originalRequest?.url,
               let redirectURL = request.url,
-              Self.isSameHTTPSOrigin(originalURL, redirectURL) else {
+              OpenAICompatibleClient.isSameHTTPSOrigin(originalURL, redirectURL) else {
             completionHandler(nil)
             return
         }
         completionHandler(request)
     }
-
-    private static func isSameHTTPSOrigin(_ lhs: URL, _ rhs: URL) -> Bool {
-        guard lhs.scheme?.lowercased() == "https",
-              rhs.scheme?.lowercased() == "https",
-              lhs.user == nil,
-              lhs.password == nil,
-              rhs.user == nil,
-              rhs.password == nil,
-              lhs.host?.lowercased() == rhs.host?.lowercased() else {
-            return false
-        }
-        return effectiveHTTPSPort(lhs) == effectiveHTTPSPort(rhs)
-    }
-
-    private static func effectiveHTTPSPort(_ url: URL) -> Int {
-        url.port ?? 443
-    }
 }
 
 enum ModelClientError: LocalizedError, Sendable {
+    case emptyResponse
     case invalidResponse
-    case httpStatus(Int, String)
+    case httpFailure(ModelProviderHTTPFailureMetadata, String)
     case requestTooLarge
     case eventTooLarge
     case unexpectedContentType
@@ -506,15 +724,28 @@ enum ModelClientError: LocalizedError, Sendable {
     case invalidUsage
     case incompleteStream
     case streamError(String)
+    case providerStreamFailure(code: String?, message: String)
 
     var errorDescription: String? {
         switch self {
+        case .emptyResponse:
+            return "模型返回了没有文本、思考内容或工具调用的空响应。"
         case .invalidResponse:
             return "模型服务返回了无效响应。"
-        case let .httpStatus(status, message):
-            return "模型服务错误 \(status)：\(message)"
+        case let .httpFailure(metadata, message):
+            var description = "模型服务错误 \(metadata.status)：\(message)"
+            if let code = metadata.code, !code.isEmpty {
+                description += " [code=\(code)]"
+            }
+            if let requestID = metadata.requestID, !requestID.isEmpty {
+                description += " [request_id=\(requestID)]"
+            }
+            if let retryAfterMilliseconds = metadata.retryAfterMilliseconds {
+                description += " [retry_after_ms=\(retryAfterMilliseconds)]"
+            }
+            return description
         case .requestTooLarge:
-            return "模型请求超过 4 MiB 上限，请开始新会话。"
+            return "模型请求超过 24 MiB 上限，请移除较早图片或开始新会话。"
         case .eventTooLarge:
             return "模型流式事件超过 1 MiB 上限。"
         case .unexpectedContentType:
@@ -529,7 +760,28 @@ enum ModelClientError: LocalizedError, Sendable {
             return "模型响应在完成前中断。"
         case let .streamError(message):
             return "模型流式响应失败：\(message)"
+        case let .providerStreamFailure(code, message):
+            if let code, !code.isEmpty {
+                return "模型流式响应失败：\(message) [code=\(code)]"
+            }
+            return "模型流式响应失败：\(message)"
         }
+    }
+
+    var providerHTTPFailure: ModelProviderHTTPFailureMetadata? {
+        guard case let .httpFailure(metadata, _) = self else { return nil }
+        return metadata
+    }
+}
+
+struct ModelProviderHTTPFailureMetadata: Sendable, Equatable {
+    let status: Int
+    let code: String?
+    let retryAfterMilliseconds: Int?
+    let requestID: String?
+
+    var isRetryable: Bool {
+        status == 408 || status == 409 || status == 425 || status == 429 || status >= 500
     }
 }
 

@@ -29,6 +29,10 @@ private enum ISHHostedHarnessPoint: String, Sendable {
     case agentStatus = "agent/status"
     case agentSessionStart = "agent/session-start"
     case agentError = "agent/error"
+    case agentInboxInserted = "agent/inbox/inserted"
+    case agentInboxClaimed = "agent/inbox/claimed"
+    case agentInboxDiscarded = "agent/inbox/discarded"
+    case agentInboxPreClaim = "agent/inbox/pre-claim"
     case memoryRecall = "memory/recall"
     case memoryRecord = "memory/record"
     case orchestrationPreStep = "orchestration/pre-step"
@@ -39,10 +43,17 @@ private enum ISHHostedHarnessPoint: String, Sendable {
     case agentRequest = "agent/request"
     case agentRequestError = "agent/request-error"
     case agentTurnStopping = "agent/turn-stopping"
+    /// The Swift side owns the provider stream and credentials. Host plugins
+    /// receive only a start/event/terminal envelope and may acknowledge or
+    /// rewrite individual events.
+    case llmStream = "llm/stream"
     case sandboxPreExecute = "sandbox/pre-execute"
     case toolsPreExecute = "tools/pre-execute"
     case toolsExecute = "tools/execute"
     case toolsPostExecute = "tools/post-execute"
+    /// This is not a standalone Host capability. It is invoked only while the
+    /// native Code Mode producer is durably recording one child dispatch.
+    case toolsCodeDispatchLog = "tools/code-dispatch-log"
     case toolsResult = "tools/result"
     case toolsChange = "tools/change"
 }
@@ -90,9 +101,16 @@ private struct ISHHostedHarnessInvoker: Sendable {
     let endpoint: ISHHostedHarnessEndpoint
     let sessionID: String
     let client: ISHPluginHostClient
+    let synchronizeMobileContext: @Sendable () async throws -> Void
 
-    func invoke(arguments: JSONValue) async throws -> JSONValue {
+    func invoke(
+        arguments: JSONValue,
+        synchronize: Bool = true
+    ) async throws -> JSONValue {
         try Task.checkCancellation()
+        if synchronize {
+            try await synchronizeMobileContext()
+        }
         let response = try await client.invoke(
             endpoint.request(sessionID: sessionID, arguments: arguments)
         )
@@ -112,6 +130,7 @@ enum ISHPluginHostDynamicHarnessBridge {
         contributions: ISHPluginHostContributions,
         sessionID: String,
         client: ISHPluginHostClient,
+        synchronizeMobileContext: @escaping @Sendable () async throws -> Void = {},
         context: CordisPluginContext
     ) async throws {
         var bindings: [(ISHHostedHarnessPoint, ISHHostedHarnessEndpoint)] = []
@@ -145,6 +164,7 @@ enum ISHPluginHostDynamicHarnessBridge {
                 endpoint: endpoint,
                 sessionID: sessionID,
                 client: client,
+                synchronizeMobileContext: synchronizeMobileContext,
                 context: context
             )
         }
@@ -177,6 +197,8 @@ enum ISHPluginHostDynamicHarnessBridge {
             return .agentRequestError
         case ("agent", "turnStopping"), ("agent", "turn-stopping"):
             return .agentTurnStopping
+        case ("llm", "stream"), ("llm", "streamEvent"), ("llm", "stream-event"):
+            return .llmStream
         case ("agent", "created"):
             return .agentCreated
         case ("agent", "disposed"):
@@ -187,10 +209,22 @@ enum ISHPluginHostDynamicHarnessBridge {
             return .agentSessionStart
         case ("agent", "error"):
             return .agentError
+        case ("agent", "inboxInserted"), ("agent", "inbox-inserted"):
+            return .agentInboxInserted
+        case ("agent", "inboxClaimed"), ("agent", "inbox-claimed"):
+            return .agentInboxClaimed
+        case ("agent", "inboxDiscarded"), ("agent", "inbox-discarded"):
+            return .agentInboxDiscarded
+        case ("agent", "inboxPreClaim"), ("agent", "inbox-pre-claim"):
+            return .agentInboxPreClaim
+        case ("inbox", "preClaim"), ("inbox", "pre-claim"):
+            return .agentInboxPreClaim
         case ("tools", "result"):
             return .toolsResult
         case ("tools", "change"):
             return .toolsChange
+        case ("tools", "codeDispatchLog"), ("tools", "code-dispatch-log"):
+            return .toolsCodeDispatchLog
         default:
             return nil
         }
@@ -201,16 +235,25 @@ enum ISHPluginHostDynamicHarnessBridge {
         endpoint: ISHHostedHarnessEndpoint,
         sessionID: String,
         client: ISHPluginHostClient,
+        synchronizeMobileContext: @escaping @Sendable () async throws -> Void,
         context: CordisPluginContext
     ) async throws {
         let invoker = ISHHostedHarnessInvoker(
             endpoint: endpoint,
             sessionID: sessionID,
-            client: client
+            client: client,
+            synchronizeMobileContext: synchronizeMobileContext
         )
         let label = "ish.\(endpoint.identity)"
 
         switch point {
+        case .agentInboxPreClaim:
+            try await registerInboxPreClaim(
+                point: point,
+                invoker: invoker,
+                label: label,
+                context: context
+            )
         case .memoryRecall:
             try await registerPreStep(
                 CordisAgentLoopCheckpoints.memoryRecall,
@@ -246,6 +289,13 @@ enum ISHPluginHostDynamicHarnessBridge {
         case .agentRequest:
             try await registerRequest(
                 CordisAgentLoopCheckpoints.request,
+                point: point,
+                invoker: invoker,
+                label: label,
+                context: context
+            )
+        case .llmStream:
+            try await registerLLMStream(
                 point: point,
                 invoker: invoker,
                 label: label,
@@ -296,6 +346,13 @@ enum ISHPluginHostDynamicHarnessBridge {
                 label: label,
                 context: context
             )
+        case .toolsCodeDispatchLog:
+            try await registerCodeDispatchLog(
+                point: point,
+                invoker: invoker,
+                label: label,
+                context: context
+            )
         case .agentCreated:
             try await registerEvent(
                 CordisAgentLoopEvents.agentCreated,
@@ -341,6 +398,27 @@ enum ISHPluginHostDynamicHarnessBridge {
             ) { input in
                 agentErrorInput(input, checkpoint: point.rawValue)
             }
+        case .agentInboxInserted:
+            try await registerEvent(
+                CordisAgentLoopEvents.agentInboxInserted,
+                invoker: invoker,
+                label: label,
+                context: context
+            ) { input in inboxInsertedInput(input, checkpoint: point.rawValue) }
+        case .agentInboxClaimed:
+            try await registerEvent(
+                CordisAgentLoopEvents.agentInboxClaimed,
+                invoker: invoker,
+                label: label,
+                context: context
+            ) { input in inboxClaimedInput(input, checkpoint: point.rawValue) }
+        case .agentInboxDiscarded:
+            try await registerEvent(
+                CordisAgentLoopEvents.agentInboxDiscarded,
+                invoker: invoker,
+                label: label,
+                context: context
+            ) { input in inboxDiscardedInput(input, checkpoint: point.rawValue) }
         case .toolsResult:
             try await registerEvent(
                 CordisAgentLoopEvents.toolsResult,
@@ -410,6 +488,23 @@ enum ISHPluginHostDynamicHarnessBridge {
         )
     }
 
+    private static func registerInboxPreClaim(
+        point: ISHHostedHarnessPoint,
+        invoker: ISHHostedHarnessInvoker,
+        label: String,
+        context: CordisPluginContext
+    ) async throws {
+        try await registerCheckpoint(
+            CordisAgentLoopCheckpoints.inboxPreClaim,
+            invoker: invoker,
+            label: label,
+            context: context,
+            encode: { inboxPreClaimInput($0, checkpoint: point.rawValue) },
+            decode: { value, input in try inboxPreClaimDecision(value, original: input) },
+            onFailure: { _, next in try await next() }
+        )
+    }
+
     private static func registerRequest(
         _ checkpoint: CordisCheckpointKey<
             CordisAgentRequestContext,
@@ -439,6 +534,154 @@ enum ISHPluginHostDynamicHarnessBridge {
                 return current
             }
         }
+    }
+
+    /// Bridges the native AsyncThrowingStream without handing the provider
+    /// client, credentials, or transport session to iSH. Each event is acknowledged by
+    /// the Host before it is yielded downstream, which gives dynamic Host
+    /// plugins real backpressure and an explicit cancellation boundary.
+    private static func registerLLMStream(
+        point: ISHHostedHarnessPoint,
+        invoker: ISHHostedHarnessInvoker,
+        label: String,
+        context: CordisPluginContext
+    ) async throws {
+        try await context.intercept(
+            CordisAgentLoopCheckpoints.llmStream,
+            label: label
+        ) { input, next in
+            let upstream = try await next()
+            let streamID = UUID().uuidString.lowercased()
+            do {
+                let response = try await invoker.invoke(
+                    arguments: llmStreamInput(
+                        input,
+                        checkpoint: point.rawValue,
+                        streamID: streamID,
+                        phase: "start",
+                        event: nil
+                    )
+                )
+                try llmStreamStartDecision(response)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // The Host hook is optional. A stale or unavailable dynamic
+                // generation must not take down the native model request.
+                return upstream
+            }
+            return observeLLMStream(
+                upstream,
+                input: input,
+                streamID: streamID,
+                point: point,
+                invoker: invoker
+            )
+        }
+    }
+
+    private static func observeLLMStream(
+        _ upstream: CordisModelEventStream,
+        input: CordisLLMStreamContext,
+        streamID: String,
+        point: ISHHostedHarnessPoint,
+        invoker: ISHHostedHarnessInvoker
+    ) -> CordisModelEventStream {
+        let (stream, continuation) = CordisModelEventStream.makeStream()
+        let task = Task {
+            do {
+                for try await event in upstream {
+                    try Task.checkCancellation()
+                    let decision: LLMStreamDecision
+                    do {
+                        let response = try await invoker.invoke(
+                            arguments: llmStreamInput(
+                                input,
+                                checkpoint: point.rawValue,
+                                streamID: streamID,
+                                phase: "event",
+                                event: event
+                            ),
+                            synchronize: false
+                        )
+                        decision = try llmStreamDecision(response)
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        // Preserve the model stream on malformed/stale Host
+                        // responses; dynamic hooks are fail-open per boundary.
+                        continuation.yield(event)
+                        continue
+                    }
+                    switch decision {
+                    case .next:
+                        continuation.yield(event)
+                    case .drop:
+                        break
+                    case let .replace(replacement):
+                        continuation.yield(replacement)
+                    }
+                }
+                await sendLLMTerminal(
+                    phase: "finish",
+                    input: input,
+                    streamID: streamID,
+                    point: point,
+                    invoker: invoker
+                )
+                continuation.finish()
+            } catch is CancellationError {
+                await sendLLMTerminal(
+                    phase: "cancel",
+                    input: input,
+                    streamID: streamID,
+                    point: point,
+                    invoker: invoker
+                )
+                continuation.finish(throwing: CancellationError())
+            } catch {
+                await sendLLMTerminal(
+                    phase: "error",
+                    input: input,
+                    streamID: streamID,
+                    point: point,
+                    invoker: invoker,
+                    error: bounded(String(describing: error), maximum: 8_192)
+                )
+                continuation.finish(throwing: error)
+            }
+        }
+        continuation.onTermination = { @Sendable _ in
+            task.cancel()
+        }
+        return stream
+    }
+
+    private static func sendLLMTerminal(
+        phase: String,
+        input: CordisLLMStreamContext,
+        streamID: String,
+        point: ISHHostedHarnessPoint,
+        invoker: ISHHostedHarnessInvoker,
+        error: String? = nil
+    ) async {
+        var payload = llmStreamInput(
+            input,
+            checkpoint: point.rawValue,
+            streamID: streamID,
+            phase: phase,
+            event: nil
+        )
+        if case var .object(object) = payload, let error {
+            object["error"] = .string(error)
+            payload = .object(object)
+        }
+        // Terminal notifications are best effort and deliberately detached
+        // from cancellation so a cancelled model task cannot retain a Host
+        // invocation indefinitely.
+        await Task.detached {
+            _ = try? await invoker.invoke(arguments: payload, synchronize: false)
+        }.value
     }
 
     private static func registerRequestError(
@@ -538,6 +781,37 @@ enum ISHPluginHostDynamicHarnessBridge {
         )
     }
 
+    private static func registerCodeDispatchLog(
+        point: ISHHostedHarnessPoint,
+        invoker: ISHHostedHarnessInvoker,
+        label: String,
+        context: CordisPluginContext
+    ) async throws {
+        try await context.intercept(
+            CordisAgentLoopCheckpoints.toolsCodeDispatchLog,
+            label: label
+        ) { input, next in
+            let current = try await next()
+            do {
+                let value = try await invoker.invoke(
+                    arguments: codeDispatchLogInput(
+                        input,
+                        result: current,
+                        checkpoint: point.rawValue
+                    )
+                )
+                return try toolResult(value) ?? current
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // Logging and presentation hooks are optional. A stale or
+                // failed Host generation must not erase the native child
+                // result or turn a successful Code Mode run into a failure.
+                return current
+            }
+        }
+    }
+
     private static func registerCheckpoint<Input: Sendable, Output: Sendable>(
         _ checkpoint: CordisCheckpointKey<Input, Output>,
         invoker: ISHHostedHarnessInvoker,
@@ -598,6 +872,30 @@ enum ISHPluginHostDynamicHarnessBridge {
         ])
     }
 
+    private static func inboxPreClaimInput(
+        _ input: CordisAgentInboxPreClaimContext,
+        checkpoint: String
+    ) -> JSONValue {
+        .object([
+            "checkpoint": .string(checkpoint),
+            "agentId": .string(input.agentID.uuidString.lowercased()),
+            "runId": .string(input.runID.uuidString.lowercased()),
+            "turn": .number(Double(input.turn)),
+            "step": .number(Double(input.step)),
+            "boundary": .string(input.boundary == .nextStep ? "next-step" : "next-turn"),
+            "workspaceBoundary": .string(input.workspaceBoundary),
+            "message": .object([
+                "id": .string(input.message.id.uuidString.lowercased()),
+                "source": .string(input.source),
+                "text": .string(input.message.text),
+                "disposition": .string(input.message.disposition.rawValue),
+                "createdAtMilliseconds": .number(
+                    input.message.createdAt.timeIntervalSince1970 * 1_000
+                )
+            ])
+        ])
+    }
+
     private static func requestInput(
         _ input: CordisAgentRequestContext,
         request: CordisModelRequestPlan,
@@ -611,6 +909,165 @@ enum ISHPluginHostDynamicHarnessBridge {
             "step": .number(Double(input.step)),
             "request": requestValue(request)
         ])
+    }
+
+    private enum LLMStreamDecision: Sendable {
+        case next
+        case drop
+        case replace(LLMStreamEvent)
+    }
+
+    private static func llmStreamInput(
+        _ input: CordisLLMStreamContext,
+        checkpoint: String,
+        streamID: String,
+        phase: String,
+        event: LLMStreamEvent?
+    ) -> JSONValue {
+        var object: [String: JSONValue] = [
+            "checkpoint": .string(checkpoint),
+            "phase": .string(phase),
+            "streamId": .string(streamID),
+            "agentId": .string(input.agentID.uuidString.lowercased()),
+            "runId": .string(input.runID.uuidString.lowercased()),
+            "turn": .number(Double(input.turn)),
+            "step": .number(Double(input.step)),
+            "request": .object([
+                "configuration": .object([
+                    "providerId": .string(input.request.configuration.providerID.rawValue),
+                    "profileId": input.request.configuration.profileID.map(JSONValue.string) ?? .null,
+                    "baseURL": .string(bounded(input.request.configuration.baseURL, maximum: 2_048)),
+                    "model": .string(bounded(input.request.configuration.model, maximum: 512)),
+                    "reasoningMode": .string(input.request.configuration.reasoningMode.rawValue),
+                    "maxSteps": .number(Double(input.request.configuration.maxSteps)),
+                    "maxOutputTokens": .number(Double(input.request.configuration.maxOutputTokens))
+                ]),
+                "systemPrompt": .string(bounded(input.request.systemPrompt, maximum: 8 * 1_024)),
+                "messages": .array(input.request.messages.prefix(128).map(messageValue)),
+                "tools": .array(input.request.tools.prefix(64).map(toolValue))
+            ])
+        ]
+        if let event {
+            object["event"] = streamEventValue(event)
+        }
+        return .object(object)
+    }
+
+    private static func streamEventValue(_ event: LLMStreamEvent) -> JSONValue {
+        switch event {
+        case let .text(text):
+            return .object(["kind": .string("text"), "text": .string(bounded(text, maximum: 32 * 1_024))])
+        case let .reasoning(text):
+            return .object(["kind": .string("reasoning"), "text": .string(bounded(text, maximum: 32 * 1_024))])
+        case let .toolCallDelta(index, id, type, name, arguments):
+            return .object([
+                "kind": .string("toolCallDelta"),
+                "index": .number(Double(index)),
+                "id": id.map(JSONValue.string) ?? .null,
+                "type": type.map(JSONValue.string) ?? .null,
+                "name": name.map(JSONValue.string) ?? .null,
+                "arguments": .string(bounded(arguments, maximum: 32 * 1_024))
+            ])
+        case let .usage(usage):
+            return .object([
+                "kind": .string("usage"),
+                "promptTokens": .number(Double(usage.promptTokens)),
+                "completionTokens": .number(Double(usage.completionTokens)),
+                "totalTokens": .number(Double(usage.totalTokens)),
+                "cachedPromptTokens": usage.cachedPromptTokens.map { .number(Double($0)) } ?? .null,
+                "uncachedPromptTokens": usage.uncachedPromptTokens.map { .number(Double($0)) } ?? .null,
+                "reasoningTokens": usage.reasoningTokens.map { .number(Double($0)) } ?? .null
+            ])
+        case let .finish(reason):
+            return .object(["kind": .string("finish"), "reason": .string(reason.rawValue)])
+        }
+    }
+
+    private static func llmStreamStartDecision(_ value: JSONValue) throws {
+        let object = try responseObject(value)
+        let kind = try responseKind(object)
+        guard kind == "next" || kind == "observe" else {
+            throw ISHPluginHostHarnessBridgeError.invalidResponse(
+                "llm/stream start kind must be next or observe"
+            )
+        }
+    }
+
+    private static func llmStreamDecision(_ value: JSONValue) throws -> LLMStreamDecision {
+        let object = try responseObject(value)
+        switch try responseKind(object) {
+        case "next", "observe":
+            return .next
+        case "drop":
+            return .drop
+        case "replace":
+            guard let replacement = object["event"] else {
+                throw ISHPluginHostHarnessBridgeError.invalidResponse(
+                    "llm/stream replace requires event"
+                )
+            }
+            return .replace(try streamEvent(replacement))
+        default:
+            throw ISHPluginHostHarnessBridgeError.invalidResponse(
+                "llm/stream event kind must be next, drop, or replace"
+            )
+        }
+    }
+
+    private static func streamEvent(_ value: JSONValue) throws -> LLMStreamEvent {
+        guard let object = value.objectValue,
+              let kind = object["kind"]?.stringValue else {
+            throw ISHPluginHostHarnessBridgeError.invalidResponse(
+                "llm/stream event must be an object with kind"
+            )
+        }
+        switch kind {
+        case "text":
+            return .text(try requiredString(object, "text", allowEmpty: true))
+        case "reasoning":
+            return .reasoning(try requiredString(object, "text", allowEmpty: true))
+        case "toolCallDelta":
+            guard let index = try optionalInteger(object["index"]) else {
+                throw ISHPluginHostHarnessBridgeError.invalidResponse(
+                    "llm/stream toolCallDelta index must be an integer"
+                )
+            }
+            return .toolCallDelta(
+                index: index,
+                id: object["id"]?.stringValue,
+                type: object["type"]?.stringValue,
+                name: object["name"]?.stringValue,
+                arguments: try requiredString(object, "arguments", allowEmpty: true)
+            )
+        case "usage":
+            guard let prompt = try optionalInteger(object["promptTokens"]),
+                  let completion = try optionalInteger(object["completionTokens"]),
+                  let total = try optionalInteger(object["totalTokens"]) else {
+                throw ISHPluginHostHarnessBridgeError.invalidResponse(
+                    "llm/stream usage requires promptTokens, completionTokens, and totalTokens"
+                )
+            }
+            return .usage(ModelTokenUsage(
+                promptTokens: prompt,
+                completionTokens: completion,
+                totalTokens: total,
+                cachedPromptTokens: try optionalInteger(object["cachedPromptTokens"]),
+                reasoningTokens: try optionalInteger(object["reasoningTokens"]),
+                uncachedPromptTokens: try optionalInteger(object["uncachedPromptTokens"])
+            ))
+        case "finish":
+            guard let rawReason = object["reason"]?.stringValue,
+                  let reason = ModelFinishReason(rawValue: rawReason) else {
+                throw ISHPluginHostHarnessBridgeError.invalidResponse(
+                    "llm/stream finish reason is invalid"
+                )
+            }
+            return .finish(reason)
+        default:
+            throw ISHPluginHostHarnessBridgeError.invalidResponse(
+                "unsupported llm/stream event kind (kind)"
+            )
+        }
     }
 
     private static func requestErrorInput(
@@ -665,6 +1122,28 @@ enum ISHPluginHostDynamicHarnessBridge {
             "isError": .bool(input.result.isError)
         ])
         return .object(object)
+    }
+
+    private static func codeDispatchLogInput(
+        _ input: CordisCodeDispatchLogContext,
+        result: CordisToolExecutionResult,
+        checkpoint: String
+    ) -> JSONValue {
+        .object([
+            "checkpoint": .string(checkpoint),
+            "agentId": .string(input.agentID.uuidString.lowercased()),
+            "runId": .string(input.runID.uuidString.lowercased()),
+            "turn": .number(Double(input.turn)),
+            "step": .number(Double(input.step)),
+            "parentCallId": .string(input.parentCallID),
+            "dispatchCallId": .string(input.dispatchCallID),
+            "toolName": .string(input.toolName),
+            "result": .object([
+                "text": .string(result.text),
+                "isError": .bool(result.isError),
+                "value": result.value ?? .null
+            ])
+        ])
     }
 
     private static func toolResultInput(
@@ -727,6 +1206,90 @@ enum ISHPluginHostDynamicHarnessBridge {
             "step": .number(Double(input.step)),
             "error": .string(bounded(input.error, maximum: 8_192))
         ])
+    }
+
+    private static func inboxMessageValue(_ message: QueuedAgentInput) -> JSONValue {
+        .object([
+            "id": .string(message.id.uuidString.lowercased()),
+            "text": .string(bounded(message.text, maximum: QueuedAgentInput.maximumTextUTF8Bytes)),
+            "disposition": .string(message.disposition.rawValue),
+            "createdAtMilliseconds": .number(message.createdAt.timeIntervalSince1970 * 1_000)
+        ])
+    }
+
+    private static func inboxInsertedInput(
+        _ input: CordisAgentInboxInsertedContext,
+        checkpoint: String
+    ) -> JSONValue {
+        inboxLifecycleInput(
+            agentID: input.agentID,
+            runID: input.runID,
+            message: input.message,
+            source: input.source,
+            boundary: input.boundary,
+            checkpoint: checkpoint,
+            turn: nil,
+            reason: nil
+        )
+    }
+
+    private static func inboxClaimedInput(
+        _ input: CordisAgentInboxClaimedContext,
+        checkpoint: String
+    ) -> JSONValue {
+        inboxLifecycleInput(
+            agentID: input.agentID,
+            runID: input.runID,
+            message: input.message,
+            source: input.source,
+            boundary: input.boundary,
+            checkpoint: checkpoint,
+            turn: nil,
+            reason: nil
+        )
+    }
+
+    private static func inboxDiscardedInput(
+        _ input: CordisAgentInboxDiscardedContext,
+        checkpoint: String
+    ) -> JSONValue {
+        inboxLifecycleInput(
+            agentID: input.agentID,
+            runID: input.runID,
+            message: input.message,
+            source: input.source,
+            boundary: input.boundary,
+            checkpoint: checkpoint,
+            turn: nil,
+            reason: input.reason
+        )
+    }
+
+    private static func inboxLifecycleInput(
+        agentID: UUID,
+        runID: UUID,
+        message: QueuedAgentInput,
+        source: String,
+        boundary: QueuedInputBoundary,
+        checkpoint: String,
+        turn: Int?,
+        reason: String?
+    ) -> JSONValue {
+        var object: [String: JSONValue] = [
+            "checkpoint": .string(checkpoint),
+            "agentId": .string(agentID.uuidString.lowercased()),
+            "runId": .string(runID.uuidString.lowercased()),
+            "source": .string(bounded(source, maximum: 256)),
+            "boundary": .string(boundary == .nextStep ? "next-step" : "turn-stopping"),
+            "message": inboxMessageValue(message)
+        ]
+        if let turn {
+            object["turn"] = .number(Double(turn))
+        }
+        if let reason {
+            object["reason"] = .string(bounded(reason, maximum: 512))
+        }
+        return .object(object)
     }
 
     private static func memoryRecordInput(
@@ -817,6 +1380,96 @@ enum ISHPluginHostDynamicHarnessBridge {
         default:
             throw ISHPluginHostHarnessBridgeError.invalidResponse(
                 "pre-step kind must be next, enter, or reject"
+            )
+        }
+    }
+
+    private static func inboxPreClaimDecision(
+        _ value: JSONValue,
+        original: CordisAgentInboxPreClaimContext
+    ) throws -> CordisAgentInboxPreClaimDecision? {
+        let object = try responseObject(value)
+        let allowed = Set([
+            "kind", "text", "messageId", "source", "workspaceBoundary",
+            "boundary", "disposition"
+        ])
+        if let unknown = object.keys.first(where: { !allowed.contains($0) }) {
+            throw ISHPluginHostHarnessBridgeError.invalidResponse(
+                "inbox pre-claim cannot mutate field \(unknown)"
+            )
+        }
+
+        try requireInvariant(
+            object,
+            key: "messageId",
+            expected: original.message.id.uuidString.lowercased()
+        )
+        try requireInvariant(object, key: "source", expected: original.source)
+        try requireInvariant(
+            object,
+            key: "workspaceBoundary",
+            expected: original.workspaceBoundary
+        )
+        try requireInvariant(
+            object,
+            key: "boundary",
+            expected: original.boundary == .nextStep ? "next-step" : "next-turn"
+        )
+        try requireInvariant(
+            object,
+            key: "disposition",
+            expected: original.message.disposition.rawValue
+        )
+
+        switch try responseKind(object) {
+        case "next":
+            guard object.keys.allSatisfy({ $0 == "kind" }) else {
+                throw ISHPluginHostHarnessBridgeError.invalidResponse(
+                    "next inbox decision cannot include mutations"
+                )
+            }
+            return nil
+        case "claim":
+            let text = object["text"]?.stringValue ?? original.message.text
+            let validated = try QueuedAgentInput(
+                id: original.message.id,
+                text: text,
+                disposition: original.message.disposition,
+                createdAt: original.message.createdAt
+            )
+            return .claim(text: validated.text)
+        case "rewrite":
+            let text = try requiredString(object, "text")
+            let validated = try QueuedAgentInput(
+                id: original.message.id,
+                text: text,
+                disposition: original.message.disposition,
+                createdAt: original.message.createdAt
+            )
+            return .claim(text: validated.text)
+        case "discard":
+            guard object["text"] == nil else {
+                throw ISHPluginHostHarnessBridgeError.invalidResponse(
+                    "discard inbox decision cannot include text"
+                )
+            }
+            return .discard
+        default:
+            throw ISHPluginHostHarnessBridgeError.invalidResponse(
+                "inbox pre-claim kind must be next, claim, rewrite, or discard"
+            )
+        }
+    }
+
+    private static func requireInvariant(
+        _ object: [String: JSONValue],
+        key: String,
+        expected: String
+    ) throws {
+        guard let value = object[key] else { return }
+        guard value.stringValue == expected else {
+            throw ISHPluginHostHarnessBridgeError.invalidResponse(
+                "inbox pre-claim cannot change \(key)"
             )
         }
     }

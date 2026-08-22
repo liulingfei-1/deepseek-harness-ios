@@ -1,5 +1,9 @@
 import XCTest
+#if canImport(HarnessMobile)
+@testable import HarnessMobile
+#else
 @testable import HarnessMobileCore
+#endif
 
 final class BackgroundAutoResumeGateTests: XCTestCase {
     func testSystemExpirationResumesOnlyWhenForegroundAndCheckpointExists() {

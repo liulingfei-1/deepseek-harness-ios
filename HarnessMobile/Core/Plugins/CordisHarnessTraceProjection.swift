@@ -3,6 +3,70 @@ import Foundation
 enum CordisHarnessTraceProjection {
     static func value(_ value: any Sendable) -> JSONValue? {
         switch value {
+        case let context as CordisAgentInboxPreClaimContext:
+            return .object([
+                "agentId": .string(context.agentID.uuidString),
+                "runId": .string(context.runID.uuidString),
+                "turn": .number(Double(context.turn)),
+                "step": .number(Double(context.step)),
+                "boundary": .string(context.boundary == .nextStep ? "next-step" : "next-turn"),
+                "message": .object([
+                    "id": .string(context.message.id.uuidString),
+                    "source": .string(context.source),
+                    "text": .string(HarnessTraceRedactor.string(
+                        context.message.text,
+                        maximumUTF8Bytes: 8 * 1_024
+                    )),
+                    "disposition": .string(context.message.disposition.rawValue)
+                ]),
+                "workspaceBoundary": .string(HarnessTraceRedactor.string(
+                    context.workspaceBoundary,
+                    maximumUTF8Bytes: 2_048
+                ))
+            ])
+        case let decision as CordisAgentInboxPreClaimDecision:
+            switch decision {
+            case let .claim(text):
+                return .object([
+                    "kind": .string("claim"),
+                    "text": .string(HarnessTraceRedactor.string(
+                        text,
+                        maximumUTF8Bytes: 8 * 1_024
+                    ))
+                ])
+            case .discard:
+                return .object(["kind": .string("discard")])
+            }
+        case let context as CordisAgentInboxInsertedContext:
+            return inboxLifecycle(
+                agentID: context.agentID,
+                runID: context.runID,
+                message: context.message,
+                source: context.source,
+                boundary: context.boundary,
+                turn: nil,
+                reason: nil
+            )
+        case let context as CordisAgentInboxClaimedContext:
+            return inboxLifecycle(
+                agentID: context.agentID,
+                runID: context.runID,
+                message: context.message,
+                source: context.source,
+                boundary: context.boundary,
+                turn: context.turn,
+                reason: nil
+            )
+        case let context as CordisAgentInboxDiscardedContext:
+            return inboxLifecycle(
+                agentID: context.agentID,
+                runID: context.runID,
+                message: context.message,
+                source: context.source,
+                boundary: context.boundary,
+                turn: nil,
+                reason: context.reason
+            )
         case let context as CordisAgentPreStepContext:
             return .object([
                 "agentId": .string(context.agentID.uuidString),
@@ -119,6 +183,37 @@ enum CordisHarnessTraceProjection {
     private static func messageArray(_ messages: [AgentMessage]) -> JSONValue {
         let values = messages.suffix(64).map(message)
         return .array(values)
+    }
+
+    private static func inboxLifecycle(
+        agentID: UUID,
+        runID: UUID,
+        message: QueuedAgentInput,
+        source: String,
+        boundary: QueuedInputBoundary,
+        turn: Int?,
+        reason: String?
+    ) -> JSONValue {
+        var object: [String: JSONValue] = [
+            "agentId": .string(agentID.uuidString),
+            "runId": .string(runID.uuidString),
+            "source": .string(HarnessTraceRedactor.string(source, maximumUTF8Bytes: 256)),
+                "boundary": .string(boundary == .nextStep ? "next-step" : "turn-stopping"),
+            "message": .object([
+                "id": .string(message.id.uuidString),
+                "text": .string(HarnessTraceRedactor.string(
+                    message.text,
+                    maximumUTF8Bytes: QueuedAgentInput.maximumTextUTF8Bytes
+                )),
+                "disposition": .string(message.disposition.rawValue),
+                "createdAtMilliseconds": .number(message.createdAt.timeIntervalSince1970 * 1_000)
+            ])
+        ]
+        if let turn { object["turn"] = .number(Double(turn)) }
+        if let reason {
+            object["reason"] = .string(HarnessTraceRedactor.string(reason, maximumUTF8Bytes: 512))
+        }
+        return .object(object)
     }
 
     private static func message(_ value: AgentMessage) -> JSONValue {

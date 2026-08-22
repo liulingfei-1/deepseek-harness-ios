@@ -28,7 +28,7 @@ struct IOSNativeOffloadTool: LocalAgentTool {
 
     let definition = ModelToolDefinition(
         name: "ios_native",
-        description: "Run one allowlisted OpenMinis iOS native capability on this iPhone through the embedded iSH bridge. Supported commands cover device status, clipboard, calendar, reminders, location, photos, vision, speech, text-to-speech, Bluetooth, HealthKit, HomeKit, NFC, maps, media, notifications, and on-device NLP. Pass --help in arguments to inspect a command. No arbitrary shell or remote executor is available through this tool.",
+        description: "Run one allowlisted OpenMinis iOS native capability on this iPhone through the embedded iSH bridge. HealthKit requires the signed entitlement and per-data-type authorization; its read, write, and delete operations receive separate approval scopes. Pass --help in arguments to inspect a command. No arbitrary shell or remote executor is available through this tool.",
         parameters: .object([
             "type": .string("object"),
             "properties": .object([
@@ -92,7 +92,22 @@ struct IOSNativeOffloadTool: LocalAgentTool {
         // The user explicitly chose durable approval for this personal-device
         // bridge. URL validation still runs on every call, but never filters
         // by scheme or destination application.
-        return ["ios-native:\(command)"]
+        let argv = try commandArguments(from: arguments)
+        guard command == "apple-healthkit" else {
+            return ["ios-native:\(command)"]
+        }
+
+        let action = argv.first(where: { !$0.hasPrefix("-") })?.lowercased()
+        let scope: String
+        switch action {
+        case "log", "log-blood-pressure":
+            scope = "write"
+        case "delete":
+            scope = "delete"
+        default:
+            scope = "read"
+        }
+        return ["ios-native:\(command):\(scope)"]
     }
 
     func concurrencyResources(arguments: [String: JSONValue]) throws -> Set<String> {
@@ -121,6 +136,10 @@ struct IOSNativeOffloadTool: LocalAgentTool {
             workspaceURL: workspaceURL,
             timeout: timeout,
             maximumOutputBytes: 128 * 1_024,
+            policy: ISHSandboxExecutionPolicy(
+                mode: .dangerFullAccess,
+                workspaceRoot: workspaceURL
+            ),
             onOutput: { chunk in
                 await onOutput(AgentToolOutputChunk(
                     channel: chunk.channel == .stderr ? .stderr : .stdout,

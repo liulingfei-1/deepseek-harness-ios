@@ -62,6 +62,109 @@ final class HarnessMobileConversationModeUITests: XCTestCase {
 }
 
 @MainActor
+final class HarnessMobileWorkspaceHierarchyUITests: XCTestCase {
+    func testWorkspaceRootExposesFilesMountsAndSessionStateFromHome() {
+        let app = XCUIApplication()
+        addTeardownBlock { app.terminate() }
+        app.launchArguments = [
+            "-reset-persistent-state-for-ui-testing",
+            "-bootstrap-configuration-for-ui-testing",
+            "-disable-animations-for-ui-testing",
+        ]
+        app.launch()
+
+        let root = app.descendants(matching: .any)["workspace-hierarchy-root"]
+        XCTAssertTrue(root.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.descendants(matching: .any)["workspace-hierarchy-files"].exists)
+
+        let open = app.buttons["workspace-hierarchy-open"]
+        XCTAssertTrue(open.isHittable)
+        open.tap()
+        XCTAssertTrue(app.navigationBars["工作区"].waitForExistence(timeout: 5))
+    }
+}
+
+@MainActor
+final class HarnessMobileLongConversationUITests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        continueAfterFailure = false
+    }
+
+    func testLongConversationStartsAtBoundedLatestWindowAndCanPageBackward() {
+        let app = XCUIApplication()
+        addTeardownBlock {
+            app.terminate()
+        }
+        app.launchArguments = [
+            "-reset-persistent-state-for-ui-testing",
+            "-bootstrap-configuration-for-ui-testing",
+            "-disable-animations-for-ui-testing",
+            "-present-long-conversation-for-ui-testing",
+        ]
+        app.launch()
+
+        openConversation(in: app)
+
+        XCTAssertTrue(text(containing: "perf-message-239", in: app).waitForExistence(timeout: 10))
+        XCTAssertFalse(text(containing: "perf-message-0", in: app).exists)
+
+        let loadEarlier = app.descendants(matching: .any)["load-earlier-messages"]
+        // Avoid querying an off-screen lazy element after every gesture: on
+        // Xcode 27 each miss retries for about three seconds. Twelve fast
+        // gestures cover the fixed 80-row initial window, then query once.
+        for _ in 0..<12 {
+            app.swipeDown(velocity: .fast)
+        }
+        XCTAssertTrue(loadEarlier.waitForExistence(timeout: 5))
+        XCTAssertTrue(loadEarlier.isHittable)
+        XCTAssertEqual(loadEarlier.value as? String, "尚有 160 条较早消息")
+        loadEarlier.tap()
+
+        let pagedValue = NSPredicate(format: "value == %@", "尚有 80 条较早消息")
+        let pagedExpectation = XCTNSPredicateExpectation(predicate: pagedValue, object: loadEarlier)
+        XCTAssertEqual(XCTWaiter.wait(for: [pagedExpectation], timeout: 10), .completed)
+    }
+
+    private func text(containing fragment: String, in app: XCUIApplication) -> XCUIElement {
+        app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@", fragment)
+        ).firstMatch
+    }
+}
+
+@MainActor
+final class HarnessMobileMarkdownUITests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        continueAfterFailure = false
+    }
+
+    func testWideMarkdownTableRemainsAccessibleAtLargeDynamicType() {
+        let app = XCUIApplication()
+        addTeardownBlock {
+            app.terminate()
+        }
+        app.launchArguments = [
+            "-disable-animations-for-ui-testing",
+            "-present-markdown-table-for-ui-testing",
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryAccessibilityXXXL",
+        ]
+        app.launch()
+
+        openConversation(in: app)
+
+        let table = app.scrollViews["表格，3 行，5 列"]
+        XCTAssertTrue(table.waitForExistence(timeout: 10))
+        XCTAssertEqual(table.label, "表格，3 行，5 列")
+        XCTAssertTrue(app.staticTexts["工具能力对照"].exists)
+        table.swipeLeft(velocity: .slow)
+        XCTAssertTrue(app.staticTexts["解释"].exists)
+    }
+}
+
+@MainActor
 final class HarnessMobilePlanReviewUITests: XCTestCase {
     func testPlanReviewPresentsAllDesktopActions() {
         let app = XCUIApplication()

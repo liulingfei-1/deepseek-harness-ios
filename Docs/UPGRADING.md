@@ -20,6 +20,13 @@ versions, `package-lock.json` pins the transitive npm tree and integrity values,
 and `manifest.json` records the audited packages plus Host/protocol versions.
 These three files must be reviewed and updated together.
 
+The current mobile Plugin Host is on DeepSeek Harness `v0.1.1-rc.2`. Native
+adapters live outside the Host package tree: multimodal image parts are
+serialized by `ChatAPIModels`/`OpenAICompatibleClient`, while Codex and Claude
+Code Profile Bundles remain local-iSH descriptors until their provider
+protocols are ported. Updating the npm tree must not silently turn either
+bundle into a remote executor.
+
 ## Normal update workflow
 
 Update only one component per change:
@@ -110,10 +117,10 @@ The compatibility suite protects behavior rather than implementation details:
   native staged draft/reset/rebase semantics. The Node smoke fixture must cover
   persistence, stale revisions, schema fail-closed behavior, and secret refusal.
 - The iSH allowlist must remain explicit about unsupported semantics. Do not
-  expose `llm/stream` through a single-response JSON-RPC shim, and do not expose
-  `tools/code-dispatch-log` until a real `run_code` producer exists. Track the
-  upstream Agent inbox events separately from checkpoints already emitted by
-  the native loop.
+  expose `llm/stream` through a single-response JSON-RPC shim. The native
+  `run_code` producer owns `tools/code-dispatch-log`; the Host must not expose
+  that event as a standalone capability. Track upstream Agent inbox events
+  separately from checkpoints already emitted by the native loop.
 - Keep plugin settings on the upstream `dsh-settings` and `dsh-settings-file`
   contracts. Every wire read must stay secret-redacted; writes must carry
   `expectedRevision`, and redacted configuration surfaces must use path mutation

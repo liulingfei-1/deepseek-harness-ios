@@ -125,16 +125,34 @@ enum ISHNativeClientCordisBridge {
         var registrations: [SlashCommandRegistration] = []
         do {
             for command in validated.contributions.commands {
-                let input = try command.inputHint.map(SlashCommandInputDescriptor.init(hint:))
+                let input = try command.inputHint.map {
+                    try SlashCommandInputDescriptor(hint: $0)
+                }
                 let definition = try SlashCommandDefinition(
                     name: command.name,
                     description: command.description,
                     input: input,
+                    imagePolicy: command.inputImages ? .accepted : .rejected,
                     recordInput: false
                 ) { invocation in
                     var arguments = command.action.arguments
                     if let inputKey = command.action.inputKey {
                         arguments[inputKey] = .string(invocation.parsed.trimmedInput)
+                    }
+                    if let interactionResponse = invocation.interactionResponse {
+                        arguments["$commandInteraction"] = interactionResponse.hostJSON
+                    }
+                    if !invocation.imageAttachments.isEmpty {
+                        arguments["$imageAttachments"] = .array(
+                            invocation.imageAttachments.map { attachment in
+                                .object([
+                                    "id": .string(attachment.id.uuidString),
+                                    "path": .string(attachment.path),
+                                    "mimeType": .string(attachment.mimeType),
+                                    "byteCount": .number(Double(attachment.byteCount))
+                                ])
+                            }
+                        )
                     }
                     let response = try await client.invoke(
                         .tool(
@@ -151,11 +169,20 @@ enum ISHNativeClientCordisBridge {
                                 ?? response.displayText
                         )
                     }
+                    if let value = response.objectValue?["value"],
+                       let interaction = try SlashCommandInteractionRequest.hostValue(value) {
+                        return .interaction(interaction)
+                    }
                     return .success(
                         text: response.objectValue?["value"]?.displayText ?? response.displayText
                     )
                 }
-                registrations.append(try await commandRegistry.register(definition))
+                registrations.append(
+                    try await commandRegistry.register(
+                        definition,
+                        origin: .nativeClient
+                    )
+                )
             }
             let token = try await registry.activate(validated)
             return ISHNativeClientActivation(
@@ -170,6 +197,83 @@ enum ISHNativeClientCordisBridge {
             }
             throw error
         }
+    }
+}
+
+private extension SlashCommandInteractionResponse {
+    var hostJSON: JSONValue {
+        switch self {
+        case let .selected(optionID):
+            .object(["kind": .string("selected"), "optionId": .string(optionID)])
+        case .confirmed:
+            .object(["kind": .string("confirmed")])
+        case .denied:
+            .object(["kind": .string("denied")])
+        case .cancelled:
+            .object(["kind": .string("cancelled")])
+        }
+    }
+}
+
+private extension SlashCommandInteractionRequest {
+    static func hostValue(_ value: JSONValue) throws -> Self? {
+        guard let object = value.objectValue,
+              let kind = object["kind"]?.stringValue else { return nil }
+        switch kind {
+        case "popupSelect":
+            guard let title = object["title"]?.stringValue,
+                  !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  case let .array(rawOptions)? = object["options"],
+                  !rawOptions.isEmpty else {
+                throw ISHHostedToolError.executionFailed("Invalid popupSelect command result.")
+            }
+            var seen = Set<String>()
+            let options = try rawOptions.map { raw -> SlashCommandSelectOption in
+                guard let option = raw.objectValue,
+                      let id = option["id"]?.stringValue,
+                      let label = option["label"]?.stringValue,
+                      !id.isEmpty,
+                      !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      seen.insert(id).inserted else {
+                    throw ISHHostedToolError.executionFailed("Invalid popupSelect option.")
+                }
+                return SlashCommandSelectOption(
+                    id: id,
+                    label: label,
+                    detail: option["detail"]?.stringValue,
+                    active: option["active"] == .bool(true),
+                    confirmation: try option["confirmation"].map(parseConfirmation)
+                )
+            }
+            return .popupSelect(title: title, options: options)
+        case "confirmation":
+            return .confirmation(try parseConfirmation(value))
+        default:
+            return nil
+        }
+    }
+
+    static func parseConfirmation(_ value: JSONValue) throws -> SlashCommandConfirmation {
+        guard let object = value.objectValue,
+              let title = object["title"]?.stringValue,
+              let description = object["description"]?.stringValue,
+              let acknowledgeLabel = object["acknowledgeLabel"]?.stringValue,
+              let cancelLabel = object["cancelLabel"]?.stringValue,
+              let confirmLabel = object["confirmLabel"]?.stringValue,
+              !title.isEmpty,
+              !description.isEmpty,
+              !acknowledgeLabel.isEmpty,
+              !cancelLabel.isEmpty,
+              !confirmLabel.isEmpty else {
+            throw ISHHostedToolError.executionFailed("Invalid confirmation command result.")
+        }
+        return SlashCommandConfirmation(
+            title: title,
+            description: description,
+            acknowledgeLabel: acknowledgeLabel,
+            cancelLabel: cancelLabel,
+            confirmLabel: confirmLabel
+        )
     }
 }
 

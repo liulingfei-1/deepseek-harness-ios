@@ -7,6 +7,41 @@ import XCTest
 #endif
 
 final class ProviderProfileTests: XCTestCase {
+    func testCompactionSummaryRoutePersistsAsProfileAndModelPair() throws {
+        let suiteName = "com.llf.harnessmobile.compaction-route.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let directory = ProviderProfileDirectory.initial()
+        let profile = try XCTUnwrap(directory.activeProfile)
+        let route = CompactionSummaryRoute(
+            profileID: profile.id,
+            model: profile.defaultModel
+        )
+        let store = SettingsStore(defaults: defaults)
+
+        try store.saveCompactionSummaryRoute(route, in: directory)
+        XCTAssertEqual(store.loadCompactionSummaryRoute(in: directory), route)
+
+        try store.saveCompactionSummaryRoute(nil, in: directory)
+        XCTAssertNil(store.loadCompactionSummaryRoute(in: directory))
+    }
+
+    func testCompactionSummaryRouteRejectsPartialOrStaleSelection() throws {
+        let directory = ProviderProfileDirectory.initial()
+        let profile = try XCTUnwrap(directory.activeProfile)
+
+        XCTAssertThrowsError(
+            try CompactionSummaryRoute(profileID: profile.id, model: "missing")
+                .validated(in: directory)
+        )
+        XCTAssertThrowsError(
+            try CompactionSummaryRoute(profileID: "missing-profile", model: profile.defaultModel)
+                .validated(in: directory)
+        )
+    }
+
     func testLegacySingleConnectionMigratesFromCompatibilityFixture() throws {
         let fixture: ProviderProfileMigrationFixture = try loadProviderFixture(
             "provider-profile-migration-v1.json"
@@ -73,6 +108,95 @@ final class ProviderProfileTests: XCTestCase {
             decoded.activeProfile?.configuration().credentialReference,
             directory.activeProfile?.credentialReference
         )
+        // Version-1 fixtures predate compatibility and retry fields. Missing
+        // fields remain readable and resolve to conservative runtime defaults.
+        XCTAssertNil(decoded.activeProfile?.openAIWireProfile)
+        XCTAssertNil(decoded.activeProfile?.retryPolicy)
+    }
+
+    func testProfilePersistsWirePresetAndOfficialRetryConfiguration() throws {
+        let descriptor = ModelProviderCatalog.descriptor(for: .customOpenAICompatible)
+        let profile = ProviderProfile(
+            id: "private-gateway",
+            displayName: "Private Gateway",
+            providerID: .customOpenAICompatible,
+            wireProtocol: .openAIChatCompletions,
+            baseURL: "https://gateway.example/v1",
+            models: [ProviderModel(id: "model")],
+            defaultModel: "model",
+            reasoningMode: .providerDefault,
+            openAIWireProfile: .legacyGateway,
+            retryPolicy: ProviderRetryPolicyConfiguration(
+                mode: .normal,
+                maxRetries: 2,
+                retryableCodes: ["SERVER"],
+                backoff: .init(initialDelayMs: 25, maxDelayMs: 100, jitterRatio: 0)
+            ),
+            isCustom: descriptor.id == .customOpenAICompatible
+        )
+
+        let validated = try profile.validated()
+        let data = try JSONEncoder().encode(validated)
+        let decoded = try JSONDecoder().decode(ProviderProfile.self, from: data)
+        XCTAssertEqual(decoded, validated)
+        XCTAssertEqual(decoded.configuration().openAIWireProfile, .legacyGateway)
+        XCTAssertEqual(
+            try ModelRetryPolicy.resolved(decoded.configuration().retryPolicy).maxRetries,
+            2
+        )
+    }
+
+    func testModelCompatibilityOverridesRouteFieldsWithoutLosingExplicitFalse() throws {
+        let route = OpenAICompletionsCompatibility(
+            supportsReasoningEffort: true,
+            supportsUsageInStreaming: true,
+            maxTokensField: .maxTokens
+        )
+        let modelOverride = OpenAICompletionsCompatibility(
+            supportsReasoningEffort: false,
+            maxTokensField: .maxCompletionTokens
+        )
+        let profile = ProviderProfile(
+            id: "model-overrides",
+            displayName: "Model Overrides",
+            providerID: .customOpenAICompatible,
+            wireProtocol: .openAIChatCompletions,
+            baseURL: "https://gateway.example/v1",
+            models: [
+                ProviderModel(
+                    id: "special",
+                    openAICompatibility: modelOverride
+                )
+            ],
+            defaultModel: "special",
+            reasoningMode: .high,
+            openAIWireProfile: .legacyGateway,
+            openAICompatibility: route,
+            isCustom: true
+        )
+
+        let configuration = try profile.validated().configuration()
+        XCTAssertEqual(configuration.openAICompatibility?.supportsReasoningEffort, false)
+        XCTAssertEqual(configuration.openAICompatibility?.supportsUsageInStreaming, true)
+        XCTAssertEqual(
+            configuration.openAICompatibility?.maxTokensField,
+            .maxCompletionTokens
+        )
+    }
+
+    func testSelectedModelCarriesExplicitInputModalitiesIntoRequestSnapshot() throws {
+        var profile = ProviderProfile.catalogDefault(for: .anthropic)
+        profile.models.append(
+            ProviderModel(id: "text-only-private", inputModalities: [.text])
+        )
+
+        let vision = try profile.configuration(model: "claude-sonnet-4-5").validated()
+        XCTAssertEqual(vision.inputModalities, [.text, .image])
+        XCTAssertTrue(ModelProviderCatalog.supportsImageInput(vision))
+
+        let textOnly = try profile.configuration(model: "text-only-private").validated()
+        XCTAssertEqual(textOnly.inputModalities, [.text])
+        XCTAssertFalse(ModelProviderCatalog.supportsImageInput(textOnly))
     }
 
     func testDirectoryRejectsCredentialReferenceSharedByTwoProfiles() throws {

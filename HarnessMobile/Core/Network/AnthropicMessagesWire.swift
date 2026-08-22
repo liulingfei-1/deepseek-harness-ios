@@ -36,12 +36,26 @@ struct AnthropicMessagesRequest: Encodable, Sendable {
 
     enum ContentBlock: Encodable, Sendable {
         case text(String)
+        case image(mediaType: String, data: String)
         case toolUse(id: String, name: String, input: JSONValue)
         case toolResult(toolUseID: String, content: String, isError: Bool?)
+
+        private struct ImageSource: Encodable, Sendable {
+            let type = "base64"
+            let mediaType: String
+            let data: String
+
+            private enum CodingKeys: String, CodingKey {
+                case type
+                case mediaType = "media_type"
+                case data
+            }
+        }
 
         private enum CodingKeys: String, CodingKey {
             case type
             case text
+            case source
             case id
             case name
             case input
@@ -56,6 +70,12 @@ struct AnthropicMessagesRequest: Encodable, Sendable {
             case let .text(text):
                 try container.encode("text", forKey: .type)
                 try container.encode(text, forKey: .text)
+            case let .image(mediaType, data):
+                try container.encode("image", forKey: .type)
+                try container.encode(
+                    ImageSource(mediaType: mediaType, data: data),
+                    forKey: .source
+                )
             case let .toolUse(id, name, input):
                 try container.encode("tool_use", forKey: .type)
                 try container.encode(id, forKey: .id)
@@ -74,6 +94,8 @@ struct AnthropicMessagesRequest: Encodable, Sendable {
 enum AnthropicMessagesWireError: LocalizedError, Sendable, Equatable {
     case invalidToolArguments(String)
     case missingToolCallID
+    case unsupportedImageRole(String)
+    case unsupportedImageMIME(String)
 
     var errorDescription: String? {
         switch self {
@@ -81,16 +103,29 @@ enum AnthropicMessagesWireError: LocalizedError, Sendable, Equatable {
             return "工具 \(toolName) 的参数不是 Anthropic Messages 可接受的 JSON 对象。"
         case .missingToolCallID:
             return "工具结果缺少对应的 Tool Use ID。"
+        case let .unsupportedImageRole(role):
+            return "Anthropic Messages 不能在 \(role) 历史消息中携带图片。"
+        case let .unsupportedImageMIME(mimeType):
+            return "Anthropic Messages 不支持图片类型 \(mimeType)。"
         }
     }
 }
 
 enum AnthropicWireSerializer {
+    static func encodeRequest(_ request: ModelRequest) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return try encoder.encode(makeRequest(request))
+    }
+
     static func makeRequest(_ request: ModelRequest) throws -> AnthropicMessagesRequest {
         AnthropicMessagesRequest(
             model: request.configuration.model,
             system: request.systemPrompt,
-            messages: try makeMessages(request.messages),
+            messages: try makeMessages(
+                request.messages,
+                imagePayloads: request.imagePayloads
+            ),
             tools: request.tools.isEmpty ? nil : request.tools.map {
                 AnthropicMessagesRequest.Tool(
                     name: $0.name,
@@ -103,10 +138,12 @@ enum AnthropicWireSerializer {
     }
 
     static func makeMessages(
-        _ messages: [AgentMessage]
+        _ messages: [AgentMessage],
+        imagePayloads: [ModelImagePayload] = []
     ) throws -> [AnthropicMessagesRequest.Message] {
         var result: [AnthropicMessagesRequest.Message] = []
         var pendingToolResults: [AnthropicMessagesRequest.ContentBlock] = []
+        let payloads = Dictionary(uniqueKeysWithValues: imagePayloads.map { ($0.id, $0) })
 
         func flushToolResults() {
             guard !pendingToolResults.isEmpty else { return }
@@ -115,6 +152,9 @@ enum AnthropicWireSerializer {
         }
 
         for message in messages {
+            if message.role != .user, !message.imageAttachments.isEmpty {
+                throw AnthropicMessagesWireError.unsupportedImageRole(message.role.rawValue)
+            }
             switch message.role {
             case .tool:
                 guard let toolCallID = message.toolCallID, !toolCallID.isEmpty else {
@@ -129,10 +169,38 @@ enum AnthropicWireSerializer {
                 )
             case .user:
                 flushToolResults()
+                var blocks: [AnthropicMessagesRequest.ContentBlock] = []
+                if !message.content.isEmpty || message.imageAttachments.isEmpty {
+                    blocks.append(.text(message.content))
+                }
+                var omittedImages = 0
+                for reference in message.imageAttachments {
+                    guard let payload = payloads[reference.id], !payload.data.isEmpty else {
+                        omittedImages += 1
+                        continue
+                    }
+                    let mimeType = payload.mimeType.lowercased()
+                    guard Self.supportedImageMIMETypes.contains(mimeType) else {
+                        throw AnthropicMessagesWireError.unsupportedImageMIME(payload.mimeType)
+                    }
+                    blocks.append(
+                        .image(
+                            mediaType: mimeType,
+                            data: payload.data.base64EncodedString()
+                        )
+                    )
+                }
+                if omittedImages > 0 {
+                    blocks.append(
+                        .text(
+                            "[\(omittedImages) earlier image(s) omitted because the request image limit was reached.]"
+                        )
+                    )
+                }
                 result.append(
                     .init(
                         role: "user",
-                        content: [.text(message.content)]
+                        content: blocks
                     )
                 )
             case .assistant:
@@ -158,6 +226,10 @@ enum AnthropicWireSerializer {
         flushToolResults()
         return result
     }
+
+    private static let supportedImageMIMETypes: Set<String> = [
+        "image/jpeg", "image/png", "image/gif", "image/webp"
+    ]
 
     private static func toolInput(_ call: AgentToolCall) throws -> JSONValue {
         guard let data = call.arguments.data(using: .utf8),
@@ -271,8 +343,9 @@ struct AnthropicStreamDecoder: Sendable {
             emittedUsage = true
             return [usage]
         case "error":
-            throw ModelClientError.streamError(
-                envelope.error?.message ?? "Anthropic 流式响应失败。"
+            throw ModelClientError.providerStreamFailure(
+                code: envelope.error?.type,
+                message: envelope.error?.message ?? "Anthropic 流式响应失败。"
             )
         case "ping", "content_block_stop":
             return []

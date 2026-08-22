@@ -131,6 +131,69 @@ struct SetupView: View {
             : AnyShapeStyle(.orange)
     }
 
+    private var effectiveRetryPolicy: ProviderRetryPolicyConfiguration {
+        draft.retryPolicy ?? .upstreamDefault
+    }
+
+    private var retryModeBinding: Binding<ProviderRetryPolicyConfiguration.Mode> {
+        Binding(
+            get: { effectiveRetryPolicy.mode },
+            set: { mode in
+                var policy = effectiveRetryPolicy
+                policy.mode = mode
+                draft.retryPolicy = policy
+            }
+        )
+    }
+
+    private var retryCountBinding: Binding<Int> {
+        Binding(
+            get: { effectiveRetryPolicy.maxRetries ?? 5 },
+            set: { value in
+                var policy = effectiveRetryPolicy
+                policy.maxRetries = value
+                draft.retryPolicy = policy
+            }
+        )
+    }
+
+    private var wireProfileBinding: Binding<OpenAICompatibleWireProfile> {
+        Binding(
+            get: { draft.openAIWireProfile ?? OpenAICompatibleWireProfile.resolve(draft) },
+            set: { draft.openAIWireProfile = $0 }
+        )
+    }
+
+    private var effectiveOpenAICompatibility: OpenAICompletionsCompatibility {
+        (draft.openAIWireProfile ?? OpenAICompatibleWireProfile.resolve(draft))
+            .compatibilityBaseline
+            .overlaying(draft.openAICompatibility)
+    }
+
+    private func compatibilityBoolBinding(
+        _ keyPath: WritableKeyPath<OpenAICompletionsCompatibility, Bool?>
+    ) -> Binding<Bool> {
+        Binding(
+            get: { effectiveOpenAICompatibility[keyPath: keyPath] ?? false },
+            set: { value in
+                var compatibility = draft.openAICompatibility ?? .init()
+                compatibility[keyPath: keyPath] = value
+                draft.openAICompatibility = compatibility
+            }
+        )
+    }
+
+    private var maxTokensFieldBinding: Binding<OpenAICompletionsCompatibility.MaxTokensField> {
+        Binding(
+            get: { effectiveOpenAICompatibility.maxTokensField ?? .maxTokens },
+            set: { value in
+                var compatibility = draft.openAICompatibility ?? .init()
+                compatibility.maxTokensField = value
+                draft.openAICompatibility = compatibility
+            }
+        )
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -346,6 +409,75 @@ struct SetupView: View {
                 }
             }
 
+            if provider.wireProtocol == .openAIChatCompletions {
+                Picker("兼容协议", selection: wireProfileBinding) {
+                    ForEach(OpenAICompatibleWireProfile.allCases) { profile in
+                        Text(profile.title).tag(profile)
+                    }
+                }
+                Text("私有网关默认使用保守模式；只有网关明确支持时才开启 OpenAI 或 DeepSeek 扩展字段。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                DisclosureGroup("高级网关兼容") {
+                    Toggle(
+                        "发送 reasoning_effort",
+                        isOn: compatibilityBoolBinding(\.supportsReasoningEffort)
+                    )
+                    Toggle(
+                        "流式返回用量",
+                        isOn: compatibilityBoolBinding(\.supportsUsageInStreaming)
+                    )
+                    Toggle(
+                        "使用 developer 角色",
+                        isOn: compatibilityBoolBinding(\.supportsDeveloperRole)
+                    )
+                    Picker("输出 Token 字段", selection: maxTokensFieldBinding) {
+                        Text("max_tokens").tag(
+                            OpenAICompletionsCompatibility.MaxTokensField.maxTokens
+                        )
+                        Text("max_completion_tokens").tag(
+                            OpenAICompletionsCompatibility.MaxTokensField.maxCompletionTokens
+                        )
+                    }
+                    Toggle(
+                        "工具结果附带 name",
+                        isOn: compatibilityBoolBinding(\.requiresToolResultName)
+                    )
+                    Toggle(
+                        "工具结果后补 assistant",
+                        isOn: compatibilityBoolBinding(\.requiresAssistantAfterToolResult)
+                    )
+                    Toggle(
+                        "思考内容转为文本标签",
+                        isOn: compatibilityBoolBinding(\.requiresThinkingAsText)
+                    )
+                    Toggle(
+                        "回放 reasoning_content",
+                        isOn: compatibilityBoolBinding(
+                            \.requiresReasoningContentOnAssistantMessages
+                        )
+                    )
+                    Button("恢复预设兼容项") {
+                        draft.openAICompatibility = nil
+                    }
+                }
+            }
+
+            Picker("失败重试", selection: retryModeBinding) {
+                ForEach(ProviderRetryPolicyConfiguration.Mode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            if effectiveRetryPolicy.mode == .normal {
+                TextField("最大重试次数", value: retryCountBinding, format: .number)
+                    .keyboardType(.numberPad)
+            } else {
+                Text("持续重试会在每次失败后有界退避，直到成功、手动停止或 App 终止；每次重试仍写入轨迹。")
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+            }
+
             LabeledContent("Agent 循环", value: "无 App 总步数限制")
             Text("单次模型响应建议最多调用 8 个工具，手机同时执行最多 2 个并发安全工具，其余自动排队。Anthropic 扩展思考需保存签名块，当前仅开放服务默认和关闭。")
                 .font(.footnote)
@@ -464,6 +596,9 @@ struct SetupView: View {
                     models: modelsEnsuringSelection(visibleCatalog.models),
                     defaultModel: draft.model,
                     reasoningMode: draft.reasoningMode,
+                    openAIWireProfile: draft.openAIWireProfile,
+                    openAICompatibility: draft.openAICompatibility,
+                    retryPolicy: draft.retryPolicy ?? .upstreamDefault,
                     maxSteps: draft.maxSteps,
                     maxOutputTokens: draft.maxOutputTokens,
                     isCustom: isCustomProfile
@@ -584,7 +719,9 @@ private struct SetupModelCatalog {
                     id: discoveredModel.id,
                     name: discoveredModel.name ?? existing.name,
                     contextWindow: discoveredModel.contextWindow ?? existing.contextWindow,
-                    maxOutputTokens: discoveredModel.maxOutputTokens ?? existing.maxOutputTokens
+                    maxOutputTokens: discoveredModel.maxOutputTokens ?? existing.maxOutputTokens,
+                    inputModalities: existing.inputModalities,
+                    openAICompatibility: existing.openAICompatibility
                 )
             } else {
                 positions[discoveredModel.id] = models.count

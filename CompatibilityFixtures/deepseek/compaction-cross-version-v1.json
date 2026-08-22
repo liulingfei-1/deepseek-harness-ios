@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "project": "deepseek-ai/deepseek-harness",
+    "commit": "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
+    "contract": "dsh-compaction-basic replay-aware checkpoint projection"
+  },
+  "maximumUTF8Bytes": 5000,
+  "messages": [
+    {
+      "key": "old",
+      "id": "00000000-0000-0000-0000-000000000001",
+      "role": "user",
+      "content": "old transcript evidence ",
+      "repeatCount": 700
+    },
+    {
+      "key": "tool-call",
+      "id": "00000000-0000-0000-0000-000000000002",
+      "role": "assistant",
+      "content": "",
+      "toolCalls": [
+        { "id": "fixture-call", "name": "workspace_read", "arguments": "{\"path\":\"report.md\"}" }
+      ]
+    },
+    {
+      "key": "tool-result",
+      "id": "00000000-0000-0000-0000-000000000003",
+      "role": "tool",
+      "content": "report contents",
+      "toolCallID": "fixture-call",
+      "toolName": "workspace_read"
+    },
+    {
+      "key": "instructions",
+      "id": "00000000-0000-0000-0000-000000000004",
+      "role": "user",
+      "content": "Workspace instructions changed: keep the report local.",
+      "source": { "kind": "workspace-instructions", "form": "instructions", "changes": ["AGENTS.md"] }
+    },
+    {
+      "key": "image",
+      "id": "00000000-0000-0000-0000-000000000005",
+      "role": "user",
+      "content": "Inspect this screenshot.",
+      "imageAttachment": {
+        "id": "10000000-0000-0000-0000-000000000005",
+        "path": "attachments/screenshot.png",
+        "mimeType": "image/png",
+        "byteCount": 4096
+      }
+    },
+    {
+      "key": "reference",
+      "id": "00000000-0000-0000-0000-000000000006",
+      "role": "user",
+      "content": "Referenced session snapshot: previous diagnosis.",
+      "source": { "kind": "reference", "uri": "harness://sessions/fixture" }
+    },
+    {
+      "key": "cancelled-assistant",
+      "id": "00000000-0000-0000-0000-000000000007",
+      "role": "assistant",
+      "content": "Partial answer preserved before cancellation.",
+      "isIncomplete": true
+    },
+    {
+      "key": "recent-user",
+      "id": "00000000-0000-0000-0000-000000000008",
+      "role": "user",
+      "content": "Continue from the preserved prefix."
+    }
+  ],
+  "expected": {
+    "omittedKeys": ["old"],
+    "retainedKeys": ["tool-call", "tool-result", "instructions", "image", "reference", "cancelled-assistant", "recent-user"],
+    "toolCallID": "fixture-call",
+    "instructionSourceKind": "workspace-instructions",
+    "imagePath": "attachments/screenshot.png",
+    "referenceURI": "harness://sessions/fixture",
+    "incompleteAssistantKey": "cancelled-assistant",
+    "stateSummaryFragments": [
+      "Goal [active]: Finish parity remediation",
+      "1. [completed] Preserve tool transaction",
+      "- [active] Verify cancellation replay",
+      "Omitted transcript messages: 1"
+    ]
+  }
+}

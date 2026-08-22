@@ -75,6 +75,69 @@ struct ProviderProfilesView: View {
                 Text("默认 Profile 用于新请求；当前正在运行的请求不会在中途切换。API Key 只保存在各自的本机 Keychain 项中。")
             }
 
+            Section {
+                Picker("摘要模型", selection: compactionSummaryRouteBinding) {
+                    Text("跟随当前会话")
+                        .tag(nil as CompactionSummaryRoute?)
+                    ForEach(compactionSummaryRouteOptions) { option in
+                        Text("\(option.profileName) / \(option.route.model)")
+                            .tag(Optional(option.route))
+                    }
+                }
+                .disabled(model.isRunning)
+            } header: {
+                Text("上下文压缩")
+            } footer: {
+                Text("可让压缩摘要使用独立 Profile 和模型。独立路由在尚未输出摘要时失败，会记录诊断并回退到当前会话模型；半截输出、取消、截断或工具调用不会静默重试。")
+            }
+
+            Section {
+                Toggle("向 Agent 提供当前时间", isOn: timeContextEnabledBinding)
+                    .disabled(model.isRunning)
+                if model.timeContextSettings.isEnabled {
+                    Picker("显示时区", selection: timeContextTimeZoneBinding) {
+                        Text("跟随 iPhone（\(TimeZone.current.identifier)）")
+                            .tag(nil as String?)
+                        Text("UTC")
+                            .tag(Optional("UTC"))
+                    }
+                    Picker("刷新间隔", selection: timeContextRefreshBinding) {
+                        Text("每个模型步骤").tag(0)
+                        Text("1 分钟").tag(60_000)
+                        Text("5 分钟").tag(300_000)
+                        Text("15 分钟").tag(900_000)
+                    }
+                }
+            } header: {
+                Text("时间上下文")
+            } footer: {
+                Text("默认关闭。开启后时间会作为带来源的持久快照追加到消息尾部，而不是修改系统提示；刷新间隔内不会重复注入，因此稳定前缀和模型缓存不会被每秒时间变化破坏。")
+            }
+
+            Section {
+                Picker("自动标题", selection: sessionTitleModeBinding) {
+                    ForEach(SessionTitleAutomaticMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .disabled(model.isRunning)
+                if model.sessionTitleSettings.automaticMode != .disabled {
+                    Picker("标题模型", selection: sessionTitleRouteBinding) {
+                        Text("跟随会话模型")
+                            .tag(nil as CompactionSummaryRoute?)
+                        ForEach(compactionSummaryRouteOptions) { option in
+                            Text("\(option.profileName) / \(option.route.model)")
+                                .tag(Optional(option.route))
+                        }
+                    }
+                    .disabled(model.isRunning)
+                }
+            } header: {
+                Text("会话标题")
+            } footer: {
+                Text("模型标题使用独立的受限请求，不带工具，API Key 仍只由本机 Keychain 解析。生成失败会保留首条提问的本机标题；手动重命名会固定标题，除非从会话菜单选择重新生成。")
+            }
+
             Section("添加") {
                 ForEach(catalogProviders) { descriptor in
                     Button {
@@ -166,6 +229,105 @@ struct ProviderProfilesView: View {
         )
     }
 
+    private var compactionSummaryRouteOptions: [CompactionSummaryRouteOption] {
+        model.providerProfiles.flatMap { profile in
+            profile.models.map { providerModel in
+                CompactionSummaryRouteOption(
+                    profileName: profile.displayName,
+                    route: CompactionSummaryRoute(
+                        profileID: profile.id,
+                        model: providerModel.id
+                    )
+                )
+            }
+        }
+    }
+
+    private var compactionSummaryRouteBinding: Binding<CompactionSummaryRoute?> {
+        Binding(
+            get: { model.compactionSummaryRoute },
+            set: { route in
+                do {
+                    try model.setCompactionSummaryRoute(route)
+                    operationError = nil
+                } catch {
+                    operationError = error.localizedDescription
+                }
+            }
+        )
+    }
+
+    private var timeContextEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { model.timeContextSettings.isEnabled },
+            set: { enabled in
+                updateTimeContextSettings { $0.isEnabled = enabled }
+            }
+        )
+    }
+
+    private var timeContextTimeZoneBinding: Binding<String?> {
+        Binding(
+            get: { model.timeContextSettings.timeZoneIdentifier },
+            set: { identifier in
+                updateTimeContextSettings { $0.timeZoneIdentifier = identifier }
+            }
+        )
+    }
+
+    private var timeContextRefreshBinding: Binding<Int> {
+        Binding(
+            get: { model.timeContextSettings.refreshIntervalMilliseconds },
+            set: { interval in
+                updateTimeContextSettings { $0.refreshIntervalMilliseconds = interval }
+            }
+        )
+    }
+
+    private func updateTimeContextSettings(
+        _ update: (inout TimeContextSettings) -> Void
+    ) {
+        var settings = model.timeContextSettings
+        update(&settings)
+        do {
+            try model.setTimeContextSettings(settings)
+            operationError = nil
+        } catch {
+            operationError = error.localizedDescription
+        }
+    }
+
+    private var sessionTitleModeBinding: Binding<SessionTitleAutomaticMode> {
+        Binding(
+            get: { model.sessionTitleSettings.automaticMode },
+            set: { mode in
+                updateSessionTitleSettings { $0.automaticMode = mode }
+            }
+        )
+    }
+
+    private var sessionTitleRouteBinding: Binding<CompactionSummaryRoute?> {
+        Binding(
+            get: { model.sessionTitleSettings.route },
+            set: { route in
+                updateSessionTitleSettings { $0.route = route }
+            }
+        )
+    }
+
+    private func updateSessionTitleSettings(
+        _ update: (inout SessionTitleSettings) -> Void
+    ) {
+        var settings = model.sessionTitleSettings
+        update(&settings)
+        do {
+            try model.setSessionTitleSettings(settings)
+            operationError = nil
+        } catch {
+            operationError = error.localizedDescription
+        }
+    }
+
     private func hasCatalogProfile(_ providerID: ModelProviderID) -> Bool {
         model.providerProfiles.contains { profile in
             !profile.isCustom && profile.providerID == providerID
@@ -207,6 +369,13 @@ struct ProviderProfilesView: View {
             workingProfileID = nil
         }
     }
+}
+
+private struct CompactionSummaryRouteOption: Identifiable {
+    let profileName: String
+    let route: CompactionSummaryRoute
+
+    var id: String { route.profileID + "\u{0}" + route.model }
 }
 
 private enum ProviderEditorRoute: Identifiable {

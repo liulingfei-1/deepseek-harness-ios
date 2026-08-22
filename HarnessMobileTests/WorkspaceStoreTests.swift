@@ -1,4 +1,7 @@
+@preconcurrency import ImageIO
+import CoreGraphics
 import Foundation
+import UniformTypeIdentifiers
 import XCTest
 #if canImport(HarnessMobile)
 @testable import HarnessMobile
@@ -84,10 +87,108 @@ final class WorkspaceStoreTests: XCTestCase {
 
         let store = WorkspaceStore(root: root)
         try await store.writeText(path: "visible.md", text: "visible")
-        try await store.stageImage(Data([0x01, 0x02, 0x03]))
+        _ = try await store.stageImage(makeJPEG(width: 8, height: 8))
 
         let entries = try await store.listFiles()
         XCTAssertEqual(entries.map(\.path), ["visible.md"])
+    }
+
+    func testStageImageNormalizesDimensionsAndUsesInterpolatedUUIDFilename() async throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = WorkspaceStore(root: root)
+        let admitted = try await store.stageImageWithMetadata(
+            makeJPEG(width: 4_000, height: 1_000)
+        )
+        let second = try await store.stageImageWithMetadata(
+            makeJPEG(width: 32, height: 16)
+        )
+
+        XCTAssertLessThanOrEqual(max(admitted.width, admitted.height), 2_048)
+        XCTAssertEqual(admitted.width, 2_048)
+        XCTAssertEqual(admitted.height, 512)
+        XCTAssertEqual(admitted.originalWidth, 4_000)
+        XCTAssertEqual(admitted.originalHeight, 1_000)
+        XCTAssertEqual(admitted.reference.mimeType, "image/jpeg")
+        XCTAssertLessThanOrEqual(admitted.reference.byteCount, 4 * 1_024 * 1_024)
+        XCTAssertTrue(admitted.reference.path.hasPrefix("Attachments/"))
+        XCTAssertTrue(admitted.reference.path.hasSuffix(".jpg"))
+        XCTAssertFalse(admitted.reference.path.contains("id.uuidString"))
+        XCTAssertTrue(admitted.reference.path.contains(admitted.reference.id.uuidString.lowercased()))
+        XCTAssertNotEqual(admitted.reference.path, second.reference.path)
+
+        let stored = try await store.readAttachment(admitted.reference)
+        XCTAssertEqual(stored.count, admitted.reference.byteCount)
+        let dimensions = try imageDimensions(stored)
+        XCTAssertEqual(dimensions.width, admitted.width)
+        XCTAssertEqual(dimensions.height, admitted.height)
+        let latestReference = try await store.latestImageReference()
+        let latestData = try await store.latestImageData()
+        let secondData = try await store.readAttachment(second.reference)
+        XCTAssertEqual(latestReference, second.reference)
+        XCTAssertEqual(latestData, secondData)
+    }
+
+    func testStageImageRejectsMalformedAndOversizedInputBeforePersistence() async throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = WorkspaceStore(root: root)
+
+        do {
+            _ = try await store.stageImage(Data([0x01, 0x02, 0x03]))
+            XCTFail("Malformed image should be rejected")
+        } catch {
+            XCTAssertEqual(error as? ImageAdmissionError, .invalidImage)
+        }
+
+        do {
+            _ = try await store.stageImage(Data(count: 20 * 1_024 * 1_024 + 1))
+            XCTFail("Oversized input should be rejected")
+        } catch {
+            XCTAssertEqual(
+                error as? ImageAdmissionError,
+                .inputTooLarge(20 * 1_024 * 1_024)
+            )
+        }
+        let hasStagedImage = await store.hasStagedImage()
+        XCTAssertFalse(hasStagedImage)
+    }
+
+    func testStageImageAppliesContainerOrientationBeforePersistence() async throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = WorkspaceStore(root: root)
+
+        let admitted = try await store.stageImageWithMetadata(
+            makeJPEG(width: 40, height: 20, orientation: 6)
+        )
+
+        XCTAssertEqual(admitted.width, 20)
+        XCTAssertEqual(admitted.height, 40)
+        XCTAssertNil(admitted.originalWidth)
+        XCTAssertNil(admitted.originalHeight)
+    }
+
+    func testModelRequestImageVariantIsBoundedAndReused() async throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = WorkspaceStore(root: root)
+        let admitted = try await store.stageImageWithMetadata(
+            makeNoiseJPEG(width: 1_600, height: 1_600)
+        )
+        XCTAssertGreaterThan(
+            admitted.reference.byteCount,
+            WorkspaceStore.maximumModelRequestImageBytes
+        )
+
+        let first = try await store.readAttachmentForModelRequest(admitted.reference)
+        let second = try await store.readAttachmentForModelRequest(admitted.reference)
+        XCTAssertLessThanOrEqual(first.count, WorkspaceStore.maximumModelRequestImageBytes)
+        XCTAssertEqual(first, second)
+        XCTAssertLessThan(first.count, admitted.reference.byteCount)
+        let dimensions = try imageDimensions(first)
+        XCTAssertLessThanOrEqual(max(dimensions.width, dimensions.height), 2_048)
     }
 
     func testPluginArchiveIsStagedInPrivateImportDirectoryAndRemoved() async throws {
@@ -190,6 +291,53 @@ final class WorkspaceStoreTests: XCTestCase {
         XCTAssertFalse(bindings[0].readOnly)
     }
 
+    func testMountNameMayCollideWithExistingWorkspaceItem() async throws {
+        let root = temporaryDirectory()
+        let external = temporaryDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: external)
+        }
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("mounts", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try Data("existing".utf8).write(
+            to: root
+                .appendingPathComponent("mounts", isDirectory: true)
+                .appendingPathComponent("File Provider Storage")
+        )
+        try FileManager.default.createDirectory(at: external, withIntermediateDirectories: true)
+        try Data("mounted".utf8).write(to: external.appendingPathComponent("source.md"))
+
+        let store = WorkspaceStore(root: root, allowsUnscopedMounts: true)
+        let mount = try await store.mountFolder(
+            from: external,
+            preferredName: "File Provider Storage"
+        )
+
+        XCTAssertEqual(mount.status, .active)
+        let mountedText = try await store.readText(path: "mounts/File Provider Storage/source.md")
+        XCTAssertEqual(mountedText, "mounted")
+    }
+
+    func testCorruptedMountRegistryIsQuarantinedAndDoesNotBlockWorkspace() async throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let configuration = root.appendingPathComponent(".harness-mobile", isDirectory: true)
+        try FileManager.default.createDirectory(at: configuration, withIntermediateDirectories: true)
+        let registry = configuration.appendingPathComponent("workspace-mounts.json")
+        try Data("not-json".utf8).write(to: registry)
+
+        let store = WorkspaceStore(root: root, allowsUnscopedMounts: true)
+        let mounts = try await store.activateMounts()
+
+        XCTAssertTrue(mounts.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: registry.path))
+        let backups = try FileManager.default.contentsOfDirectory(atPath: configuration.path)
+        XCTAssertTrue(backups.contains { $0.hasPrefix("workspace-mounts.corrupt-") })
+    }
+
     func testReadOnlyMountRejectsWritesAndPersistsAcrossStoreReload() async throws {
         let root = temporaryDirectory()
         let external = temporaryDirectory()
@@ -257,5 +405,92 @@ final class WorkspaceStoreTests: XCTestCase {
     private func temporaryDirectory() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("HarnessMobileTests-\(UUID().uuidString)", isDirectory: true)
+    }
+
+    private func makeJPEG(width: Int, height: Int, orientation: Int? = nil) -> Data {
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        ) else { preconditionFailure("Could not create test image context") }
+        context.setFillColor(CGColor(red: 0.12, green: 0.42, blue: 0.78, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        guard let image = context.makeImage() else {
+            preconditionFailure("Could not create test image")
+        }
+        let output = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            output,
+            UTType.jpeg.identifier as CFString,
+            1,
+            nil
+        ) else { preconditionFailure("Could not create JPEG destination") }
+        var properties: [CFString: Any] = [
+            kCGImageDestinationLossyCompressionQuality: 0.96
+        ]
+        if let orientation {
+            properties[kCGImagePropertyOrientation] = orientation
+        }
+        CGImageDestinationAddImage(destination, image, properties as CFDictionary)
+        precondition(CGImageDestinationFinalize(destination))
+        return output as Data
+    }
+
+    private func makeNoiseJPEG(width: Int, height: Int) -> Data {
+        var pixels = Data(count: width * height * 4)
+        var image: CGImage? = nil
+        pixels.withUnsafeMutableBytes { rawBuffer in
+            guard let bytes = rawBuffer.bindMemory(to: UInt8.self).baseAddress else {
+                preconditionFailure("Could not allocate noise image")
+            }
+            var state: UInt64 = 0x9E37_79B9_7F4A_7C15
+            for offset in stride(from: 0, to: width * height * 4, by: 4) {
+                state = state &* 6_364_136_223_846_793_005 &+ 1
+                bytes[offset] = UInt8(truncatingIfNeeded: state >> 16)
+                bytes[offset + 1] = UInt8(truncatingIfNeeded: state >> 24)
+                bytes[offset + 2] = UInt8(truncatingIfNeeded: state >> 32)
+                bytes[offset + 3] = 255
+            }
+            let context = CGContext(
+                data: bytes,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: width * 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+            )
+            image = context?.makeImage()
+        }
+        guard let image else { preconditionFailure("Could not create noise image") }
+        let output = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            output,
+            UTType.jpeg.identifier as CFString,
+            1,
+            nil
+        ) else { preconditionFailure("Could not create noise JPEG destination") }
+        CGImageDestinationAddImage(
+            destination,
+            image,
+            [kCGImageDestinationLossyCompressionQuality: 0.98] as CFDictionary
+        )
+        precondition(CGImageDestinationFinalize(destination))
+        return output as Data
+    }
+
+    private func imageDimensions(_ data: Data) throws -> (width: Int, height: Int) {
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(data as CFData, nil))
+        let properties = try XCTUnwrap(
+            CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        )
+        let width = try XCTUnwrap(properties[kCGImagePropertyPixelWidth] as? NSNumber)
+        let height = try XCTUnwrap(properties[kCGImagePropertyPixelHeight] as? NSNumber)
+        return (width.intValue, height.intValue)
     }
 }

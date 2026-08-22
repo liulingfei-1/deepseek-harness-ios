@@ -7,6 +7,38 @@ import XCTest
 #endif
 
 final class ISHNativeClientTests: XCTestCase {
+    func testNativeCommandImageCapabilityIsOptionalAndRoundTrips() throws {
+        let command = ISHNativeClientCommandContribution(
+            name: "vision_status",
+            description: "Inspect an image.",
+            inputHint: "<query>",
+            inputImages: true,
+            order: 1,
+            action: ISHNativeClientActionDescriptor(
+                kind: .hostTool,
+                name: "vision_status_tool",
+                arguments: [:],
+                inputKey: "query"
+            )
+        )
+        let data = try JSONEncoder().encode(command)
+        let object = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        XCTAssertEqual(object["inputImages"] as? Bool, true)
+        XCTAssertEqual(
+            try JSONDecoder().decode(ISHNativeClientCommandContribution.self, from: data),
+            command
+        )
+
+        let legacy = Data(
+            "{\"name\":\"legacy\",\"description\":\"Legacy\",\"order\":1,\"action\":{\"kind\":\"hostTool\",\"name\":\"legacy_tool\",\"arguments\":{}}}".utf8
+        )
+        XCTAssertFalse(
+            try JSONDecoder().decode(ISHNativeClientCommandContribution.self, from: legacy).inputImages
+        )
+    }
+
     func testManifestValidationFailsClosedForUnknownRenderer() {
         let data = Data(
             """

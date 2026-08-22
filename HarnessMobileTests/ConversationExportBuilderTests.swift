@@ -7,6 +7,34 @@ import XCTest
 #endif
 
 final class ConversationExportBuilderTests: XCTestCase {
+    func testExportOmitsInternalRuntimeContextSnapshots() throws {
+        let internalMarker = "INTERNAL_RUNTIME_CONTEXT_MARKER"
+        let snapshot = AgentMessage(
+            role: .user,
+            content: internalMarker,
+            source: .object([
+                "kind": .string("plugin"),
+                "plugin": .string(AgentMessage.runtimeContextPluginID),
+                "form": .string("snapshot")
+            ])
+        )
+        let input = ConversationExportInput(
+            sessionID: UUID(),
+            title: "Cache-safe context",
+            providerID: "deepseek",
+            model: "deepseek-chat",
+            messages: [.user("visible question"), snapshot, .assistant("visible answer")]
+        )
+
+        for format in ConversationExportFormat.allCases {
+            let data = try ConversationExportBuilder.makeData(input: input, format: format)
+            let text = String(decoding: data, as: UTF8.self)
+            XCTAssertFalse(text.contains(internalMarker))
+            XCTAssertTrue(text.contains("visible question"))
+            XCTAssertTrue(text.contains("visible answer"))
+        }
+    }
+
     func testJSONExportRedactsTokensOmitsArgumentsAndIncludesFeedback() throws {
         let secret = "sk-abcdefghijklmnopqrstuvwxyz123456"
         let call = AgentToolCall(

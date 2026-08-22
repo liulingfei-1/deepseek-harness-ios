@@ -45,6 +45,7 @@ enum DevicePermissionStatus: String, Sendable, Equatable {
     case restricted
     case unavailable
     case notIntegrated
+    case systemManaged = "system_managed"
     case sessionOnly
 }
 
@@ -90,6 +91,7 @@ extension DevicePermissionCenter {
 struct SystemDevicePermissionStatusProvider: DevicePermissionStatusProviding {
     func authorizationStatuses() async -> [DevicePermissionSnapshot] {
         let notificationSettings = await UNUserNotificationCenter.current().notificationSettings()
+        let healthKitStatus = await healthKitStatus()
 
         return [
             snapshot(.camera, cameraStatus),
@@ -100,16 +102,21 @@ struct SystemDevicePermissionStatusProvider: DevicePermissionStatusProviding {
             snapshot(.notifications, notificationStatus(notificationSettings.authorizationStatus)),
             snapshot(.bluetooth, bluetoothStatus),
             // iOS has no non-invasive global local-network status API. A
-            // discovery probe is an actual operation and may prompt.
-            snapshot(.localNetwork, .notIntegrated),
+            // discovery probe is an actual operation and may prompt, so report
+            // this as system-managed instead of incorrectly claiming the
+            // already wired network tools are not integrated.
+            snapshot(.localNetwork, .systemManaged),
             snapshot(.contacts, contactsStatus),
             snapshot(.photos, photosStatus),
             snapshot(.calendar, eventStatus(for: .event)),
             snapshot(.reminders, eventStatus(for: .reminder)),
             snapshot(.mediaLibrary, mediaLibraryStatus),
             snapshot(.healthKit, healthKitStatus),
+            // The current development profile does not carry HomeKit/NFC
+            // entitlements. Keep their real handlers compiled but report the
+            // signed app boundary instead of implying hardware is enough.
             snapshot(.homeKit, .notIntegrated),
-            snapshot(.nfc, NFCNDEFReaderSession.readingAvailable ? .sessionOnly : .unavailable),
+            snapshot(.nfc, .notIntegrated),
         ]
     }
 
@@ -251,8 +258,43 @@ struct SystemDevicePermissionStatusProvider: DevicePermissionStatusProviding {
         }
     }
 
-    private var healthKitStatus: DevicePermissionStatus {
-        HKHealthStore.isHealthDataAvailable() ? .notIntegrated : .unavailable
+    private func healthKitStatus() async -> DevicePermissionStatus {
+        guard HKHealthStore.isHealthDataAvailable() else { return .unavailable }
+
+        let readTypes = Set<HKObjectType>([
+            HKObjectType.quantityType(forIdentifier: .stepCount),
+            HKObjectType.quantityType(forIdentifier: .heartRate),
+            HKObjectType.quantityType(forIdentifier: .restingHeartRate),
+            HKObjectType.quantityType(forIdentifier: .heartRateVariabilitySDNN),
+            HKObjectType.categoryType(forIdentifier: .sleepAnalysis)
+        ].compactMap { $0 })
+        guard !readTypes.isEmpty else { return .notIntegrated }
+
+        return await withCheckedContinuation { continuation in
+            HKHealthStore().getRequestStatusForAuthorization(
+                toShare: Set<HKSampleType>(),
+                read: readTypes
+            ) { status, error in
+                if error != nil {
+                    continuation.resume(returning: .notIntegrated)
+                    return
+                }
+                switch status {
+                case .shouldRequest:
+                    continuation.resume(returning: .notDetermined)
+                case .unnecessary:
+                    // Apple intentionally does not reveal whether read access
+                    // was allowed. Report the truthful system-managed state,
+                    // not a false green "authorized" status.
+                    continuation.resume(returning: .systemManaged)
+                case .unknown:
+                    continuation.resume(returning: .systemManaged)
+                @unknown default:
+                    continuation.resume(returning: .systemManaged)
+                }
+            }
+        }
     }
+
 }
 #endif

@@ -4,6 +4,9 @@ struct SettingsStore {
     private let defaults: UserDefaults
     private let legacyConfigurationKey = "agent.configuration.v1"
     private let providerDirectoryKey = "model.provider-directory.v1"
+    private let compactionSummaryRouteKey = "agent.compaction-summary-route.v1"
+    private let timeContextSettingsKey = "agent.time-context.v1"
+    private let sessionTitleSettingsKey = "agent.session-title.v1"
     private let toolApprovalGrantsKey = "tool.approval-grants.v1"
     private let defaultAgentPresetKey = "agent.default-preset.v1"
 
@@ -51,6 +54,60 @@ struct SettingsStore {
         let data = try JSONEncoder().encode(validated)
         defaults.set(data, forKey: providerDirectoryKey)
         defaults.removeObject(forKey: legacyConfigurationKey)
+    }
+
+    func loadCompactionSummaryRoute(
+        in directory: ProviderProfileDirectory
+    ) -> CompactionSummaryRoute? {
+        guard let data = defaults.data(forKey: compactionSummaryRouteKey),
+              let decoded = try? JSONDecoder().decode(CompactionSummaryRoute.self, from: data),
+              let validated = try? decoded.validated(in: directory) else {
+            return nil
+        }
+        return validated
+    }
+
+    func saveCompactionSummaryRoute(
+        _ route: CompactionSummaryRoute?,
+        in directory: ProviderProfileDirectory
+    ) throws {
+        guard let route else {
+            defaults.removeObject(forKey: compactionSummaryRouteKey)
+            return
+        }
+        let validated = try route.validated(in: directory)
+        defaults.set(try JSONEncoder().encode(validated), forKey: compactionSummaryRouteKey)
+    }
+
+    func loadTimeContextSettings() -> TimeContextSettings {
+        guard let data = defaults.data(forKey: timeContextSettingsKey),
+              let decoded = try? JSONDecoder().decode(TimeContextSettings.self, from: data),
+              let validated = try? decoded.validated() else {
+            return TimeContextSettings()
+        }
+        return validated
+    }
+
+    func saveTimeContextSettings(_ settings: TimeContextSettings) throws {
+        let validated = try settings.validated()
+        defaults.set(try JSONEncoder().encode(validated), forKey: timeContextSettingsKey)
+    }
+
+    func loadSessionTitleSettings(in directory: ProviderProfileDirectory) -> SessionTitleSettings {
+        guard let data = defaults.data(forKey: sessionTitleSettingsKey),
+              let decoded = try? JSONDecoder().decode(SessionTitleSettings.self, from: data),
+              let validated = try? decoded.validated(in: directory) else {
+            return SessionTitleSettings()
+        }
+        return validated
+    }
+
+    func saveSessionTitleSettings(
+        _ settings: SessionTitleSettings,
+        in directory: ProviderProfileDirectory
+    ) throws {
+        let validated = try settings.validated(in: directory)
+        defaults.set(try JSONEncoder().encode(validated), forKey: sessionTitleSettingsKey)
     }
 
     func loadToolApprovalGrants() -> [ToolApprovalGrant] {
@@ -109,6 +166,9 @@ struct SettingsStore {
     func clear() {
         defaults.removeObject(forKey: legacyConfigurationKey)
         defaults.removeObject(forKey: providerDirectoryKey)
+        defaults.removeObject(forKey: compactionSummaryRouteKey)
+        defaults.removeObject(forKey: timeContextSettingsKey)
+        defaults.removeObject(forKey: sessionTitleSettingsKey)
         defaults.removeObject(forKey: defaultAgentPresetKey)
     }
 

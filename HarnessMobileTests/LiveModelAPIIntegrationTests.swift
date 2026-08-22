@@ -75,6 +75,59 @@ final class LiveModelAPIIntegrationTests: XCTestCase {
         XCTAssertEqual(committed.first?.map(\.role), [.assistant, .tool])
         XCTAssertTrue(committed.last?.last?.content.contains("LOCAL_TOOL_OK") == true)
     }
+
+    func testNativePluginCompilerAppliesParentRepairGuidanceWhenExplicitlyEnabled() async throws {
+        guard let apiKey = ProcessInfo.processInfo.environment["HARNESS_LIVE_API_KEY"],
+              !apiKey.isEmpty else {
+            throw XCTSkip("Set HARNESS_LIVE_API_KEY only for an explicit live API test.")
+        }
+
+        let source = NativeAgentPluginSourceSnapshot(
+            schemaVersion: 1,
+            failureReason: "source-prepared",
+            sourceDigest: String(repeating: "c", count: 64),
+            source: ISHMarketplacePluginSource(
+                kind: .github,
+                location: "https://github.com/example/live-native-probe"
+            ),
+            packageName: "dsh-live-native-probe",
+            version: "1.0.0",
+            description: "One pure Cordis echo tool.",
+            files: [
+                NativeAgentPluginSourceFile(
+                    path: "index.js",
+                    content: """
+                    export function apply(ctx) {
+                      ctx.tools.register({
+                        name: 'phone_note_echo',
+                        description: 'Return the supplied note unchanged.',
+                        async execute(args) { return String(args.text ?? '') },
+                      })
+                    }
+                    """,
+                    truncated: false
+                )
+            ]
+        )
+        var configuration = AgentConfiguration()
+        configuration.reasoningMode = .off
+        let plugin = try await NativeAgentPluginCompiler(
+            client: OpenAICompatibleClient()
+        ).compile(
+            source: source,
+            configuration: configuration,
+            apiKey: apiKey,
+            allowedToolDefinitions: [],
+            compilerGuidance: """
+            The previous manifest failed validation. Preserve the phone_note_echo tool, use an object input schema with text as a required string and additionalProperties=false, use risk=pure, and use no base tools because the result can be returned directly.
+            """
+        )
+
+        XCTAssertEqual(plugin.id, "native-agent.dsh-live-native-probe")
+        XCTAssertEqual(plugin.tools.map { $0.name }, ["phone_note_echo"])
+        XCTAssertEqual(plugin.tools.first?.risk, .pure)
+        XCTAssertEqual(plugin.tools.first?.allowedTools, [String]())
+    }
 }
 
 private struct LiveProbeTool: LocalAgentTool {

@@ -213,7 +213,7 @@ struct SessionModelPickerView: View {
     @ViewBuilder
     private var modelSection: some View {
         Section {
-            TextField("手动模型 ID", text: $draft.model)
+            TextField("手动模型 ID", text: modelIDBinding)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .disabled(isSaving || model.isRunning || selectedProfile == nil)
@@ -247,6 +247,7 @@ struct SessionModelPickerView: View {
                 ForEach(filteredModels) { candidate in
                     Button {
                         draft.model = candidate.id
+                        draft.inputModalities = candidate.inputModalities
                     } label: {
                         SessionModelRow(
                             model: candidate,
@@ -298,6 +299,18 @@ struct SessionModelPickerView: View {
         } footer: {
             Text("刷新只使用该 Profile 已保存在 Keychain 中的同源 API Key。目录之外的模型可直接填写 ID。")
         }
+    }
+
+    private var modelIDBinding: Binding<String> {
+        Binding(
+            get: { draft.model },
+            set: { value in
+                draft.model = value
+                draft.inputModalities = visibleCatalog.models.first(
+                    where: { $0.id == value }
+                )?.inputModalities
+            }
+        )
     }
 
     private var inferenceSection: some View {
@@ -542,7 +555,9 @@ private struct SessionModelCatalog {
                     id: discoveredModel.id,
                     name: discoveredModel.name ?? current.name,
                     contextWindow: discoveredModel.contextWindow ?? current.contextWindow,
-                    maxOutputTokens: discoveredModel.maxOutputTokens ?? current.maxOutputTokens
+                    maxOutputTokens: discoveredModel.maxOutputTokens ?? current.maxOutputTokens,
+                    inputModalities: current.inputModalities,
+                    openAICompatibility: current.openAICompatibility
                 )
             } else {
                 positions[discoveredModel.id] = models.count

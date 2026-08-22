@@ -82,6 +82,47 @@ final class AppModelProviderProfileTests: XCTestCase {
         try await fixture.credentialStore.deleteAllAPIKeys()
     }
 
+    func testRemovingCompactionProviderAtomicallyReturnsSummaryRouteToInherited() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanFilesAndDefaults() }
+        let model = fixture.makeModel()
+        let first = try XCTUnwrap(model.activeProviderProfile)
+        try await model.saveProviderProfile(
+            first,
+            apiKey: "deepseek-fixture-secret",
+            makeActive: true,
+            existingProfileID: first.id
+        )
+        let second = ProviderProfile.catalogDefault(for: .openAI)
+        try await model.saveProviderProfile(
+            second,
+            apiKey: "openai-fixture-secret",
+            makeActive: false
+        )
+        let route = CompactionSummaryRoute(
+            profileID: second.id,
+            model: second.defaultModel
+        )
+        try model.setCompactionSummaryRoute(route)
+        try model.setSessionTitleSettings(
+            SessionTitleSettings(automaticMode: .allPrompts, route: route)
+        )
+
+        try await model.removeProviderProfile(id: second.id)
+
+        XCTAssertNil(model.compactionSummaryRoute)
+        XCTAssertEqual(model.sessionTitleSettings.automaticMode, .allPrompts)
+        XCTAssertNil(model.sessionTitleSettings.route)
+        XCTAssertNil(
+            fixture.settingsStore.loadCompactionSummaryRoute(in: model.providerDirectory)
+        )
+        XCTAssertEqual(
+            fixture.settingsStore.loadSessionTitleSettings(in: model.providerDirectory),
+            SessionTitleSettings(automaticMode: .allPrompts, route: nil)
+        )
+        try await fixture.credentialStore.deleteAllAPIKeys()
+    }
+
     func testDirectorySaveFailureLeavesCredentialAndProfileIntact() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanFilesAndDefaults() }

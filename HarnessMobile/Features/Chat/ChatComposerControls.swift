@@ -7,12 +7,14 @@ struct ChatInputBar: View {
     @Binding var selectedPhoto: PhotosPickerItem?
 
     let isRunning: Bool
+    let isSubmitting: Bool
+    let submissionStatus: String?
     let hasStagedImage: Bool
     let queuedInputs: [QueuedAgentInput]
-    let slashSuggestions: [SlashCommandDescriptor]
+    let triggerGroups: [InputTriggerSuggestionGroup]
     let onCamera: () -> Void
     let onShowCommands: () -> Void
-    let onSelectCommand: (SlashCommandDescriptor) -> Void
+    let onSelectSuggestion: (InputTriggerSuggestion) -> Void
     let onSend: (QueuedInputDisposition) -> Void
     let onCancel: () -> Void
     let onEditQueuedInput: (QueuedAgentInput) -> Void
@@ -36,10 +38,10 @@ struct ChatInputBar: View {
                 )
             }
 
-            if !slashSuggestions.isEmpty, draft.hasPrefix("/") {
-                SlashCommandPalette(
-                    commands: slashSuggestions,
-                    onSelect: onSelectCommand
+            if !triggerGroups.isEmpty {
+                InputTriggerPalette(
+                    groups: triggerGroups,
+                    onSelect: onSelectSuggestion
                 )
             }
 
@@ -48,6 +50,19 @@ struct ChatInputBar: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            if isSubmitting {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(submissionStatus ?? "正在准备请求")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(submissionStatus ?? "正在准备请求")
             }
 
             inputRow
@@ -103,7 +118,7 @@ struct ChatInputBar: View {
             }
             .submitLabel(.send)
             .onSubmit {
-                guard hasDraft else { return }
+                guard hasDraft, !isSubmitting else { return }
                 onSend(.queued)
             }
 
@@ -114,7 +129,7 @@ struct ChatInputBar: View {
                     Image(systemName: "arrow.triangle.branch")
                         .frame(width: 34, height: 40)
                 }
-                .disabled(!hasDraft)
+                .disabled(!hasDraft || isSubmitting)
                 .accessibilityLabel("作为 steer 发送")
                 .accessibilityHint("在下一个安全步骤改变当前任务方向")
                 .accessibilityIdentifier("chat-steer-button")
@@ -123,16 +138,25 @@ struct ChatInputBar: View {
             Button {
                 onSend(.queued)
             } label: {
-                Image(systemName: "arrow.up")
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                    .frame(width: 38, height: 38)
-                    .background(
-                        hasDraft ? Color.accentColor : Color.secondary.opacity(0.28),
-                        in: Circle()
-                    )
+                Group {
+                    if isSubmitting {
+                        ProgressView()
+                            .tint(.white)
+                    } else {
+                        Image(systemName: "arrow.up")
+                            .font(.headline)
+                    }
+                }
+                .foregroundStyle(.white)
+                .frame(width: 38, height: 38)
+                .background(
+                    hasDraft && !isSubmitting
+                        ? Color.accentColor
+                        : Color.secondary.opacity(0.28),
+                    in: Circle()
+                )
             }
-            .disabled(!hasDraft)
+            .disabled(!hasDraft || isSubmitting)
             .accessibilityLabel(isRunning ? "加入队列" : "发送")
             .accessibilityIdentifier("chat-send-button")
 
@@ -151,54 +175,185 @@ struct ChatInputBar: View {
     }
 }
 
-private struct SlashCommandPalette: View {
-    let commands: [SlashCommandDescriptor]
-    let onSelect: (SlashCommandDescriptor) -> Void
+private struct InputTriggerPalette: View {
+    let groups: [InputTriggerSuggestionGroup]
+    let onSelect: (InputTriggerSuggestion) -> Void
 
     var body: some View {
         ScrollView(.vertical) {
             LazyVStack(spacing: 0) {
-                ForEach(commands.prefix(8)) { command in
-                    Button {
-                        onSelect(command)
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: icon(for: command.name))
-                                .frame(width: 22)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("/\(command.name)")
-                                    .font(.body.monospaced())
-                                Text(command.description)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                            Spacer(minLength: 8)
-                        }
+                ForEach(groups) { group in
+                    Text(title(for: group.source))
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 8)
-                    }
-                    .buttonStyle(.plain)
-                    if command.id != commands.prefix(8).last?.id {
-                        Divider()
+                        .padding(.horizontal, 4)
+                        .padding(.top, 8)
+                        .padding(.bottom, 4)
+
+                    ForEach(group.suggestions.prefix(10)) { suggestion in
+                        Button {
+                            onSelect(suggestion)
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: suggestion.systemImage ?? "terminal")
+                                    .frame(width: 22)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(displayName(for: suggestion))
+                                        .font(.body.monospaced())
+                                    if let description = suggestion.description {
+                                        Text(description)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                }
+                                Spacer(minLength: 8)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 8)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
         }
-        .frame(maxHeight: 230)
-        .accessibilityLabel("命令列表")
+        .frame(maxHeight: 280)
+        .accessibilityLabel("输入建议")
     }
 
-    private func icon(for name: String) -> String {
-        switch name {
-        case "new": "plus.square"
-        case "clear": "trash"
-        case "plan": "list.bullet.clipboard"
-        case "model": "cpu"
-        case "compact": "arrow.down.right.and.arrow.up.left"
-        case "status": "gauge"
-        case "agent": "person.crop.circle.badge.checkmark"
-        default: "questionmark.circle"
+    private func title(for source: String) -> String {
+        switch source {
+        case "command": "命令"
+        case "skill": "Skills"
+        case "file": "文件"
+        case "history": "历史会话"
+        case "subagent": "子 Agent"
+        case "model": "模型"
+        case "agent": "Agent"
+        case "plugin": "插件"
+        case "session": "会话"
+        default: source
+        }
+    }
+
+    private func displayName(for suggestion: InputTriggerSuggestion) -> String {
+        if case .completion = suggestion.kind { return suggestion.name }
+        return "\(suggestion.trigger.rawValue)\(suggestion.name)"
+    }
+}
+
+struct SlashCommandInteractionSheet: View {
+    let pending: PendingSlashCommandInteraction
+    let onResolve: (SlashCommandInteractionResponse) -> Void
+
+    @State private var search = ""
+    @State private var gatedOption: SlashCommandSelectOption?
+    @State private var acknowledged = false
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                switch pending.request {
+                case let .popupSelect(title, options):
+                    popup(title: title, options: options)
+                case let .confirmation(confirmation):
+                    confirmationView(confirmation)
+                }
+            }
+            .navigationTitle("/\(pending.commandName)")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { onResolve(.cancelled) }
+                }
+            }
+        }
+    }
+
+    private func popup(
+        title: String,
+        options: [SlashCommandSelectOption]
+    ) -> some View {
+        List {
+            Section {
+                TextField("搜索", text: $search)
+            } header: {
+                Text(title)
+            }
+            if let gatedOption, let confirmation = gatedOption.confirmation {
+                Section(confirmation.title) {
+                    Text(confirmation.description)
+                    Toggle(confirmation.acknowledgeLabel, isOn: $acknowledged)
+                    Button(confirmation.confirmLabel) {
+                        onResolve(.selected(optionID: gatedOption.id))
+                    }
+                    .disabled(!acknowledged)
+                    Button(confirmation.cancelLabel, role: .cancel) {
+                        self.gatedOption = nil
+                        acknowledged = false
+                    }
+                }
+            } else {
+                Section {
+                    ForEach(filtered(options)) { option in
+                        Button {
+                            if option.confirmation == nil {
+                                onResolve(.selected(optionID: option.id))
+                            } else {
+                                gatedOption = option
+                                acknowledged = false
+                            }
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(option.label)
+                                    if let detail = option.detail {
+                                        Text(detail)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                Spacer()
+                                if option.active {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(.tint)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func confirmationView(
+        _ confirmation: SlashCommandConfirmation
+    ) -> some View {
+        Form {
+            Section(confirmation.title) {
+                Text(confirmation.description)
+                Toggle(confirmation.acknowledgeLabel, isOn: $acknowledged)
+            }
+            Section {
+                Button(confirmation.confirmLabel) { onResolve(.confirmed) }
+                    .disabled(!acknowledged)
+                Button(confirmation.cancelLabel, role: .destructive) {
+                    onResolve(.denied)
+                }
+            }
+        }
+    }
+
+    private func filtered(
+        _ options: [SlashCommandSelectOption]
+    ) -> [SlashCommandSelectOption] {
+        let needle = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !needle.isEmpty else { return options }
+        return options.filter {
+            $0.label.lowercased().contains(needle)
+                || ($0.detail?.lowercased().contains(needle) ?? false)
         }
     }
 }

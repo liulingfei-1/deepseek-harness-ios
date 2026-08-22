@@ -23,6 +23,8 @@ private struct GenericUserQuestionSheet: View {
     let pending: ContinuationUserQuestionProvider.Pending
 
     @State private var drafts: [String: Draft]
+    @State private var index = 0
+    @State private var validationMessage: String?
 
     init(pending: ContinuationUserQuestionProvider.Pending) {
         self.pending = pending
@@ -35,72 +37,159 @@ private struct GenericUserQuestionSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                ForEach(pending.request.questions) { question in
-                    questionSection(question)
-                        .accessibilityIdentifier("ask-user-question-\(question.id)")
+            VStack(spacing: 0) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        if let header = question.header {
+                            Text(header)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Text(question.question)
+                            .font(.title3.weight(.semibold))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        if let detail = question.detail {
+                            NativeMarkdownText(source: detail)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .textSelection(.enabled)
+                        }
+
+                        optionList(for: question)
+
+                        if let validationMessage {
+                            Label(validationMessage, systemImage: "exclamationmark.circle")
+                                .font(.footnote)
+                                .foregroundStyle(.red)
+                        }
+                    }
+                    .padding(20)
+                    .accessibilityIdentifier("ask-user-question-\(question.id)")
                 }
+
+                Divider()
+
+                HStack(spacing: 12) {
+                    Button {
+                        move(to: index - 1)
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .frame(width: 30, height: 30)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(index == 0)
+                    .accessibilityLabel("上一题")
+
+                    Text("\(index + 1) / \(pending.request.questions.count)")
+                        .font(.footnote.monospacedDigit())
+                        .foregroundStyle(.secondary)
+
+                    Button {
+                        move(to: index + 1)
+                    } label: {
+                        Image(systemName: "chevron.right")
+                            .frame(width: 30, height: 30)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(index == pending.request.questions.count - 1)
+                    .accessibilityLabel("下一题")
+
+                    Spacer(minLength: 0)
+
+                    Button("跳过", action: skipCurrent)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("ask-user-skip-\(question.id)")
+
+                    Button(primaryActionTitle, action: continueFlow)
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityIdentifier("ask-user-submit")
+                }
+                .padding(16)
             }
             .accessibilityIdentifier("ask-user-question-sheet")
             .navigationTitle("需要你的选择")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") {
+                    Button {
                         model.cancelPendingUserQuestion()
+                    } label: {
+                        Image(systemName: "xmark")
                     }
+                    .accessibilityLabel("取消提问")
                     .accessibilityIdentifier("ask-user-cancel")
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("提交", action: submit)
-                        .disabled(!canSubmit)
-                        .accessibilityIdentifier("ask-user-submit")
                 }
             }
         }
         .interactiveDismissDisabled()
     }
 
-    private var canSubmit: Bool {
-        pending.request.questions.allSatisfy { question in
-            let draft = drafts[question.id] ?? Draft()
-            return draft.skipped || isAnswered(draft)
-        }
+    private var question: AskUserQuestionItem {
+        pending.request.questions[index]
     }
 
-    private func questionSection(_ question: AskUserQuestionItem) -> some View {
-        Section {
-            if let detail = question.detail {
-                ScrollView(.vertical) {
-                    NativeMarkdownText(source: detail)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-                }
-                .frame(maxHeight: 220)
-            }
+    private var primaryActionTitle: String {
+        index == pending.request.questions.count - 1 ? "提交" : "下一题"
+    }
 
+    @ViewBuilder
+    private func optionList(for question: AskUserQuestionItem) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
             if let options = question.options {
-                ForEach(options, id: \.label) { option in
+                ForEach(Array(options.enumerated()), id: \.element.label) { optionIndex, option in
+                    let display = recommendedDisplay(for: option.label)
                     Button {
                         toggle(option.label, for: question)
                     } label: {
-                        HStack(alignment: .firstTextBaseline, spacing: 10) {
-                            Image(
-                                systemName: isSelected(option.label, for: question)
-                                    ? selectedIcon(for: question)
-                                    : unselectedIcon(for: question)
-                            )
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(option.label)
-                                    .foregroundStyle(.primary)
+                        HStack(alignment: .top, spacing: 10) {
+                            if question.multiSelect {
+                                Image(
+                                    systemName: isSelected(option.label, for: question)
+                                        ? "checkmark.square.fill"
+                                        : "square"
+                                )
+                                .foregroundStyle(isSelected(option.label, for: question) ? Color.accentColor : Color.secondary)
+                            } else {
+                                Text(String(optionIndex + 1))
+                                    .font(.caption.monospacedDigit().weight(.semibold))
+                                    .foregroundStyle(isSelected(option.label, for: question) ? Color.white : Color.secondary)
+                                    .frame(width: 24, height: 24)
+                                    .background(
+                                        isSelected(option.label, for: question)
+                                            ? Color.accentColor
+                                            : Color(uiColor: .tertiarySystemFill)
+                                    )
+                                    .clipShape(Circle())
+                            }
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 6) {
+                                    Text(display.label)
+                                        .font(.body.weight(.medium))
+                                        .foregroundStyle(.primary)
+                                    if display.recommended {
+                                        Text("推荐")
+                                            .font(.caption2.weight(.semibold))
+                                            .foregroundStyle(.tint)
+                                    }
+                                }
                                 if let description = option.description {
                                     Text(description)
                                         .font(.footnote)
                                         .foregroundStyle(.secondary)
                                 }
                             }
-                            Spacer(minLength: 8)
+                            Spacer(minLength: 0)
                         }
+                        .padding(12)
+                        .background(
+                            isSelected(option.label, for: question)
+                                ? Color.accentColor.opacity(0.10)
+                                : Color(uiColor: .secondarySystemBackground)
+                        )
+                        .clipShape(.rect(cornerRadius: 8))
                         .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
@@ -116,25 +205,13 @@ private struct GenericUserQuestionSheet: View {
                 axis: .vertical
             )
             .lineLimit(2...8)
+            .textFieldStyle(.roundedBorder)
             .accessibilityIdentifier("ask-user-custom-\(question.id)")
 
-            Button {
-                skip(question)
-            } label: {
-                Label(
-                    isSkipped(question) ? "已跳过" : "跳过本题",
-                    systemImage: isSkipped(question) ? "checkmark" : "forward.end"
-                )
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .disabled(isSkipped(question))
-            .accessibilityIdentifier("ask-user-skip-\(question.id)")
-        } header: {
-            Text(question.header ?? question.question)
-        } footer: {
-            if question.header != nil {
-                Text(question.question)
+            if isSkipped(question) {
+                Label("本题已跳过", systemImage: "forward.end.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -150,14 +227,6 @@ private struct GenericUserQuestionSheet: View {
 
     private func isSkipped(_ question: AskUserQuestionItem) -> Bool {
         drafts[question.id]?.skipped == true
-    }
-
-    private func selectedIcon(for question: AskUserQuestionItem) -> String {
-        question.multiSelect ? "checkmark.square.fill" : "largecircle.fill.circle"
-    }
-
-    private func unselectedIcon(for question: AskUserQuestionItem) -> String {
-        question.multiSelect ? "square" : "circle"
     }
 
     private func toggle(_ label: String, for question: AskUserQuestionItem) {
@@ -176,10 +245,12 @@ private struct GenericUserQuestionSheet: View {
             draft.custom = ""
         }
         drafts[question.id] = draft
-    }
-
-    private func skip(_ question: AskUserQuestionItem) {
-        drafts[question.id] = Draft(skipped: true)
+        validationMessage = nil
+        if !question.multiSelect,
+           draft.selected.contains(label),
+           index < pending.request.questions.count - 1 {
+            index += 1
+        }
     }
 
     private func customBinding(for question: AskUserQuestionItem) -> Binding<String> {
@@ -193,14 +264,53 @@ private struct GenericUserQuestionSheet: View {
                     draft.selected.removeAll()
                 }
                 drafts[question.id] = draft
+                validationMessage = nil
             }
         )
     }
 
-    private func submit() {
-        guard canSubmit else { return }
+    private func move(to target: Int) {
+        index = min(max(0, target), pending.request.questions.count - 1)
+        validationMessage = nil
+    }
+
+    private func continueFlow() {
+        let draft = drafts[question.id] ?? Draft()
+        guard draft.skipped || isAnswered(draft) else {
+            validationMessage = "请回答或跳过本题。"
+            return
+        }
+        if index < pending.request.questions.count - 1 {
+            move(to: index + 1)
+        } else {
+            submit()
+        }
+    }
+
+    private func skipCurrent() {
+        var updated = drafts
+        updated[question.id] = Draft(skipped: true)
+        drafts = updated
+        validationMessage = nil
+        if index < pending.request.questions.count - 1 {
+            index += 1
+        } else {
+            submit(updated)
+        }
+    }
+
+    private func submit(_ values: [String: Draft]? = nil) {
+        let values = values ?? drafts
+        if let missingIndex = pending.request.questions.firstIndex(where: { question in
+            let draft = values[question.id] ?? Draft()
+            return !draft.skipped && !isAnswered(draft)
+        }) {
+            index = missingIndex
+            validationMessage = "还有问题未回答；可以回答或逐题跳过。"
+            return
+        }
         let answers = pending.request.questions.map { question in
-            let draft = drafts[question.id] ?? Draft()
+            let draft = values[question.id] ?? Draft()
             if draft.skipped {
                 return AskUserQuestionAnswerItem(id: question.id)
             }
@@ -215,6 +325,14 @@ private struct GenericUserQuestionSheet: View {
             )
         }
         model.answerPendingUserQuestion(AskUserQuestionAnswer(answers: answers))
+    }
+
+    private func recommendedDisplay(for label: String) -> (label: String, recommended: Bool) {
+        let suffixes = [" (Recommended)", "（Recommended）", " (推荐)", "（推荐）"]
+        for suffix in suffixes where label.lowercased().hasSuffix(suffix.lowercased()) {
+            return (String(label.dropLast(suffix.count)), true)
+        }
+        return (label, false)
     }
 }
 
@@ -325,175 +443,5 @@ private struct PlanReviewSheet: View {
                 ]
             )
         )
-    }
-}
-
-private struct NativeMarkdownText: View {
-    let source: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
-                switch block {
-                case let .heading(level, text):
-                    Text(inlineMarkdown(text))
-                        .font(headingFont(level: level))
-                        .fontWeight(.semibold)
-                case let .paragraph(text):
-                    Text(inlineMarkdown(text))
-                        .font(.body)
-                case let .ordered(marker, text):
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(marker)
-                            .font(.body.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                            .frame(minWidth: 20, alignment: .trailing)
-                        Text(inlineMarkdown(text))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                case let .unordered(text):
-                    HStack(alignment: .firstTextBaseline, spacing: 10) {
-                        Text("•")
-                            .foregroundStyle(.secondary)
-                        Text(inlineMarkdown(text))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                case let .quote(text):
-                    HStack(alignment: .top, spacing: 10) {
-                        Capsule()
-                            .fill(Color.secondary.opacity(0.45))
-                            .frame(width: 3)
-                        Text(inlineMarkdown(text))
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                case let .code(text):
-                    ScrollView(.horizontal) {
-                        Text(text)
-                            .font(.body.monospaced())
-                            .textSelection(.enabled)
-                            .padding(10)
-                    }
-                    .background(Color(uiColor: .secondarySystemBackground))
-                    .clipShape(.rect(cornerRadius: 6))
-                }
-            }
-        }
-    }
-
-    private var blocks: [NativeMarkdownBlock] {
-        NativeMarkdownBlock.parse(source)
-    }
-
-    private func headingFont(level: Int) -> Font {
-        switch level {
-        case 1: .title3
-        case 2: .headline
-        default: .subheadline
-        }
-    }
-
-    private func inlineMarkdown(_ text: String) -> AttributedString {
-        (try? AttributedString(markdown: text)) ?? AttributedString(text)
-    }
-}
-
-private enum NativeMarkdownBlock: Equatable {
-    case heading(level: Int, text: String)
-    case paragraph(String)
-    case ordered(marker: String, text: String)
-    case unordered(String)
-    case quote(String)
-    case code(String)
-
-    static func parse(_ source: String) -> [Self] {
-        var blocks: [Self] = []
-        var paragraphLines: [String] = []
-        var codeLines: [String] = []
-        var isInCodeFence = false
-
-        func flushParagraph() {
-            guard !paragraphLines.isEmpty else { return }
-            blocks.append(.paragraph(paragraphLines.joined(separator: " ")))
-            paragraphLines.removeAll(keepingCapacity: true)
-        }
-
-        func flushCode() {
-            blocks.append(.code(codeLines.joined(separator: "\n")))
-            codeLines.removeAll(keepingCapacity: true)
-        }
-
-        for rawLine in source.split(separator: "\n", omittingEmptySubsequences: false) {
-            let line = String(rawLine)
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-
-            if trimmed.hasPrefix("```") {
-                if isInCodeFence {
-                    flushCode()
-                } else {
-                    flushParagraph()
-                }
-                isInCodeFence.toggle()
-                continue
-            }
-
-            if isInCodeFence {
-                codeLines.append(line)
-                continue
-            }
-
-            guard !trimmed.isEmpty else {
-                flushParagraph()
-                continue
-            }
-
-            if let heading = heading(in: trimmed) {
-                flushParagraph()
-                blocks.append(.heading(level: heading.level, text: heading.text))
-            } else if let ordered = orderedItem(in: trimmed) {
-                flushParagraph()
-                blocks.append(.ordered(marker: ordered.marker, text: ordered.text))
-            } else if let text = unorderedItem(in: trimmed) {
-                flushParagraph()
-                blocks.append(.unordered(text))
-            } else if trimmed.hasPrefix("> ") {
-                flushParagraph()
-                blocks.append(.quote(String(trimmed.dropFirst(2))))
-            } else {
-                paragraphLines.append(trimmed)
-            }
-        }
-
-        flushParagraph()
-        if isInCodeFence || !codeLines.isEmpty {
-            flushCode()
-        }
-        return blocks
-    }
-
-    private static func heading(in line: String) -> (level: Int, text: String)? {
-        let markers = line.prefix { $0 == "#" }
-        guard !markers.isEmpty,
-              markers.count <= 6,
-              line.dropFirst(markers.count).first == " " else { return nil }
-        return (
-            markers.count,
-            String(line.dropFirst(markers.count + 1))
-        )
-    }
-
-    private static func orderedItem(in line: String) -> (marker: String, text: String)? {
-        let digits = line.prefix { $0.isNumber }
-        guard !digits.isEmpty else { return nil }
-        let suffix = line.dropFirst(digits.count)
-        guard suffix.hasPrefix(". ") else { return nil }
-        return (String(digits) + ".", String(suffix.dropFirst(2)))
-    }
-
-    private static func unorderedItem(in line: String) -> String? {
-        for marker in ["- ", "* ", "+ "] where line.hasPrefix(marker) {
-            return String(line.dropFirst(marker.count))
-        }
-        return nil
     }
 }

@@ -188,9 +188,14 @@ private enum WorkStateToolSupport {
     ])
 
     static func status(from value: JSONValue?) throws -> ConversationItemStatus {
-        guard let rawValue = value?.stringValue,
+        let rawValue = value?.stringValue
+        guard let rawValue,
               let status = ConversationItemStatus(rawValue: rawValue) else {
-            throw LocalToolError.invalidArguments
+            throw LocalToolError.invalidEnumValue(
+                field: "status",
+                value: rawValue,
+                allowed: ConversationItemStatus.allCases.map(\.rawValue)
+            )
         }
         return status
     }

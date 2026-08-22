@@ -3,6 +3,8 @@ import Foundation
 enum CordisAgentServiceKeys {
     static let tools = CordisServiceKey<CordisToolRuntime>("tools")
     static let systemPrompt = CordisServiceKey<CordisSystemPromptRuntime>("systemPrompt")
+    static let fileSystem = CordisServiceKey<any HarnessFileSystem>("fs")
+    static let jobs = CordisServiceKey<any HarnessJobManaging>("jobs")
 }
 
 /// Core agent services are ordinary Cordis services. The host keeps these actor
@@ -233,10 +235,25 @@ actor CordisToolRuntime {
 }
 
 struct CordisPromptAssemblyInput: Sendable, Equatable {
+    let agentID: UUID
     let runID: UUID
     let step: Int
     let configuration: AgentConfiguration
     let messages: [AgentMessage]
+
+    init(
+        runID: UUID,
+        agentID: UUID? = nil,
+        step: Int,
+        configuration: AgentConfiguration,
+        messages: [AgentMessage]
+    ) {
+        self.agentID = agentID ?? runID
+        self.runID = runID
+        self.step = step
+        self.configuration = configuration
+        self.messages = messages
+    }
 }
 
 typealias CordisPromptTextProvider = @Sendable (CordisPromptAssemblyInput) async throws -> String
@@ -246,12 +263,20 @@ struct CordisPromptSection: Sendable {
     let name: String
     let order: Int
     let complete: Bool
+    let interpolate: Bool
     let text: CordisPromptTextProvider
 
-    init(name: String, order: Int, complete: Bool = false, text: String) {
+    init(
+        name: String,
+        order: Int,
+        complete: Bool = false,
+        interpolate: Bool = true,
+        text: String
+    ) {
         self.name = name
         self.order = order
         self.complete = complete
+        self.interpolate = interpolate
         self.text = { _ in text }
     }
 
@@ -259,11 +284,13 @@ struct CordisPromptSection: Sendable {
         name: String,
         order: Int,
         complete: Bool = false,
+        interpolate: Bool = true,
         text: @escaping CordisPromptTextProvider
     ) {
         self.name = name
         self.order = order
         self.complete = complete
+        self.interpolate = interpolate
         self.text = text
     }
 }
@@ -271,17 +298,25 @@ struct CordisPromptSection: Sendable {
 struct CordisPromptContextContribution: Sendable {
     let name: String
     let order: Int
+    let interpolate: Bool
     let text: CordisPromptTextProvider
 
-    init(name: String, order: Int, text: String) {
+    init(name: String, order: Int, interpolate: Bool = true, text: String) {
         self.name = name
         self.order = order
+        self.interpolate = interpolate
         self.text = { _ in text }
     }
 
-    init(name: String, order: Int, text: @escaping CordisPromptTextProvider) {
+    init(
+        name: String,
+        order: Int,
+        interpolate: Bool = true,
+        text: @escaping CordisPromptTextProvider
+    ) {
         self.name = name
         self.order = order
+        self.interpolate = interpolate
         self.text = text
     }
 }
@@ -486,11 +521,13 @@ actor CordisSystemPromptRuntime {
             assembledSections.append(
                 CordisAssembledPromptContribution(
                     name: entry.contribution.name,
-                    text: try Self.interpolate(
-                        raw,
-                        contributionName: entry.contribution.name,
-                        variables: variableMap
-                    )
+                    text: entry.contribution.interpolate
+                        ? try Self.interpolate(
+                            raw,
+                            contributionName: entry.contribution.name,
+                            variables: variableMap
+                        )
+                        : raw
                 )
             )
         }
@@ -511,11 +548,13 @@ actor CordisSystemPromptRuntime {
             assembledContexts.append(
                 CordisAssembledPromptContribution(
                     name: entry.contribution.name,
-                    text: try Self.interpolate(
-                        raw,
-                        contributionName: entry.contribution.name,
-                        variables: variableMap
-                    )
+                    text: entry.contribution.interpolate
+                        ? try Self.interpolate(
+                            raw,
+                            contributionName: entry.contribution.name,
+                            variables: variableMap
+                        )
+                        : raw
                 )
             )
         }

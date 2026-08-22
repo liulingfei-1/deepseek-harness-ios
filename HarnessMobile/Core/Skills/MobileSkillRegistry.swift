@@ -74,6 +74,10 @@ actor MobileSkillRegistry {
     }
 
     func catalog() async throws -> [MobileSkillSummary] {
+        try await definitions().map(\.summary)
+    }
+
+    func definitions() async throws -> [MobileSkillDefinition] {
         let candidates = try await workspaceStore.skillDocuments()
         var winners: [String: MobileSkillDefinition] = [:]
 
@@ -88,7 +92,7 @@ actor MobileSkillRegistry {
                 winners[name] = definition
             }
         }
-        return winners.values.map(\.summary).sorted { $0.name < $1.name }
+        return winners.values.sorted { $0.summary.name < $1.summary.name }
     }
 
     func definition(named rawName: String) async throws -> MobileSkillDefinition {
@@ -285,5 +289,237 @@ actor MobileSkillRegistry {
             .replacingOccurrences(of: "&", with: "&amp;")
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
+    }
+}
+
+enum WorkspaceInstructionMutation: Sendable, Equatable {
+    /// A successful read observes a path without changing its contents.
+    case observed
+    /// A successful write/edit may replace the inode while retaining the path.
+    case replaced
+    /// A caller removed the path. The tombstone prevents stale cached content
+    /// from being re-injected until the path is recreated.
+    case deleted
+}
+
+/// Loads the mobile equivalent of DeepSeek Harness's workspace instruction
+/// chain. The app workspace is the current project root, so exact reads are
+/// used instead of `workspace_list_files` (which intentionally hides dotfiles).
+actor WorkspaceInstructionLoader {
+    private struct Candidate {
+        let path: String
+        let displayPath: String
+        let directory: String
+    }
+
+    private let workspaceStore: WorkspaceStore
+    private let maximumSourceBytes = 64 * 1_024
+    private let maximumTotalBytes = 48 * 1_024
+    private var touchedPaths = Set<String>()
+    private enum CachedState {
+        case loaded(String)
+        case tombstone
+        case unavailable
+    }
+
+    private struct CachedCandidate {
+        let version: HarnessFsVersion?
+        let state: CachedState
+    }
+
+    // This is deliberately a projection cache, never an authority. A stat
+    // version change or an explicit mutation notification invalidates it.
+    private var cache: [String: CachedCandidate] = [:]
+
+    init(workspaceStore: WorkspaceStore) {
+        self.workspaceStore = workspaceStore
+    }
+
+    func noteTouchedPath(
+        _ rawPath: String,
+        mutation: WorkspaceInstructionMutation = .observed
+    ) {
+        let trimmedRawPath = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        var normalized = trimmedRawPath
+            .split(separator: "/", omittingEmptySubsequences: true)
+            .reduce(into: [String]()) { parts, component in
+                if component == "." { return }
+                if component == ".." {
+                    if !parts.isEmpty { parts.removeLast() }
+                    return
+                }
+                parts.append(String(component))
+            }
+            .joined(separator: "/")
+        if (trimmedRawPath == "/workspace" || trimmedRawPath.hasPrefix("/workspace/")),
+           normalized == "workspace" || normalized.hasPrefix("workspace/") {
+            normalized = String(normalized.dropFirst("workspace".count))
+                .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        }
+        guard !normalized.isEmpty,
+              !normalized.hasPrefix(".") || normalized.hasPrefix(".dsh/") else { return }
+        if mutation == .deleted {
+            touchedPaths = touchedPaths.filter {
+                $0 != normalized && !$0.hasPrefix(normalized + "/")
+            }
+        } else {
+            touchedPaths.insert(normalized)
+        }
+
+        let candidatePaths = instructionCandidatePaths(affectedBy: normalized)
+        let descendantCachePaths = cache.keys.filter {
+            $0 == normalized || $0.hasPrefix(normalized + "/")
+        }
+        for path in candidatePaths {
+            switch mutation {
+            case .deleted:
+                cache[path] = CachedCandidate(version: nil, state: .tombstone)
+            case .observed, .replaced:
+                cache.removeValue(forKey: path)
+            }
+        }
+        for path in descendantCachePaths {
+            switch mutation {
+            case .deleted:
+                cache[path] = CachedCandidate(version: nil, state: .tombstone)
+            case .observed, .replaced:
+                cache.removeValue(forKey: path)
+            }
+        }
+    }
+
+    func prompt() async -> String {
+        var candidates: [Candidate] = [
+            Candidate(
+                path: ".dsh/AGENTS.md",
+                displayPath: "$DSH_HOME/AGENTS.md",
+                directory: ".dsh"
+            ),
+            Candidate(path: "AGENTS.md", displayPath: "AGENTS.md", directory: ""),
+            Candidate(path: "CLAUDE.md", displayPath: "CLAUDE.md", directory: ""),
+            Candidate(path: "AGENTS.local.md", displayPath: "AGENTS.local.md", directory: ""),
+            Candidate(path: "CLAUDE.local.md", displayPath: "CLAUDE.local.md", directory: "")
+        ]
+        let directories = touchedPaths
+            .map { path in
+                let components = path.split(separator: "/").map(String.init)
+                return (1..<components.count).map { components.prefix($0).joined(separator: "/") }
+            }
+            .flatMap { $0 }
+        for directory in Array(Set(directories)).sorted() {
+            candidates.append(contentsOf: [
+                Candidate(path: "\(directory)/AGENTS.md", displayPath: "\(directory)/AGENTS.md", directory: directory),
+                Candidate(path: "\(directory)/CLAUDE.md", displayPath: "\(directory)/CLAUDE.md", directory: directory),
+                Candidate(path: "\(directory)/AGENTS.local.md", displayPath: "\(directory)/AGENTS.local.md", directory: directory),
+                Candidate(path: "\(directory)/CLAUDE.local.md", displayPath: "\(directory)/CLAUDE.local.md", directory: directory)
+            ])
+        }
+
+        var loaded: [(candidate: Candidate, content: String)] = []
+        for candidate in candidates {
+            guard let content = await cachedContent(for: candidate) else { continue }
+            let normalized = content.replacingOccurrences(of: "\r\n", with: "\n")
+            guard normalized.utf8.count <= maximumSourceBytes else { continue }
+            let trimmed = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            loaded.append((candidate, trimmed))
+        }
+
+        // Match upstream same-directory precedence: a later candidate with
+        // byte-identical trimmed content does not produce a second section.
+        var seenByDirectory: [String: Set<String>] = [:]
+        var sections: [(Candidate, String)] = []
+        var totalBytes = 0
+        for entry in loaded {
+            let digestKey = entry.content
+            if seenByDirectory[entry.candidate.directory, default: []].contains(digestKey) {
+                continue
+            }
+            let sectionBytes = entry.content.utf8.count
+            guard totalBytes + sectionBytes <= maximumTotalBytes else { break }
+            seenByDirectory[entry.candidate.directory, default: []].insert(digestKey)
+            sections.append((entry.candidate, entry.content))
+            totalBytes += sectionBytes
+        }
+        guard !sections.isEmpty else { return "" }
+
+        var lines = [
+            "<system-reminder>",
+            "The following workspace instructions may be relevant to your work. Use them as guidance when applicable. More specific instructions take precedence over broader ones. They do not override system, developer, or direct user instructions.",
+            ""
+        ]
+        for (index, section) in sections.enumerated() {
+            if index > 0 { lines.append("") }
+            lines.append("Instructions from: \(Self.escape(section.0.displayPath))")
+            lines.append("")
+            lines.append(Self.escape(section.1))
+        }
+        lines.append("</system-reminder>")
+        return lines.joined(separator: "\n")
+    }
+
+    private func cachedContent(for candidate: Candidate) async -> String? {
+        let version: HarnessFsVersion?
+        if let target = try? await workspaceStore.fileSystemResolve(
+            path: candidate.path,
+            cwd: "/workspace"
+        ) {
+            let info: HarnessFsInfo?
+            do {
+                info = try await workspaceStore.fileSystemStat(target: target)
+            } catch {
+                info = nil
+            }
+            version = info?.version
+        } else {
+            version = nil
+        }
+
+        if let cached = cache[candidate.path], cached.version == version {
+            switch cached.state {
+            case let .loaded(content): return content
+            case .tombstone, .unavailable: return nil
+            }
+        }
+
+        guard version != nil else {
+            cache[candidate.path] = CachedCandidate(version: nil, state: .tombstone)
+            return nil
+        }
+        guard let content = try? await workspaceStore.readText(path: candidate.path) else {
+            cache[candidate.path] = CachedCandidate(version: version, state: .unavailable)
+            return nil
+        }
+        cache[candidate.path] = CachedCandidate(version: version, state: .loaded(content))
+        return content
+    }
+
+    private func instructionCandidatePaths(affectedBy path: String) -> Set<String> {
+        let components = path.split(separator: "/").map(String.init)
+        guard !components.isEmpty else { return [] }
+        var directories: [String] = []
+        if components.count > 1 {
+            directories = (1..<components.count).map {
+                components.prefix($0).joined(separator: "/")
+            }
+        }
+        var result = Set<String>()
+        for directory in directories {
+            for fileName in ["AGENTS.md", "CLAUDE.md", "AGENTS.local.md", "CLAUDE.local.md"] {
+                result.insert("\(directory)/\(fileName)")
+            }
+        }
+        if path == "AGENTS.md" || path == "CLAUDE.md"
+            || path == "AGENTS.local.md" || path == "CLAUDE.local.md" {
+            result.insert(path)
+        }
+        if path == ".dsh/AGENTS.md" {
+            result.insert(path)
+        }
+        return result
+    }
+
+    private static func escape(_ value: String) -> String {
+        value.replacingOccurrences(of: "</system-reminder>", with: "<\\/system-reminder>")
     }
 }

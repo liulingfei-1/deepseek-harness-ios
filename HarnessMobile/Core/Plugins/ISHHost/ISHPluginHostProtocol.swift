@@ -7,7 +7,9 @@ enum ISHPluginHostRPCMethod: String, Codable, Sendable, CaseIterable {
     case run
     case stop
     case undefine
+    case contextSync = "context/sync"
     case contributions
+    case commandExecute = "command/execute"
     case invoke
     case settingsDescribe = "settings/describe"
     case settingsMutate = "settings/mutate"
@@ -229,6 +231,112 @@ struct ISHPluginHostUndefineResponse: Codable, Sendable, Equatable {
     let message: String?
 }
 
+struct ISHPluginHostSkillDefinition: Codable, Sendable, Equatable {
+    let name: String
+    let description: String
+    let whenToUse: String?
+    let invocation: MobileSkillInvocationPolicy
+    let source: String
+    let path: String
+    let resourceBase: String
+    let content: String
+
+    init(_ definition: MobileSkillDefinition) {
+        name = definition.summary.name
+        description = definition.summary.description
+        whenToUse = definition.summary.whenToUse
+        invocation = definition.summary.invocation
+        source = definition.summary.source.rawValue
+        path = definition.summary.path
+        resourceBase = definition.summary.resourceBase
+        content = definition.content
+    }
+}
+
+struct ISHPluginHostContextSyncRequest: Codable, Sendable, Equatable {
+    let sessionId: String
+    let startingAtSeq: UInt64
+    let events: [ISHPluginHostContextEvent]
+    let skills: [ISHPluginHostSkillDefinition]?
+}
+
+struct ISHPluginHostContextSyncResponse: Codable, Sendable, Equatable {
+    let sessionId: String
+    let appendedEvents: Int
+    let totalEvents: Int
+    let skillCount: Int
+}
+
+enum ISHPluginHostContextProjection {
+    static func retains(_ event: SessionEvent) -> Bool {
+        event.type != SessionEventVocabulary.assistantChunk
+            || event.assistantChunkData?.usage != nil
+    }
+
+    /// Token-sized assistant deltas are recoverable from assistant/message and
+    /// can number in the tens of thousands during a long run. Keep finalized
+    /// surface events and usage while preventing post-run Host synchronization
+    /// from holding the conversation in a running state for many seconds.
+    static func events(from events: [SessionEvent]) -> [ISHPluginHostContextEvent] {
+        let retained = events.filter(retains)
+        let projectedSequenceBySource = Dictionary(
+            uniqueKeysWithValues: retained.enumerated().map { index, event in
+                (event.seq, UInt64(index))
+            }
+        )
+
+        return retained.enumerated().map { index, event in
+            let projectedSequence = UInt64(index)
+            let sourceEventSeqs = event.sourceEventSeqs?.compactMap {
+                projectedSequenceBySource[$0]
+            }.filter { $0 < projectedSequence }
+
+            let surfaceOp: SessionSurfaceOperation?
+            switch event.surfaceOp {
+            case .append:
+                surfaceOp = .append
+            case let .replace(start, end):
+                let projectedRange = retained.compactMap { candidate -> UInt64? in
+                    guard (start...end).contains(candidate.seq) else { return nil }
+                    return projectedSequenceBySource[candidate.seq]
+                }.filter { $0 < projectedSequence }
+                if let first = projectedRange.first, let last = projectedRange.last {
+                    surfaceOp = .replace(start: first, end: last)
+                } else {
+                    // The entire replacement target consisted of discarded
+                    // token deltas, so there is no Host surface range to replace.
+                    surfaceOp = .append
+                }
+            case nil:
+                surfaceOp = nil
+            }
+
+            return ISHPluginHostContextEvent(
+                type: event.type,
+                seq: projectedSequence,
+                time: event.time,
+                data: event.data,
+                ignorable: event.ignorable,
+                sourceEventSeqs: sourceEventSeqs?.isEmpty == false ? sourceEventSeqs : nil,
+                surfaceOp: surfaceOp
+            )
+        }
+    }
+}
+
+/// A compact, contiguously sequenced view of the native trajectory. Its
+/// sequence belongs to the Plugin Host stream, while SessionEvent.seq remains
+/// the immutable identity in the lossless native JSONL log.
+struct ISHPluginHostContextEvent: Codable, Sendable, Equatable {
+    let type: String
+    let seq: UInt64
+    let time: Int64
+    let data: JSONValue
+    let ignorable: Bool?
+    let sourceEventSeqs: [UInt64]?
+    let surfaceOp: SessionSurfaceOperation?
+}
+
 struct ISHPluginHostContributionsRequest: Codable, Sendable, Equatable {
     let sessionId: String?
 
@@ -241,6 +349,7 @@ struct ISHPluginHostContributions: Codable, Sendable, Equatable {
     let revision: UInt64
     let scope: String
     let tools: [ISHPluginHostToolContribution]
+    let commands: [ISHPluginHostCommandContribution]
     let prompt: ISHPluginHostPromptContributions
     let handlers: [ISHPluginHostHandlerContribution]
     let services: [ISHPluginHostServiceContribution]
@@ -249,6 +358,7 @@ struct ISHPluginHostContributions: Codable, Sendable, Equatable {
         revision: UInt64,
         scope: String,
         tools: [ISHPluginHostToolContribution],
+        commands: [ISHPluginHostCommandContribution] = [],
         prompt: ISHPluginHostPromptContributions,
         handlers: [ISHPluginHostHandlerContribution] = [],
         services: [ISHPluginHostServiceContribution] = []
@@ -256,6 +366,7 @@ struct ISHPluginHostContributions: Codable, Sendable, Equatable {
         self.revision = revision
         self.scope = scope
         self.tools = tools
+        self.commands = commands
         self.prompt = prompt
         self.handlers = handlers
         self.services = services
@@ -265,6 +376,7 @@ struct ISHPluginHostContributions: Codable, Sendable, Equatable {
         case revision
         case scope
         case tools
+        case commands
         case prompt
         case handlers
         case services
@@ -275,6 +387,10 @@ struct ISHPluginHostContributions: Codable, Sendable, Equatable {
         revision = try container.decode(UInt64.self, forKey: .revision)
         scope = try container.decode(String.self, forKey: .scope)
         tools = try container.decode([ISHPluginHostToolContribution].self, forKey: .tools)
+        commands = try container.decodeIfPresent(
+            [ISHPluginHostCommandContribution].self,
+            forKey: .commands
+        ) ?? []
         prompt = try container.decode(ISHPluginHostPromptContributions.self, forKey: .prompt)
         handlers = try container.decodeIfPresent(
             [ISHPluginHostHandlerContribution].self,
@@ -304,6 +420,45 @@ struct ISHPluginHostToolContribution: Codable, Sendable, Equatable {
     let name: String
     let description: String
     let parameters: JSONValue
+}
+
+struct ISHPluginHostCommandContribution: Codable, Sendable, Equatable {
+    struct Input: Codable, Sendable, Equatable {
+        let hint: String
+        let images: Bool?
+    }
+
+    let name: String
+    let description: String
+    let input: Input?
+    let recordInput: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case description
+        case input
+        case recordInput
+    }
+
+    init(
+        name: String,
+        description: String,
+        input: Input? = nil,
+        recordInput: Bool = true
+    ) {
+        self.name = name
+        self.description = description
+        self.input = input
+        self.recordInput = recordInput
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        description = try container.decode(String.self, forKey: .description)
+        input = try container.decodeIfPresent(Input.self, forKey: .input)
+        recordInput = try container.decodeIfPresent(Bool.self, forKey: .recordInput) ?? true
+    }
 }
 
 struct ISHPluginHostPromptContributions: Codable, Sendable, Equatable {

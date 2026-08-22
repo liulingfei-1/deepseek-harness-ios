@@ -401,6 +401,168 @@ struct PluginSettingsNamespaceView: View {
     }
 }
 
+struct NativeAgentPluginSettingsView: View {
+    @Environment(AppModel.self) private var model
+
+    let pluginID: String
+
+    @State private var form: ISHPluginSettingsForm?
+    @State private var draft: ISHPluginSettingsDraft?
+    @State private var notice: EditorNotice?
+    @State private var isSaving = false
+
+    var body: some View {
+        Group {
+            if let plugin, plugin.settings != nil {
+                Form {
+                    Section("运行方式") {
+                        LabeledContent("插件", value: plugin.name)
+                        LabeledContent("生效", value: "立即替换运行时贡献")
+                        LabeledContent("存储", value: "App 本地插件注册表")
+                    }
+
+                    if let notice {
+                        Section {
+                            Label(notice.message, systemImage: notice.systemImage)
+                                .foregroundStyle(notice.tint)
+                        }
+                    }
+
+                    if let form, let draftBinding = Binding($draft) {
+                        PluginSettingsFormSections(
+                            form: form,
+                            draft: draftBinding,
+                            isDisabled: isSaving
+                        )
+                    } else {
+                        Section {
+                            ProgressView("读取原生设置 schema")
+                        }
+                    }
+
+                    if let defaults = plugin.settings?.defaults {
+                        Section("默认值") {
+                            Button {
+                                save(values: defaults, successMessage: "已恢复插件默认设置。")
+                            } label: {
+                                Label("恢复全部默认值", systemImage: "arrow.counterclockwise")
+                            }
+                            .disabled(isSaving || plugin.settings?.values == defaults)
+                        }
+                    }
+                }
+                .accessibilityIdentifier("native-agent-settings-editor")
+            } else {
+                ContentUnavailableView(
+                    "没有可编辑设置",
+                    systemImage: "slider.horizontal.3",
+                    description: Text("插件可能已卸载，或源码没有声明可迁移的设置 schema。")
+                )
+            }
+        }
+        .navigationTitle(plugin?.name ?? "原生插件设置")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if draft != nil {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button {
+                        seed(force: true)
+                    } label: {
+                        Image(systemName: "arrow.uturn.backward")
+                    }
+                    .disabled(isSaving || draft?.isDirty != true)
+                    .accessibilityLabel("放弃设置草稿")
+                    .help("放弃设置草稿")
+
+                    Button {
+                        saveDraft()
+                    } label: {
+                        Image(systemName: "checkmark")
+                    }
+                    .disabled(!canSave)
+                    .accessibilityLabel("保存原生插件设置")
+                    .help("保存原生插件设置")
+                }
+            }
+        }
+        .task {
+            seed(force: false)
+        }
+    }
+
+    private var plugin: NativeAgentCompiledPlugin? {
+        model.nativeAgentPlugins.first { $0.id == pluginID }
+    }
+
+    private var namespace: ISHPluginSettingsNamespace? {
+        guard let settings = plugin?.settings else { return nil }
+        return ISHPluginSettingsNamespace(
+            ns: pluginID,
+            schema: settings.schema,
+            value: settings.values,
+            base: settings.defaults,
+            user: settings.values,
+            revision: 1,
+            applies: .live,
+            secrets: [],
+            editable: true,
+            unsupportedReason: nil
+        )
+    }
+
+    private var canSave: Bool {
+        guard !isSaving,
+              let form,
+              let draft,
+              draft.isDirty,
+              draft.operations.count <= 256 else { return false }
+        return draft.validationIssues(in: form).isEmpty
+    }
+
+    @MainActor
+    private func seed(force: Bool) {
+        guard let namespace else { return }
+        if !force, draft != nil { return }
+        do {
+            let parsed = try ISHPluginSettingsForm(namespace: namespace)
+            form = parsed
+            draft = try ISHPluginSettingsDraft(namespace: namespace, form: parsed)
+            notice = nil
+        } catch {
+            form = nil
+            draft = nil
+            notice = .error(error.localizedDescription)
+        }
+    }
+
+    private func saveDraft() {
+        guard canSave,
+              let settings = plugin?.settings,
+              let draft else { return }
+        let values = ISHPluginSettingsValue.merging(
+            base: settings.defaults,
+            overrides: draft.user
+        )
+        save(values: values, successMessage: "原生插件设置已生效。")
+    }
+
+    private func save(values: JSONValue, successMessage: String) {
+        guard !isSaving else { return }
+        isSaving = true
+        notice = nil
+        Task { @MainActor in
+            defer { isSaving = false }
+            do {
+                try await model.updateNativeAgentPluginSettings(id: pluginID, values: values)
+                seed(force: true)
+                notice = .success(successMessage)
+            } catch {
+                notice = .error(error.localizedDescription)
+            }
+        }
+    }
+}
+
 private struct PluginSettingsFormSections: View {
     let form: ISHPluginSettingsForm
     @Binding var draft: ISHPluginSettingsDraft

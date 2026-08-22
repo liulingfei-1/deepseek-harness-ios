@@ -7,6 +7,149 @@ import XCTest
 #endif
 
 final class AgentRuntimeTests: XCTestCase {
+    func testDefinitionOwnedFinalizerRunsOnceAndPreservesCanonicalValue() async throws {
+        let counter = FinalizerCounter()
+        let tool = FinalizingEchoTool(counter: counter, shouldThrow: false)
+        let result = CordisToolExecutionResult(
+            text: "raw",
+            isError: false,
+            value: .object(["canonical": .string("raw")])
+        )
+        let execution = CordisToolExecution(
+            agentID: UUID(), runID: UUID(), turn: 1, step: 1,
+            call: AgentToolCall(id: "c", name: "finalizing", arguments: "{}"),
+            arguments: [:], risk: .pure, summary: "finalizing"
+        )
+        let finalized = LocalToolFinalizer.apply(tool: tool, execution: execution, result: result)
+        XCTAssertEqual(finalized.text, "presented")
+        XCTAssertEqual(finalized.value, result.value)
+        XCTAssertFalse(finalized.isError)
+        XCTAssertEqual(counter.value, 1)
+    }
+
+    func testThrowingDefinitionFinalizerFailsOpenAndRunsOnceForErrorResult() async throws {
+        let counter = FinalizerCounter()
+        let tool = FinalizingEchoTool(counter: counter, shouldThrow: true)
+        let result = CordisToolExecutionResult(text: "error", isError: true, value: nil)
+        let finalized = LocalToolFinalizer.apply(tool: tool, execution: nil, result: result)
+        XCTAssertEqual(finalized, result)
+        XCTAssertEqual(counter.value, 1)
+    }
+
+    func testCodeModeChildFailureClosesNestedDispatchAndKeepsParentTurnAlive() async throws {
+        let script = ModelScript(turns: [[
+            .toolCallDelta(
+                index: 0,
+                id: "provider/opaque/../run-code",
+                type: "function",
+                name: "run_code",
+                arguments: "{}"
+            ),
+            .finish(.toolCalls)
+        ], [
+            .text("recovered"),
+            .finish(.stop)
+        ]])
+        let recorder = EventRecorder()
+        let sessionEvents = SessionDraftRecorder()
+        let codePreset = try XCTUnwrap(
+            AgentPresetRegistry.systemPresets.first { $0.id == "code" }
+        ).runtimeProjection
+        let runtime = AgentRuntime(
+            client: ScriptedModelClient(script: script),
+            registry: LocalToolRegistry(tools: [
+                TestRunCodeBridgeTool(),
+                FailingCodeChildTool()
+            ]),
+            approvalHandler: { _ in true },
+            eventHandler: { event in await recorder.append(event) },
+            permissionMode: .dangerFullAccess,
+            agentPreset: codePreset,
+            sessionEventHandler: { draft in
+                await sessionEvents.append(draft)
+            }
+        )
+
+        try await runtime.run(
+            history: [.user("exercise Code Mode")],
+            configuration: AgentConfiguration(),
+            apiKey: "test-only"
+        )
+
+        let requests = await script.requests
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(requests.first?.tools.map(\.name), ["run_code"])
+
+        let drafts = await sessionEvents.drafts
+        let nested = drafts.filter {
+            $0.type == "tool/code-dispatch-start" || $0.type == "tool/code-dispatch"
+        }
+        XCTAssertEqual(nested.map(\.type), [
+            "tool/code-dispatch-start",
+            "tool/code-dispatch"
+        ])
+        XCTAssertEqual(
+            nested.last?.data.objectValue?["isError"],
+            .bool(true)
+        )
+        XCTAssertTrue(
+            nested.last?.data.objectValue?["content"]?.stringValue?
+                .contains("nested failure") == true
+        )
+
+        let runtimeEvents = await recorder.events
+        XCTAssertTrue(runtimeEvents.contains { event in
+            guard case let .toolEventChanged(root) = event else { return false }
+            return root.callID == "provider/opaque/../run-code"
+                && root.children.contains {
+                    $0.name == "failing_child" && $0.status == .failed
+                }
+        })
+        let committed = runtimeEvents.flatMap { event -> [AgentMessage] in
+            guard case let .messagesCommitted(messages) = event else { return [] }
+            return messages
+        }
+        XCTAssertEqual(committed.last?.content, "recovered")
+    }
+
+    func testConversationRerunKeepsSelectedUserMessageAndDropsLaterBranch() throws {
+        let first = AgentMessage.user("first")
+        let reply = AgentMessage.assistant("reply")
+        let selected = AgentMessage.user("retry me")
+        let later = AgentMessage.assistant("old branch")
+
+        let preparation = try ConversationRerunPlanner.prepare(
+            messages: [first, reply, selected, later],
+            messageID: selected.id
+        )
+
+        XCTAssertEqual(preparation.messages, [first, reply, selected])
+        XCTAssertEqual(preparation.initialUserMessage, selected)
+        XCTAssertEqual(preparation.removedMessageCount, 1)
+    }
+
+    func testConversationEditPreservesMessageIdentityAndRejectsEmptyText() throws {
+        let selected = AgentMessage.user("before")
+        let later = AgentMessage.assistant("old branch")
+        let preparation = try ConversationRerunPlanner.prepare(
+            messages: [selected, later],
+            messageID: selected.id,
+            replacementText: "  after  "
+        )
+
+        XCTAssertEqual(preparation.initialUserMessage.id, selected.id)
+        XCTAssertEqual(preparation.initialUserMessage.content, "after")
+        XCTAssertThrowsError(
+            try ConversationRerunPlanner.prepare(
+                messages: [selected],
+                messageID: selected.id,
+                replacementText: "  \n "
+            )
+        ) { error in
+            XCTAssertEqual(error as? ConversationRerunError, .emptyReplacement)
+        }
+    }
+
     func testUserMessageInstructionInjectionIsModelVisibleButNotChatCommitted() async throws {
         let script = ModelScript(turns: [[.text("done"), .finish(.stop)]])
         let recorder = EventRecorder()
@@ -65,6 +208,648 @@ final class AgentRuntimeTests: XCTestCase {
         XCTAssertTrue(committedUserMessages.isEmpty)
     }
 
+    func testInstructionInjectionCanNormalizeOnlyTheProviderFacingUserMessage() async throws {
+        let script = ModelScript(turns: [[.text("done"), .finish(.stop)]])
+        let sessionEvents = SessionEventRecorder()
+        let userMessage = AgentMessage.user(
+            "compare @[Old run](dsh-session:opaque-token)"
+        )
+        let runtime = AgentRuntime(
+            client: ScriptedModelClient(script: script),
+            registry: LocalToolRegistry(tools: []),
+            approvalHandler: { _ in true },
+            eventHandler: { _ in },
+            userMessageInjectionProvider: { message in
+                guard message.id == userMessage.id else { return [] }
+                return [
+                    AgentRuntimeInstructionInjection(
+                        content: "<referenced-sessions>[]</referenced-sessions>",
+                        source: .object([
+                            "kind": .string("session-reference"),
+                            "form": .string("recall")
+                        ]),
+                        normalizedUserContent: "compare @Old run"
+                    )
+                ]
+            },
+            sessionEventHandler: { draft in
+                try await sessionEvents.append(draft)
+            }
+        )
+
+        try await runtime.run(
+            history: [userMessage],
+            configuration: AgentConfiguration(),
+            apiKey: "test-only",
+            initialUserMessage: userMessage
+        )
+
+        let requests = await script.requests
+        XCTAssertEqual(try XCTUnwrap(requests.first).messages.map(\.content), [
+            "compare @Old run",
+            "<referenced-sessions>[]</referenced-sessions>"
+        ])
+        let events = await sessionEvents.events
+        let direct = try XCTUnwrap(events.first(where: {
+            $0.userMessageData?.objectValue?["source"]?.objectValue?["kind"] == .string("user")
+        }))
+        XCTAssertEqual(
+            direct.userMessageData?.objectValue?["content"]?.displayText.contains("opaque-token"),
+            true
+        )
+        let injected = try XCTUnwrap(events.first(where: {
+            $0.userMessageData?.objectValue?["source"]?.objectValue?["kind"]
+                == .string("session-reference")
+        }))
+        XCTAssertNotNil(injected.userMessageData)
+    }
+
+    func testPreStepInstructionProviderAppendsDurableTransitionsBeforeEveryRequest() async throws {
+        let script = ModelScript(turns: [
+            [
+                .toolCallDelta(
+                    index: 0,
+                    id: "instruction-step",
+                    type: "function",
+                    name: "echo",
+                    arguments: "{\"value\":\"touch\"}"
+                ),
+                .finish(.toolCalls)
+            ],
+            [.text("done"), .finish(.stop)]
+        ])
+        let injectionScript = PreStepInjectionScript()
+        let sessionEvents = SessionEventRecorder()
+        let runtime = AgentRuntime(
+            client: ScriptedModelClient(script: script),
+            registry: LocalToolRegistry(tools: [EchoTool(counter: ToolCounter())]),
+            approvalHandler: { _ in true },
+            eventHandler: { _ in },
+            preStepInstructionProvider: { messages in
+                await injectionScript.next(visibleMessages: messages)
+            },
+            sessionEventHandler: { draft in
+                try await sessionEvents.append(draft)
+            }
+        )
+
+        var configuration = AgentConfiguration()
+        configuration.maxSteps = 2
+        try await runtime.run(
+            history: [.user("start")],
+            configuration: configuration,
+            apiKey: "test-only"
+        )
+
+        let requests = await script.requests
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(
+            requests[0].messages.filter(\.isWorkspaceInstructionTransition).map(\.content),
+            ["workspace baseline"]
+        )
+        XCTAssertEqual(
+            requests[1].messages.filter(\.isWorkspaceInstructionTransition).map(\.content),
+            ["workspace baseline", "workspace update"]
+        )
+        let durableTransitions = await sessionEvents.events.filter { event in
+            event.userMessageData?.objectValue?["source"]?.objectValue?["kind"]
+                == .string(WorkspaceInstructionMessageSource.kind)
+        }
+        XCTAssertEqual(durableTransitions.count, 2)
+        let sawBaselineBeforeSecond = await injectionScript.sawBaselineBeforeSecond
+        XCTAssertTrue(sawBaselineBeforeSecond)
+    }
+
+    func testTimeContextProviderAppendsDurableTailWithoutChangingRequestHeader() async throws {
+        let script = ModelScript(turns: [
+            [
+                .toolCallDelta(
+                    index: 0,
+                    id: "time-step",
+                    type: "function",
+                    name: "echo",
+                    arguments: "{\"value\":\"tick\"}"
+                ),
+                .finish(.toolCalls)
+            ],
+            [.text("done"), .finish(.stop)]
+        ])
+        let sessionEvents = SessionEventRecorder()
+        let runtime = AgentRuntime(
+            client: ScriptedModelClient(script: script),
+            registry: LocalToolRegistry(tools: [EchoTool(counter: ToolCounter())]),
+            approvalHandler: { _ in true },
+            eventHandler: { _ in },
+            timeContextInjectionProvider: { messages, turn, step, now in
+                try TimeContextOverlay.injection(
+                    settings: TimeContextSettings(
+                        isEnabled: true,
+                        timeZoneIdentifier: "UTC",
+                        refreshIntervalMilliseconds: 0
+                    ),
+                    messages: messages,
+                    turn: turn,
+                    step: step,
+                    now: now
+                )
+            },
+            sessionEventHandler: { draft in
+                try await sessionEvents.append(draft)
+            }
+        )
+        var configuration = AgentConfiguration()
+        configuration.maxSteps = 2
+
+        try await runtime.run(
+            history: [.user("what time is it")],
+            configuration: configuration,
+            apiKey: "test-only"
+        )
+
+        let requests = await script.requests
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(requests.map(\.systemPrompt), [MobileHarnessPrompt.text, MobileHarnessPrompt.text])
+        XCTAssertEqual(
+            requests[0].messages.filter { message in
+                message.source?.objectValue?["plugin"]?.stringValue == TimeContextOverlay.pluginID
+            }.count,
+            1
+        )
+        XCTAssertEqual(
+            requests[1].messages.filter { message in
+                message.source?.objectValue?["plugin"]?.stringValue == TimeContextOverlay.pluginID
+            }.count,
+            2
+        )
+        let durable = await sessionEvents.events.filter { event in
+            event.userMessageData?.objectValue?["source"]?.objectValue?["plugin"]?.stringValue
+                == TimeContextOverlay.pluginID
+        }
+        XCTAssertEqual(durable.count, 2)
+    }
+
+    func testReadImageToolResultBecomesDurableHiddenVisionContext() async throws {
+        let attachment = AgentImageAttachmentRef(
+            id: UUID(),
+            path: ".harness-mobile/attachments/tool-image.jpg",
+            mimeType: "image/jpeg",
+            byteCount: 3
+        )
+        let script = ModelScript(turns: [
+            [
+                .toolCallDelta(
+                    index: 0,
+                    id: "read-image-call",
+                    type: "function",
+                    name: "read_image",
+                    arguments: "{}"
+                ),
+                .finish(.toolCalls)
+            ],
+            [.text("I can inspect the image."), .finish(.stop)]
+        ])
+        let sessionEvents = SessionEventRecorder()
+        let imageProvider = TestImageAttachmentProvider(
+            expected: attachment,
+            data: Data([1, 2, 3])
+        )
+        let runtime = AgentRuntime(
+            client: ScriptedModelClient(script: script),
+            registry: LocalToolRegistry(tools: [ReadImageEnvelopeTool(attachment: attachment)]),
+            approvalHandler: { _ in true },
+            eventHandler: { _ in },
+            imageAttachmentProvider: { refs in
+                try await imageProvider.resolve(refs)
+            },
+            sessionEventHandler: { draft in
+                try await sessionEvents.append(draft)
+            }
+        )
+
+        try await runtime.run(
+            history: [.user("inspect screenshot")],
+            configuration: AgentConfiguration(model: "deepseek-v4-flash-vision-exp"),
+            apiKey: "test-only"
+        )
+
+        let requests = await script.requests
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(requests[1].imagePayloads.map(\.id), [attachment.id])
+        let imageContext = try XCTUnwrap(
+            requests[1].messages.first(where: { message in
+                message.source?.objectValue?["kind"] == .string("tool-result-image")
+            })
+        )
+        XCTAssertEqual(imageContext.imageAttachments, [attachment])
+        XCTAssertTrue(imageContext.isHiddenContextMessage)
+        XCTAssertFalse(imageContext.isChatVisible)
+
+        let events = await sessionEvents.events
+        let durableContext = try XCTUnwrap(events.first(where: { event in
+            event.userMessageData?.objectValue?["source"]?.objectValue?["kind"]
+                == .string("tool-result-image")
+        }))
+        XCTAssertEqual(
+            durableContext.userMessageData?.objectValue?["imageAttachments"]?.displayText
+                .contains(attachment.id.uuidString),
+            true
+        )
+    }
+
+    func testImageAggregateBudgetSkipsOldestAttachmentsBeforeReadingThem() async throws {
+        let refs = (0..<16).map { index in
+            AgentImageAttachmentRef(
+                id: UUID(),
+                path: "Attachments/image-\(index).jpg",
+                mimeType: "image/jpeg",
+                byteCount: WorkspaceStore.maximumModelRequestImageBytes
+            )
+        }
+        let history = refs.enumerated().map { index, ref in
+            AgentMessage.user("image \(index)", imageAttachments: [ref])
+        }
+        let script = ModelScript(turns: [[.text("done"), .finish(.stop)]])
+        let runtime = AgentRuntime(
+            client: ScriptedModelClient(script: script),
+            registry: LocalToolRegistry(tools: []),
+            approvalHandler: { _ in true },
+            eventHandler: { _ in },
+            imageAttachmentProvider: { selected in
+                selected.map {
+                    ModelImagePayload(id: $0.id, mimeType: $0.mimeType, data: Data([1]))
+                }
+            }
+        )
+
+        try await runtime.run(
+            history: history,
+            configuration: AgentConfiguration(model: "deepseek-v4-flash-vision-exp"),
+            apiKey: "test-only"
+        )
+
+        let requests = await script.requests
+        let request = try XCTUnwrap(requests.first)
+        XCTAssertLessThan(request.imagePayloads.count, refs.count)
+        XCTAssertEqual(
+            request.imagePayloads.map(\.id),
+            Array(refs.suffix(request.imagePayloads.count)).map(\.id)
+        )
+    }
+
+    func testContextSourceLabelUsesDurableProducerIdentity() {
+        XCTAssertEqual(
+            AgentRuntime.contextSourceLabel(
+                .object([
+                    "kind": .string("plugin"),
+                    "plugin": .string("memory-palace"),
+                    "name": .string("fallback-name")
+                ])
+            ),
+            "memory-palace"
+        )
+        XCTAssertEqual(
+            AgentRuntime.contextSourceLabel(
+                .object([
+                    "kind": .string("skill-invocation"),
+                    "name": .string("release-notes")
+                ])
+            ),
+            "release-notes"
+        )
+        XCTAssertEqual(
+            AgentRuntime.promptSourceLabel("harness:base"),
+            "@deepseek-ai/dsh-system-prompt"
+        )
+    }
+
+    func testRuntimeContextChangesAppendAtTailWithoutRewritingSystemHeader() async throws {
+        let script = ModelScript(turns: [
+            [
+                .toolCallDelta(
+                    index: 0,
+                    id: "context-call",
+                    type: "function",
+                    name: "echo",
+                    arguments: "{\"value\":\"updated\"}"
+                ),
+                .finish(.toolCalls)
+            ],
+            [.text("done"), .finish(.stop)]
+        ])
+        let counter = ToolCounter()
+        let recorder = EventRecorder()
+        let sessionEvents = SessionEventRecorder()
+        let plugins = CordisPluginRuntime()
+        let services = CordisAgentServices()
+        _ = try await plugins.install(
+            services.pluginDefinition(baseSystemPrompt: "stable base prompt")
+        )
+        _ = try await plugins.install(
+            CordisPluginDefinition(
+                id: "test.cache-context",
+                version: "1",
+                dependencies: [
+                    CordisAgentServiceKeys.systemPrompt.name,
+                    CordisAgentServiceKeys.tools.name
+                ]
+            ) { context in
+                try await context.registerTool(EchoTool(counter: counter))
+                try await context.promptContext(
+                    CordisPromptContextContribution(
+                        name: "test:tool-count",
+                        order: 0,
+                        text: { _ in
+                            "Tool executions: \(await counter.value)"
+                        }
+                    )
+                )
+            }
+        )
+        let runtime = AgentRuntime(
+            client: ScriptedModelClient(script: script),
+            registry: LocalToolRegistry(tools: []),
+            plugins: plugins,
+            approvalHandler: { _ in true },
+            eventHandler: { event in await recorder.append(event) },
+            sessionEventHandler: { draft in
+                try await sessionEvents.append(draft)
+            }
+        )
+
+        try await runtime.run(
+            history: [.user("update the context")],
+            configuration: AgentConfiguration(),
+            apiKey: "test-only"
+        )
+
+        let requests = await script.requests
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(requests.map(\.systemPrompt), [
+            "stable base prompt",
+            "stable base prompt"
+        ])
+        let first = try XCTUnwrap(requests.first)
+        let second = try XCTUnwrap(requests.last)
+        XCTAssertEqual(Array(second.messages.prefix(first.messages.count)), first.messages)
+        XCTAssertEqual(
+            first.messages.filter(\.isRuntimeContextSnapshot).map(\.content),
+            [
+                "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nTool executions: 0"
+            ]
+        )
+        XCTAssertEqual(
+            second.messages.filter(\.isRuntimeContextSnapshot).map(\.content),
+            [
+                "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nTool executions: 0",
+                "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nTool executions: 1"
+            ]
+        )
+
+        let committedSnapshots = await recorder.events.flatMap { event -> [AgentMessage] in
+            guard case let .messagesCommitted(messages) = event else { return [] }
+            return messages.filter(\.isRuntimeContextSnapshot)
+        }
+        XCTAssertEqual(committedSnapshots.count, 2)
+        let recordedSessionEvents = await sessionEvents.events
+        XCTAssertEqual(
+            recordedSessionEvents.filter {
+                $0.type == SessionEventVocabulary.requestHeader
+            }.count,
+            1
+        )
+    }
+
+    func testRetainedRuntimeContextIsNotDuplicatedAfterRuntimeRecreation() async throws {
+        let content = "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nMode: stable."
+        let source = JSONValue.object([
+            "kind": .string("plugin"),
+            "plugin": .string(AgentMessage.runtimeContextPluginID),
+            "form": .string("snapshot")
+        ])
+        let retained = AgentMessage(role: .user, content: content, source: source)
+        let history: [AgentMessage] = [
+            .user("first"),
+            retained,
+            .assistant("first answer"),
+            .user("second")
+        ]
+        let script = ModelScript(turns: [[.text("second answer"), .finish(.stop)]])
+        let recorder = EventRecorder()
+        let plugins = CordisPluginRuntime()
+        let services = CordisAgentServices()
+        _ = try await plugins.install(
+            services.pluginDefinition(baseSystemPrompt: "stable base prompt")
+        )
+        _ = try await plugins.install(
+            CordisPluginDefinition(
+                id: "test.stable-context",
+                version: "1",
+                dependencies: [CordisAgentServiceKeys.systemPrompt.name]
+            ) { context in
+                try await context.promptContext(
+                    CordisPromptContextContribution(
+                        name: "test:mode",
+                        order: 0,
+                        text: "Mode: stable."
+                    )
+                )
+            }
+        )
+        let runtime = AgentRuntime(
+            client: ScriptedModelClient(script: script),
+            registry: LocalToolRegistry(tools: []),
+            plugins: plugins,
+            approvalHandler: { _ in true },
+            eventHandler: { event in await recorder.append(event) }
+        )
+
+        try await runtime.run(
+            history: history,
+            configuration: AgentConfiguration(),
+            apiKey: "test-only"
+        )
+
+        let requests = await script.requests
+        let request = try XCTUnwrap(requests.first)
+        XCTAssertEqual(request.messages, history)
+        XCTAssertEqual(request.messages.filter(\.isRuntimeContextSnapshot), [retained])
+        let newlyCommitted = await recorder.events.flatMap { event -> [AgentMessage] in
+            guard case let .messagesCommitted(messages) = event else { return [] }
+            return messages.filter(\.isRuntimeContextSnapshot)
+        }
+        XCTAssertTrue(newlyCommitted.isEmpty)
+    }
+
+    func testFallbackForceCompactionRejectsSummaryThatDoesNotShrinkOmittedHistory() async throws {
+        let recorder = FallbackCompactionRequestRecorder()
+        let runtime = AgentRuntime(
+            client: FallbackCompactionClient(recorder: recorder),
+            registry: LocalToolRegistry(tools: []),
+            approvalHandler: { _ in true },
+            eventHandler: { _ in }
+        )
+
+        do {
+            try await runtime.run(
+                history: [
+                    .user(String(repeating: "old context ", count: 900)),
+                    .assistant("recent")
+                ],
+                configuration: AgentConfiguration(),
+                apiKey: "test-only"
+            )
+            XCTFail("An oversized fallback compaction summary must not be dispatched")
+        } catch is ModelClientError {
+            // The original provider context error remains the terminal failure.
+        }
+
+        let requests = await recorder.requests
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertTrue(
+            requests[1].messages.last?.content.contains("compaction engine") == true
+        )
+    }
+
+    func testConfiguredCompactionRouteFallsBackBeforeAnySummaryOutput() async throws {
+        let script = CompactionRouteScript(mode: .failBeforeOutput)
+        let traceRecorder = CompactionRouteTraceRecorder()
+        var configuredRoute = ModelProviderCatalog.applying(
+            .openAI,
+            to: AgentConfiguration()
+        )
+        configuredRoute.model = "gpt-4.1-mini"
+        let summaryConfiguration = configuredRoute
+        let runtime = AgentRuntime(
+            client: CompactionRouteClient(script: script),
+            registry: LocalToolRegistry(tools: []),
+            approvalHandler: { _ in true },
+            eventHandler: { _ in },
+            apiKeyProvider: { configuration in
+                configuration.providerID == .openAI ? "summary-key" : "main-key"
+            },
+            compactionConfigurationProvider: { _ in summaryConfiguration },
+            traceHandler: { draft in await traceRecorder.append(draft) }
+        )
+
+        try await runtime.run(
+            history: [
+                .user(String(repeating: "old context ", count: 900)),
+                .assistant("recent")
+            ],
+            configuration: AgentConfiguration(),
+            apiKey: "main-key"
+        )
+
+        let requests = await script.requests
+        XCTAssertEqual(requests.count, 4)
+        XCTAssertEqual(requests[1].configuration.providerID, .openAI)
+        XCTAssertEqual(requests[1].configuration.model, "gpt-4.1-mini")
+        XCTAssertEqual(requests[1].apiKey, "summary-key")
+        XCTAssertEqual(requests[2].configuration.providerID, .deepSeekOfficial)
+        XCTAssertEqual(requests[2].apiKey, "main-key")
+        XCTAssertEqual(requests[3].configuration.providerID, .deepSeekOfficial)
+        let drafts = await traceRecorder.drafts
+        XCTAssertTrue(
+            drafts.contains {
+                $0.name == "compaction/summary-route-fallback"
+                    && $0.attributes["configuredProvider"] == .string("openai")
+            }
+        )
+    }
+
+    func testConfiguredCompactionRouteNeverFallsBackAfterPartialSummaryOutput() async throws {
+        let script = CompactionRouteScript(mode: .failAfterPartialOutput)
+        var configuredRoute = ModelProviderCatalog.applying(
+            .openAI,
+            to: AgentConfiguration()
+        )
+        configuredRoute.model = "gpt-4.1-mini"
+        let summaryConfiguration = configuredRoute
+        let runtime = AgentRuntime(
+            client: CompactionRouteClient(script: script),
+            registry: LocalToolRegistry(tools: []),
+            approvalHandler: { _ in true },
+            eventHandler: { _ in },
+            apiKeyProvider: { _ in "summary-key" },
+            compactionConfigurationProvider: { _ in summaryConfiguration }
+        )
+
+        do {
+            try await runtime.run(
+                history: [
+                    .user(String(repeating: "old context ", count: 900)),
+                    .assistant("recent")
+                ],
+                configuration: AgentConfiguration(),
+                apiKey: "main-key"
+            )
+            XCTFail("The original context failure should remain terminal")
+        } catch is ModelClientError {
+            // Overflow recovery preserves the original provider failure.
+        }
+
+        let requests = await script.requests
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(requests[1].configuration.providerID, .openAI)
+    }
+
+    func testRuntimeContextIsReinjectedAfterCompactionDropsItsEarlierSnapshot() async throws {
+        let plugins = CordisPluginRuntime()
+        let services = CordisAgentServices()
+        _ = try await plugins.install(
+            services.pluginDefinition(baseSystemPrompt: "base prompt")
+        )
+        _ = try await plugins.install(
+            CordisPluginDefinition(
+                id: "test.runtime-context-compaction",
+                version: "1",
+                dependencies: [
+                    CordisAgentServiceKeys.systemPrompt.name,
+                    CordisAgentServiceKeys.tools.name
+                ]
+            ) { context in
+                try await context.registerTool(EchoTool(counter: ToolCounter()))
+                try await context.promptContext(
+                    CordisPromptContextContribution(
+                        name: "test:mode",
+                        order: 0,
+                        text: "Mode: stable."
+                    )
+                )
+            }
+        )
+
+        let snapshotContent = "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nMode: stable."
+        let snapshotSource = JSONValue.object([
+            "kind": .string("plugin"),
+            "plugin": .string(AgentMessage.runtimeContextPluginID),
+            "form": .string("snapshot")
+        ])
+        let script = CompactionRuntimeContextScript()
+        let runtime = AgentRuntime(
+            client: CompactionRuntimeContextClient(script: script),
+            registry: LocalToolRegistry(tools: []),
+            plugins: plugins,
+            approvalHandler: { _ in true },
+            eventHandler: { _ in }
+        )
+
+        try await runtime.run(
+            history: [
+                .user(String(repeating: "old context ", count: 900)),
+                AgentMessage(role: .user, content: snapshotContent, source: snapshotSource),
+                .assistant("recent")
+            ],
+            configuration: AgentConfiguration(),
+            apiKey: "test-only"
+        )
+
+        let requests = await script.requests
+        XCTAssertEqual(requests.count, 4)
+        XCTAssertFalse(requests[2].messages.contains(where: \.isRuntimeContextSnapshot))
+        XCTAssertTrue(requests[3].messages.contains(where: \.isRuntimeContextSnapshot))
+    }
+
     func testReasoningToolRoundTripAndLocalExecution() async throws {
         let script = ModelScript(
             turns: [
@@ -120,6 +905,8 @@ final class AgentRuntimeTests: XCTestCase {
         )
         XCTAssertEqual(replayedAssistant.reasoning, "I should echo.")
         XCTAssertEqual(replayedAssistant.content, "")
+        XCTAssertEqual(replayedAssistant.modelSource?.provider, ModelProviderID.deepSeekOfficial.rawValue)
+        XCTAssertEqual(replayedAssistant.modelSource?.model, configuration.model)
 
         let events = await recorder.events
         XCTAssertTrue(events.contains { event in
@@ -134,6 +921,10 @@ final class AgentRuntimeTests: XCTestCase {
             return messages
         }
         XCTAssertEqual(committedTurns.first?.map(\.role), [.assistant, .tool])
+        XCTAssertEqual(
+            committedTurns.first?.first?.modelSource,
+            replayedAssistant.modelSource
+        )
         XCTAssertEqual(committedTurns.last?.map(\.role), [.assistant])
     }
 
@@ -294,6 +1085,7 @@ final class AgentRuntimeTests: XCTestCase {
         let gate = ParallelToolGate()
         let approval = ApprovalProbe()
         let recorder = EventRecorder()
+        let sessionEvents = SessionEventRecorder()
         let runtime = AgentRuntime(
             client: ScriptedModelClient(script: script),
             registry: LocalToolRegistry(tools: [
@@ -304,7 +1096,10 @@ final class AgentRuntimeTests: XCTestCase {
                 await approval.recordRequest(request)
                 return true
             },
-            eventHandler: { event in await recorder.append(event) }
+            eventHandler: { event in await recorder.append(event) },
+            sessionEventHandler: { draft in
+                try await sessionEvents.append(draft)
+            }
         )
 
         let task = Task {
@@ -334,6 +1129,180 @@ final class AgentRuntimeTests: XCTestCase {
         XCTAssertEqual(barrierMaximumConcurrent, 1)
         await gate.release("after")
         try await task.value
+    }
+
+    func testApprovalWritesUpstreamAuditPairBeforeToolExecution() async throws {
+        let script = ModelScript(turns: [
+            [
+                .toolCallDelta(
+                    index: 0,
+                    id: "approval-audit",
+                    type: "function",
+                    name: "approval_counting",
+                    arguments: "{\"value\":\"allowed\"}"
+                ),
+                .finish(.toolCalls)
+            ],
+            [.text("done"), .finish(.stop)]
+        ])
+        let counter = ToolCounter()
+        let sessionEvents = SessionEventRecorder()
+        let runtime = AgentRuntime(
+            client: ScriptedModelClient(script: script),
+            registry: LocalToolRegistry(tools: [ApprovalCountingTool(counter: counter)]),
+            approvalHandler: { _ in true },
+            eventHandler: { _ in },
+            sessionEventHandler: { draft in
+                try await sessionEvents.append(draft)
+            }
+        )
+
+        try await runtime.run(
+            history: [.user("audit approval")],
+            configuration: AgentConfiguration(),
+            apiKey: "test-only"
+        )
+
+        let executionCount = await counter.value
+        XCTAssertEqual(executionCount, 1)
+        let events = await sessionEvents.events
+        let asked = try XCTUnwrap(
+            events.first { $0.type == SessionEventVocabulary.approvalAsked }
+        )
+        let decided = try XCTUnwrap(
+            events.first { $0.type == SessionEventVocabulary.approvalDecided }
+        )
+        let requestID = try XCTUnwrap(asked.data.objectValue?["id"]?.stringValue)
+        XCTAssertEqual(asked.data.objectValue?["toolName"]?.stringValue, "approval_counting")
+        XCTAssertEqual(asked.data.objectValue?["callId"]?.stringValue, "approval-audit")
+        XCTAssertEqual(asked.data.objectValue?["reason"]?.stringValue, "approval counting")
+        XCTAssertEqual(asked.data.objectValue?["risk"]?.stringValue, ToolRisk.sideEffect.rawValue)
+        XCTAssertFalse(asked.data.objectValue?["modelDestination"]?.stringValue?.isEmpty ?? true)
+        guard case let .array(resources)? = asked.data.objectValue?["resources"] else {
+            return XCTFail("approval/asked resources must be an array")
+        }
+        XCTAssertEqual(resources, [.string("tool")])
+        XCTAssertEqual(decided.data.objectValue?["id"]?.stringValue, requestID)
+        XCTAssertEqual(decided.data.objectValue?["outcome"]?.stringValue, "allowed-once")
+        XCTAssertLessThan(asked.seq, decided.seq)
+    }
+
+    func testApprovalAuditAppendFailurePreventsToolExecution() async throws {
+        for failingType in [
+            SessionEventVocabulary.approvalAsked,
+            SessionEventVocabulary.approvalDecided
+        ] {
+            let script = ModelScript(turns: [
+                [
+                    .toolCallDelta(
+                        index: 0,
+                        id: "approval-fail-\(failingType)",
+                        type: "function",
+                        name: "approval_counting",
+                        arguments: "{\"value\":\"blocked\"}"
+                    ),
+                    .finish(.toolCalls)
+                ],
+                [.text("handled"), .finish(.stop)]
+            ])
+            let counter = ToolCounter()
+            let sessionEvents = SessionEventRecorder()
+            let runtime = AgentRuntime(
+                client: ScriptedModelClient(script: script),
+                registry: LocalToolRegistry(tools: [ApprovalCountingTool(counter: counter)]),
+                approvalHandler: { _ in true },
+                eventHandler: { _ in },
+                sessionEventHandler: { draft in
+                    if draft.type == failingType {
+                        throw ApprovalAuditTestError.persistenceFailed
+                    }
+                    return try await sessionEvents.append(draft)
+                }
+            )
+
+            try await runtime.run(
+                history: [.user("fail closed")],
+                configuration: AgentConfiguration(),
+                apiKey: "test-only"
+            )
+
+            let executionCount = await counter.value
+            XCTAssertEqual(executionCount, 0, "Failed open for \(failingType)")
+        }
+    }
+
+    func testMissingDurableApprovalWriterPreventsToolExecution() async throws {
+        let script = ModelScript(turns: [
+            [
+                .toolCallDelta(
+                    index: 0,
+                    id: "approval-missing-writer",
+                    type: "function",
+                    name: "approval_counting",
+                    arguments: "{\"value\":\"blocked\"}"
+                ),
+                .finish(.toolCalls)
+            ],
+            [.text("handled"), .finish(.stop)]
+        ])
+        let counter = ToolCounter()
+        let runtime = AgentRuntime(
+            client: ScriptedModelClient(script: script),
+            registry: LocalToolRegistry(tools: [ApprovalCountingTool(counter: counter)]),
+            approvalHandler: { _ in true },
+            eventHandler: { _ in },
+            sessionEventHandler: { _ in nil }
+        )
+
+        try await runtime.run(
+            history: [.user("missing audit writer")],
+            configuration: AgentConfiguration(),
+            apiKey: "test-only"
+        )
+
+        let executionCount = await counter.value
+        XCTAssertEqual(executionCount, 0)
+    }
+
+    func testDeniedApprovalWritesRejectedDecisionAndDoesNotExecuteTool() async throws {
+        let script = ModelScript(turns: [
+            [
+                .toolCallDelta(
+                    index: 0,
+                    id: "approval-denied",
+                    type: "function",
+                    name: "approval_counting",
+                    arguments: "{\"value\":\"blocked\"}"
+                ),
+                .finish(.toolCalls)
+            ],
+            [.text("handled"), .finish(.stop)]
+        ])
+        let counter = ToolCounter()
+        let sessionEvents = SessionEventRecorder()
+        let runtime = AgentRuntime(
+            client: ScriptedModelClient(script: script),
+            registry: LocalToolRegistry(tools: [ApprovalCountingTool(counter: counter)]),
+            approvalHandler: { _ in false },
+            eventHandler: { _ in },
+            sessionEventHandler: { draft in
+                try await sessionEvents.append(draft)
+            }
+        )
+
+        try await runtime.run(
+            history: [.user("deny approval")],
+            configuration: AgentConfiguration(),
+            apiKey: "test-only"
+        )
+
+        let executionCount = await counter.value
+        XCTAssertEqual(executionCount, 0)
+        let events = await sessionEvents.events
+        let decision = try XCTUnwrap(
+            events.first { $0.type == SessionEventVocabulary.approvalDecided }
+        )
+        XCTAssertEqual(decision.data.objectValue?["outcome"]?.stringValue, "rejected")
     }
 
     func testParallelSafeCallsWithSameResourceRunSerially() async throws {
@@ -497,17 +1466,21 @@ final class AgentRuntimeTests: XCTestCase {
     }
 
     func testValidLookingToolArgumentsAreNotExecutedAfterLengthFinish() async throws {
+        let truncatedTurn: [LLMStreamEvent] = [
+            .toolCallDelta(
+                index: 0,
+                id: "call-1",
+                type: "function",
+                name: "echo",
+                arguments: "{\"value\":\"must-not-run\"}"
+            ),
+            .finish(.length)
+        ]
+        // One larger-budget retry plus two compact tool-call recovery attempts.
+        // Every response remains truncated, so the runtime must eventually
+        // fail closed without executing any of the plausible-looking JSON.
         let script = ModelScript(
-            turns: [[
-                .toolCallDelta(
-                    index: 0,
-                    id: "call-1",
-                    type: "function",
-                    name: "echo",
-                    arguments: "{\"value\":\"must-not-run\"}"
-                ),
-                .finish(.length)
-            ]]
+            turns: [truncatedTurn, truncatedTurn, truncatedTurn, truncatedTurn]
         )
         let counter = ToolCounter()
         let recorder = EventRecorder()
@@ -524,7 +1497,7 @@ final class AgentRuntimeTests: XCTestCase {
                 configuration: AgentConfiguration(),
                 apiKey: "test-only"
             )
-            XCTFail("A length-truncated tool call must not execute")
+            XCTFail("A repeatedly length-truncated tool call must not execute")
         } catch let error as AgentRuntimeError {
             guard case .unsafeFinishReason(.length) = error else {
                 return XCTFail("Unexpected error: \(error)")
@@ -534,10 +1507,231 @@ final class AgentRuntimeTests: XCTestCase {
         let executionCount = await counter.value
         XCTAssertEqual(executionCount, 0)
         let events = await recorder.events
+        XCTAssertTrue(events.contains { event in
+            guard case let .modelResponseRetrying(maxOutputTokens) = event else { return false }
+            return maxOutputTokens == 16_384
+        })
         XCTAssertFalse(events.contains { event in
             if case .messagesCommitted = event { return true }
             return false
         })
+    }
+
+    func testLengthTruncatedToolCallRetriesWithLargerBudgetAndExecutesOnlyCleanCall() async throws {
+        let script = ModelScript(
+            turns: [[
+                .toolCallDelta(
+                    index: 0,
+                    id: "call-1",
+                    type: "function",
+                    name: "echo",
+                    arguments: "{\"value\":\"must-not-run\"}"
+                ),
+                .finish(.length)
+            ], [
+                .toolCallDelta(
+                    index: 0,
+                    id: "call-2",
+                    type: "function",
+                    name: "echo",
+                    arguments: "{\"value\":\"safe-retry\"}"
+                ),
+                .finish(.toolCalls)
+            ], [
+                .text("done"),
+                .finish(.stop)
+            ]]
+        )
+        let counter = ToolCounter()
+        let recorder = EventRecorder()
+        let runtime = AgentRuntime(
+            client: ScriptedModelClient(script: script),
+            registry: LocalToolRegistry(tools: [EchoTool(counter: counter)]),
+            approvalHandler: { _ in true },
+            eventHandler: { event in await recorder.append(event) }
+        )
+
+        try await runtime.run(
+            history: [.user("test")],
+            configuration: AgentConfiguration(),
+            apiKey: "test-only"
+        )
+
+        let executionCount = await counter.value
+        XCTAssertEqual(executionCount, 1)
+        let requests = await script.requests
+        XCTAssertEqual(requests.map(\.configuration.maxOutputTokens), [8_192, 16_384, 16_384])
+        let events = await recorder.events
+        XCTAssertTrue(events.contains { event in
+            guard case let .toolFinished(call, _, isError) = event else { return false }
+            return call.id == "call-2" && !isError
+        })
+    }
+
+    func testEmptyStopAfterTruncatedToolCallDoesNotCommitBlankAssistant() async throws {
+        let script = ModelScript(turns: [[
+            .toolCallDelta(
+                index: 0,
+                id: "truncated-call",
+                type: "function",
+                name: "echo",
+                arguments: "{\"value\":\"incomplete"
+            ),
+            .finish(.length)
+        ], [
+            .finish(.stop)
+        ]])
+        let counter = ToolCounter()
+        let recorder = EventRecorder()
+        let runtime = AgentRuntime(
+            client: ScriptedModelClient(script: script),
+            registry: LocalToolRegistry(tools: [EchoTool(counter: counter)]),
+            approvalHandler: { _ in true },
+            eventHandler: { event in await recorder.append(event) }
+        )
+
+        do {
+            try await runtime.run(
+                history: [.user("test")],
+                configuration: AgentConfiguration(),
+                apiKey: "test-only"
+            )
+            XCTFail("An empty acknowledgement must not hide a truncated tool call")
+        } catch let error as AgentRuntimeError {
+            guard case .unsafeFinishReason(.length) = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+        }
+
+        let executionCount = await counter.value
+        XCTAssertEqual(executionCount, 0)
+        let committed = await recorder.events.contains { event in
+            if case .messagesCommitted = event { return true }
+            return false
+        }
+        XCTAssertFalse(committed)
+    }
+
+    func testReasoningOnlyLengthFinishRetriesBeforeCommittingAnything() async throws {
+        let script = ModelScript(turns: [[
+            .reasoning("unfinished private reasoning"),
+            .finish(.length)
+        ], [
+            .text("complete answer"),
+            .finish(.stop)
+        ]])
+        let recorder = EventRecorder()
+        let runtime = AgentRuntime(
+            client: ScriptedModelClient(script: script),
+            registry: LocalToolRegistry(tools: []),
+            approvalHandler: { _ in true },
+            eventHandler: { event in await recorder.append(event) }
+        )
+
+        try await runtime.run(
+            history: [.user("think deeply")],
+            configuration: AgentConfiguration(),
+            apiKey: "test-only"
+        )
+
+        let requests = await script.requests
+        XCTAssertEqual(requests.map(\.configuration.maxOutputTokens), [8_192, 16_384])
+        let committed = await recorder.events.flatMap { event -> [AgentMessage] in
+            guard case let .messagesCommitted(messages) = event else { return [] }
+            return messages
+        }
+        XCTAssertEqual(committed.map(\.content), ["complete answer"])
+        XCTAssertFalse(committed.contains { $0.reasoning?.contains("unfinished") == true })
+    }
+
+    func testRepeatedTextLengthFinishContinuesWithoutCommittingATruncatedTurn() async throws {
+        let script = ModelScript(turns: [[
+            .reasoning("first attempt exceeded the provider ceiling"),
+            .finish(.length)
+        ], [
+            .reasoning("use the prepared source"),
+            .text("partial "),
+            .finish(.length)
+        ], [
+            .text("finished"),
+            .finish(.stop)
+        ]])
+        let recorder = EventRecorder()
+        let runtime = AgentRuntime(
+            client: ScriptedModelClient(script: script),
+            registry: LocalToolRegistry(tools: []),
+            approvalHandler: { _ in true },
+            eventHandler: { event in await recorder.append(event) }
+        )
+
+        try await runtime.run(
+            history: [.user("complete the task")],
+            configuration: AgentConfiguration(),
+            apiKey: "test-only"
+        )
+
+        let requests = await script.requests
+        XCTAssertEqual(requests.map(\.configuration.maxOutputTokens), [8_192, 16_384, 16_384])
+        XCTAssertTrue(
+            requests[2].messages.contains {
+                $0.role == .user && $0.content.contains("[Harness continuation]")
+            }
+        )
+        let recordedEvents = await recorder.events
+        let committed = recordedEvents.flatMap { event -> [AgentMessage] in
+            guard case let .messagesCommitted(messages) = event else { return [] }
+            return messages
+        }
+        XCTAssertEqual(committed.map(\.content), ["partial finished"])
+        XCTAssertEqual(committed.first?.reasoning, "use the prepared source")
+        XCTAssertTrue(recordedEvents.contains { event in
+            guard case let .modelResponseContinuing(attempt) = event else { return false }
+            return attempt == 1
+        })
+    }
+
+    func testRepeatedReasoningOnlyLengthFinishCommitsIncompleteReasoningInsteadOfFailingTurn() async throws {
+        let script = ModelScript(turns: [
+            [.reasoning("discarded retry"), .finish(.length)],
+            [.reasoning("reasoning-1 "), .finish(.length)],
+            [.reasoning("reasoning-2 "), .finish(.length)],
+            [.reasoning("reasoning-3 "), .finish(.length)],
+            [.reasoning("reasoning-4"), .finish(.length)]
+        ])
+        let recorder = EventRecorder()
+        let runtime = AgentRuntime(
+            client: ScriptedModelClient(script: script),
+            registry: LocalToolRegistry(tools: []),
+            approvalHandler: { _ in true },
+            eventHandler: { event in await recorder.append(event) }
+        )
+
+        try await runtime.run(
+            history: [.user("deep dive")],
+            configuration: AgentConfiguration(),
+            apiKey: "test-only"
+        )
+
+        let requests = await script.requests
+        XCTAssertEqual(requests.map(\.configuration.maxOutputTokens), [
+            8_192, 16_384, 16_384, 16_384, 16_384
+        ])
+        XCTAssertTrue(
+            requests.dropFirst(2).allSatisfy { request in
+                request.messages.contains {
+                    $0.role == .assistant && $0.reasoning?.isEmpty == false
+                }
+            }
+        )
+
+        let committed = await recorder.events.flatMap { event -> [AgentMessage] in
+            guard case let .messagesCommitted(messages) = event else { return [] }
+            return messages
+        }
+        let message = try XCTUnwrap(committed.last)
+        XCTAssertEqual(message.content, "")
+        XCTAssertEqual(message.reasoning, "reasoning-1 reasoning-2 reasoning-3 reasoning-4")
+        XCTAssertTrue(message.isIncomplete)
     }
 
     func testSessionEventsFollowDurableTurnAndStepOrder() async throws {
@@ -579,17 +1773,18 @@ final class AgentRuntimeTests: XCTestCase {
     }
 
     func testUnsafeFinishDoesNotCommitAssistantOrToolSessionEvents() async throws {
+        let truncatedTurn: [LLMStreamEvent] = [
+            .toolCallDelta(
+                index: 0,
+                id: "call-1",
+                type: "function",
+                name: "echo",
+                arguments: "{\"value\":\"must-not-run\"}"
+            ),
+            .finish(.length)
+        ]
         let script = ModelScript(
-            turns: [[
-                .toolCallDelta(
-                    index: 0,
-                    id: "call-1",
-                    type: "function",
-                    name: "echo",
-                    arguments: "{\"value\":\"must-not-run\"}"
-                ),
-                .finish(.length)
-            ]]
+            turns: [truncatedTurn, truncatedTurn, truncatedTurn, truncatedTurn]
         )
         let sessionEvents = SessionDraftRecorder()
         let runtime = AgentRuntime(
@@ -692,6 +1887,7 @@ final class AgentRuntimeTests: XCTestCase {
         )
         let gate = ApprovalGate()
         let recorder = EventRecorder()
+        let sessionEvents = SessionEventRecorder()
         let runtime = AgentRuntime(
             client: ScriptedModelClient(script: script),
             registry: LocalToolRegistry(tools: [ApprovalEchoTool()]),
@@ -704,7 +1900,10 @@ final class AgentRuntimeTests: XCTestCase {
                     return false
                 }
             },
-            eventHandler: { event in await recorder.append(event) }
+            eventHandler: { event in await recorder.append(event) },
+            sessionEventHandler: { draft in
+                try await sessionEvents.append(draft)
+            }
         )
 
         let task = Task {
@@ -728,6 +1927,234 @@ final class AgentRuntimeTests: XCTestCase {
             if case .messagesCommitted = event { return true }
             return false
         })
+    }
+
+    func testCancellationDuringModelStreamCommitsVisiblePrefixBeforeClosingTurn() async throws {
+        let gate = SilentStreamGate()
+        let usage = ModelTokenUsage(
+            promptTokens: 12,
+            completionTokens: 5,
+            totalTokens: 17,
+            cachedPromptTokens: nil,
+            reasoningTokens: 2
+        )
+        let recorder = EventRecorder()
+        let sessionEvents = SessionEventRecorder()
+        let runtime = AgentRuntime(
+            client: PrefixThenHangModelClient(
+                events: [
+                    .reasoning("considering the request"),
+                    .text("delivered answer prefix"),
+                    .toolCallDelta(
+                        index: 0,
+                        id: "unfinished-call",
+                        type: "function",
+                        name: "echo",
+                        arguments: "{\"value\":"
+                    ),
+                    .usage(usage)
+                ],
+                gate: gate
+            ),
+            registry: LocalToolRegistry(tools: []),
+            approvalHandler: { _ in true },
+            eventHandler: { event in await recorder.append(event) },
+            sessionEventHandler: { draft in
+                try await sessionEvents.append(draft)
+            }
+        )
+
+        let task = Task {
+            try await runtime.run(
+                history: [.user("start")],
+                configuration: AgentConfiguration(),
+                apiKey: "test-only"
+            )
+        }
+        await gate.waitUntilSubscribed()
+        try await eventually {
+            await recorder.events.contains { event in
+                if case .usage = event { return true }
+                return false
+            }
+        }
+        task.cancel()
+        await gate.finish()
+
+        do {
+            try await task.value
+            XCTFail("Cancelled run should throw")
+        } catch is CancellationError {
+            // Expected.
+        }
+
+        let runtimeEvents = await recorder.events
+        let committed = runtimeEvents.flatMap { event -> [AgentMessage] in
+            guard case let .messagesCommitted(messages) = event else { return [] }
+            return messages
+        }
+        let interrupted = try XCTUnwrap(committed.last)
+        XCTAssertEqual(interrupted.role, .assistant)
+        XCTAssertEqual(interrupted.content, "delivered answer prefix")
+        XCTAssertEqual(interrupted.reasoning, "considering the request")
+        XCTAssertTrue(interrupted.toolCalls.isEmpty)
+        XCTAssertTrue(interrupted.isIncomplete)
+
+        let durableEvents = await sessionEvents.events
+        let assistantEvent = try XCTUnwrap(
+            durableEvents.first { $0.type == SessionEventVocabulary.assistantMessage }
+        )
+        XCTAssertTrue(assistantEvent.assistantMessageData?.interrupted == true)
+        XCTAssertEqual(
+            assistantEvent.sourceEventSeqs,
+            durableEvents.filter { $0.type == SessionEventVocabulary.assistantChunk }.map(\.seq)
+        )
+        XCTAssertEqual(
+            assistantEvent.assistantMessageData?.usage,
+            SessionTokenUsage(
+                inputTokens: 12,
+                outputTokens: 5,
+                cacheReadTokens: nil,
+                reasoningTokens: 2
+            )
+        )
+        let types = durableEvents.map(\.type)
+        let assistantIndex = try XCTUnwrap(types.firstIndex(of: SessionEventVocabulary.assistantMessage))
+        let stepEndIndex = try XCTUnwrap(types.firstIndex(of: SessionEventVocabulary.stepEnd))
+        let turnEndIndex = try XCTUnwrap(types.firstIndex(of: SessionEventVocabulary.turnEnd))
+        XCTAssertLessThan(assistantIndex, stepEndIndex)
+        XCTAssertLessThan(stepEndIndex, turnEndIndex)
+
+        let projected = SessionTrajectoryConversationProjection.messages(from: durableEvents)
+        let projectedAssistant = try XCTUnwrap(projected.last { $0.role == .assistant })
+        XCTAssertEqual(projectedAssistant.content, interrupted.content)
+        XCTAssertEqual(projectedAssistant.reasoning, interrupted.reasoning)
+        XCTAssertTrue(projectedAssistant.isIncomplete)
+
+        let followUpScript = ModelScript(turns: [[.text("continued"), .finish(.stop)]])
+        let followUpRuntime = AgentRuntime(
+            client: ScriptedModelClient(script: followUpScript),
+            registry: LocalToolRegistry(tools: []),
+            approvalHandler: { _ in true },
+            eventHandler: { _ in }
+        )
+        try await followUpRuntime.run(
+            history: [.user("start"), interrupted, .user("continue from there")],
+            configuration: AgentConfiguration(),
+            apiKey: "test-only"
+        )
+        let followUpRequests = await followUpScript.requests
+        let followUpRequest = try XCTUnwrap(followUpRequests.first)
+        XCTAssertTrue(followUpRequest.messages.contains { message in
+            message.id == interrupted.id
+                && message.content == "delivered answer prefix"
+                && message.reasoning == "considering the request"
+        })
+    }
+
+    func testCancellationDuringToolOnlyStreamDoesNotCommitAssistantMessage() async throws {
+        let gate = SilentStreamGate()
+        let recorder = EventRecorder()
+        let sessionEvents = SessionEventRecorder()
+        let runtime = AgentRuntime(
+            client: PrefixThenHangModelClient(
+                events: [
+                    .toolCallDelta(
+                        index: 0,
+                        id: "unfinished-call",
+                        type: "function",
+                        name: "echo",
+                        arguments: "{\"value\":"
+                    )
+                ],
+                gate: gate
+            ),
+            registry: LocalToolRegistry(tools: []),
+            approvalHandler: { _ in true },
+            eventHandler: { event in await recorder.append(event) },
+            sessionEventHandler: { draft in
+                try await sessionEvents.append(draft)
+            }
+        )
+
+        let task = Task {
+            try await runtime.run(
+                history: [.user("start")],
+                configuration: AgentConfiguration(),
+                apiKey: "test-only"
+            )
+        }
+        await gate.waitUntilSubscribed()
+        try await eventually {
+            await sessionEvents.events.contains {
+                $0.type == SessionEventVocabulary.assistantChunk
+            }
+        }
+        task.cancel()
+        await gate.finish()
+
+        do {
+            try await task.value
+            XCTFail("Cancelled run should throw")
+        } catch is CancellationError {
+            // Expected.
+        }
+
+        let runtimeEvents = await recorder.events
+        XCTAssertFalse(runtimeEvents.contains { event in
+            if case .messagesCommitted = event { return true }
+            return false
+        })
+        let durableEvents = await sessionEvents.events
+        XCTAssertFalse(durableEvents.contains {
+            $0.type == SessionEventVocabulary.assistantMessage
+        })
+    }
+
+    func testCancellationDuringReasoningOnlyStreamCommitsReasoningPrefix() async throws {
+        let gate = SilentStreamGate()
+        let recorder = EventRecorder()
+        let runtime = AgentRuntime(
+            client: PrefixThenHangModelClient(
+                events: [.reasoning("reasoning prefix")],
+                gate: gate
+            ),
+            registry: LocalToolRegistry(tools: []),
+            approvalHandler: { _ in true },
+            eventHandler: { event in await recorder.append(event) }
+        )
+
+        let task = Task {
+            try await runtime.run(
+                history: [.user("start")],
+                configuration: AgentConfiguration(),
+                apiKey: "test-only"
+            )
+        }
+        await gate.waitUntilSubscribed()
+        try await eventually {
+            await recorder.events.contains { event in
+                if case .reasoningDelta = event { return true }
+                return false
+            }
+        }
+        task.cancel()
+        await gate.finish()
+
+        do {
+            try await task.value
+            XCTFail("Cancelled run should throw")
+        } catch is CancellationError {
+            // Expected.
+        }
+
+        let committed = await recorder.events.flatMap { event -> [AgentMessage] in
+            guard case let .messagesCommitted(messages) = event else { return [] }
+            return messages
+        }
+        XCTAssertEqual(committed.last?.content, "")
+        XCTAssertEqual(committed.last?.reasoning, "reasoning prefix")
+        XCTAssertTrue(committed.last?.isIncomplete == true)
     }
 
     func testCancellationAfterSilentlyFinishedModelStreamPropagatesCancellation() async throws {
@@ -868,6 +2295,220 @@ final class AgentRuntimeTests: XCTestCase {
         XCTAssertTrue(normalInboxIsEmpty)
     }
 
+    func testInboxPreClaimDiscardsThenRewritesWithoutChangingOccurrenceIdentity() async throws {
+        let script = ModelScript(turns: [
+            [.text("first answer"), .finish(.stop)],
+            [.text("second answer"), .finish(.stop)]
+        ])
+        let discarded = try QueuedAgentInput(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000331")!,
+            text: "discard me",
+            disposition: .queued,
+            createdAt: Date(timeIntervalSinceReferenceDate: 300)
+        )
+        let rewritten = try QueuedAgentInput(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000332")!,
+            text: "rewrite me",
+            disposition: .queued,
+            createdAt: Date(timeIntervalSinceReferenceDate: 301)
+        )
+        let inbox = TestQueuedInputInbox(inputs: [discarded, rewritten])
+        let observed = InboxCheckpointRecorder()
+        let plugins = CordisPluginRuntime()
+        _ = try await plugins.install(
+            CordisAgentServices().pluginDefinition(baseSystemPrompt: MobileHarnessPrompt.text)
+        )
+        _ = try await plugins.install(
+            CordisPluginDefinition(id: "test.inbox-policy", version: "1") { context in
+                try await context.intercept(
+                    CordisAgentLoopCheckpoints.inboxPreClaim
+                ) { input, _ in
+                    await observed.append(input)
+                    if input.message.id == discarded.id {
+                        return .discard
+                    }
+                    return .claim(text: "rewritten by plugin")
+                }
+            }
+        )
+        let runtime = AgentRuntime(
+            client: ScriptedModelClient(script: script),
+            registry: LocalToolRegistry(tools: []),
+            plugins: plugins,
+            approvalHandler: { _ in true },
+            eventHandler: { _ in },
+            queuedInputProvider: { boundary in
+                await inbox.next(at: boundary)
+            },
+            queuedInputCommitter: { messageID in
+                await inbox.claim(messageID: messageID)
+            },
+            workspaceBoundary: "/workspace/session-a"
+        )
+
+        try await runtime.run(
+            history: [.user("start")],
+            configuration: {
+                var configuration = AgentConfiguration()
+                configuration.maxSteps = 2
+                return configuration
+            }(),
+            apiKey: "test-only"
+        )
+
+        let requests = await script.requests
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertFalse(requests.flatMap(\.messages).contains { $0.id == discarded.id })
+        let claimed = try XCTUnwrap(
+            requests[1].messages.first(where: { $0.id == rewritten.id })
+        )
+        XCTAssertEqual(claimed.role, .user)
+        XCTAssertEqual(claimed.content, "rewritten by plugin")
+        XCTAssertEqual(claimed.createdAt, rewritten.createdAt)
+        let inboxIsEmpty = await inbox.isEmpty
+        XCTAssertTrue(inboxIsEmpty)
+
+        let contexts = await observed.values
+        XCTAssertEqual(contexts.map(\.message.id), [discarded.id, rewritten.id])
+        XCTAssertTrue(contexts.allSatisfy { $0.source == "user" })
+        XCTAssertTrue(contexts.allSatisfy { $0.workspaceBoundary == "/workspace/session-a" })
+        XCTAssertTrue(contexts.allSatisfy { $0.boundary == .turnStopping })
+        XCTAssertTrue(contexts.allSatisfy { $0.turn == 2 && $0.step == 0 })
+    }
+
+    func testInboxLifecycleEventsPublishStableClaimAndDiscardFacts() async throws {
+        let script = ModelScript(turns: [
+            [.text("first answer"), .finish(.stop)],
+            [.text("second answer"), .finish(.stop)]
+        ])
+        let discarded = try QueuedAgentInput(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000341")!,
+            text: "discard lifecycle",
+            disposition: .queued,
+            createdAt: Date(timeIntervalSinceReferenceDate: 340)
+        )
+        let claimed = try QueuedAgentInput(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000342")!,
+            text: "claim lifecycle",
+            disposition: .queued,
+            createdAt: Date(timeIntervalSinceReferenceDate: 341)
+        )
+        let inbox = TestQueuedInputInbox(inputs: [discarded, claimed])
+        let recorder = InboxLifecycleEventRecorder()
+        let plugins = CordisPluginRuntime()
+        let services = CordisAgentServices()
+        _ = try await plugins.install(
+            services.pluginDefinition(baseSystemPrompt: MobileHarnessPrompt.text)
+        )
+        _ = try await plugins.install(
+            CordisPluginDefinition(id: "test.inbox-lifecycle", version: "1") { context in
+                try await context.intercept(
+                    CordisAgentLoopCheckpoints.inboxPreClaim
+                ) { input, _ in
+                    if input.message.id == discarded.id {
+                        return .discard
+                    }
+                    return .claim(text: input.message.text)
+                }
+                _ = try await context.on(CordisAgentLoopEvents.agentInboxDiscarded) { input in
+                    await recorder.recordDiscarded(input)
+                }
+                _ = try await context.on(CordisAgentLoopEvents.agentInboxClaimed) { input in
+                    await recorder.recordClaimed(input)
+                }
+            }
+        )
+
+        let runID = UUID(uuidString: "00000000-0000-0000-0000-000000000343")!
+        let agentID = UUID(uuidString: "00000000-0000-0000-0000-000000000344")!
+        let runtime = AgentRuntime(
+            agentID: agentID,
+            runID: runID,
+            client: ScriptedModelClient(script: script),
+            registry: LocalToolRegistry(tools: []),
+            plugins: plugins,
+            approvalHandler: { _ in true },
+            eventHandler: { _ in },
+            queuedInputProvider: { boundary in
+                await inbox.next(at: boundary)
+            },
+            queuedInputCommitter: { messageID in
+                await inbox.claim(messageID: messageID)
+            }
+        )
+
+        try await runtime.run(
+            history: [.user("start")],
+            configuration: {
+                var configuration = AgentConfiguration()
+                configuration.maxSteps = 2
+                return configuration
+            }(),
+            apiKey: "test-only"
+        )
+        try await eventually {
+            await recorder.count == 2
+        }
+
+        let events = await recorder.events
+        XCTAssertEqual(events.map(\.kind), [.discarded, .claimed])
+        XCTAssertEqual(events.map(\.messageID), [discarded.id, claimed.id])
+        XCTAssertEqual(events.map(\.text), [discarded.text, claimed.text])
+        XCTAssertTrue(events.allSatisfy { $0.agentID == agentID && $0.runID == runID })
+        XCTAssertTrue(events.allSatisfy { $0.source == "user" && $0.boundary == .turnStopping })
+        XCTAssertEqual(events.first?.reason, "plugin")
+        XCTAssertNil(events.last?.reason)
+    }
+
+    func testInboxLifecycleListenerFailureDoesNotAbortAgentLoop() async throws {
+        let script = ModelScript(turns: [
+            [.text("completed"), .finish(.stop)],
+            [.text("completed after claim"), .finish(.stop)]
+        ])
+        let queued = try QueuedAgentInput(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000345")!,
+            text: "continue despite listener",
+            disposition: .queued,
+            createdAt: Date(timeIntervalSinceReferenceDate: 345)
+        )
+        let inbox = TestQueuedInputInbox(inputs: [queued])
+        let plugins = CordisPluginRuntime()
+        _ = try await plugins.install(
+            CordisAgentServices().pluginDefinition(baseSystemPrompt: MobileHarnessPrompt.text)
+        )
+        _ = try await plugins.install(
+            CordisPluginDefinition(id: "test.inbox-listener-failure", version: "1") { context in
+                _ = try await context.on(CordisAgentLoopEvents.agentInboxClaimed) { _ in
+                    throw TestInboxLifecycleError.injected
+                }
+            }
+        )
+        let runtime = AgentRuntime(
+            client: ScriptedModelClient(script: script),
+            registry: LocalToolRegistry(tools: []),
+            plugins: plugins,
+            approvalHandler: { _ in true },
+            eventHandler: { _ in },
+            queuedInputProvider: { boundary in
+                await inbox.next(at: boundary)
+            },
+            queuedInputCommitter: { messageID in
+                await inbox.claim(messageID: messageID)
+            }
+        )
+
+        try await runtime.run(
+            history: [.user("start")],
+            configuration: AgentConfiguration(),
+            apiKey: "test-only"
+        )
+        let inboxIsEmpty = await inbox.isEmpty
+        XCTAssertTrue(inboxIsEmpty)
+        let requests = await script.requests
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertTrue(requests[1].messages.contains { $0.id == queued.id })
+    }
+
     func testCordisProvidesPromptAndDynamicToolToAgentLoop() async throws {
         let script = ModelScript(turns: [
             [
@@ -883,6 +2524,7 @@ final class AgentRuntimeTests: XCTestCase {
             [.text("done"), .finish(.stop)]
         ])
         let counter = ToolCounter()
+        let recorder = EventRecorder()
         let plugins = CordisPluginRuntime()
         let services = CordisAgentServices()
         _ = try await plugins.install(
@@ -912,7 +2554,7 @@ final class AgentRuntimeTests: XCTestCase {
             registry: LocalToolRegistry(tools: []),
             plugins: plugins,
             approvalHandler: { _ in true },
-            eventHandler: { _ in }
+            eventHandler: { event in await recorder.append(event) }
         )
 
         try await runtime.run(
@@ -926,6 +2568,15 @@ final class AgentRuntimeTests: XCTestCase {
         XCTAssertEqual(executionCount, 1)
         XCTAssertEqual(requests.first?.tools.map(\.name), ["echo"])
         XCTAssertEqual(requests.first?.systemPrompt, "base prompt\n\nplugin prompt")
+        let injections = await recorder.events.compactMap { event -> AgentContextInjection? in
+            guard case let .contextInjected(injection) = event else { return nil }
+            return injection
+        }
+        XCTAssertEqual(injections.count, 2)
+        XCTAssertEqual(
+            Set(injections.map(\.sourceLabel)),
+            ["@deepseek-ai/dsh-system-prompt", "test:prompt"]
+        )
     }
 
     func testCordisGuardCanDenyButCannotBeOverriddenByFullAccess() async throws {
@@ -1075,6 +2726,184 @@ final class AgentRuntimeTests: XCTestCase {
         let encodedEvents = try JSONEncoder().encode(events)
         let persistedText = String(decoding: encodedEvents, as: UTF8.self)
         XCTAssertFalse(persistedText.contains(apiKey))
+    }
+
+    func testDurabilityCheckpointsCoverModelToolAndTurnBoundaries() async throws {
+        let script = ModelScript(turns: [[
+            .toolCallDelta(
+                index: 0,
+                id: "checkpoint-call",
+                type: "function",
+                name: "echo",
+                arguments: "{\"value\":\"durable\"}"
+            ),
+            .finish(.toolCalls)
+        ], [
+            .text("done"),
+            .finish(.stop)
+        ]])
+        let recorder = CheckpointRecorder()
+        let runtime = AgentRuntime(
+            client: ScriptedModelClient(script: script),
+            registry: LocalToolRegistry(tools: [EchoTool(counter: ToolCounter())]),
+            approvalHandler: { _ in true },
+            eventHandler: { _ in },
+            checkpointHandler: {
+                await recorder.record("checkpoint")
+            }
+        )
+
+        try await runtime.run(
+            history: [.user("checkpoint test")],
+            configuration: AgentConfiguration(),
+            apiKey: "test-only"
+        )
+
+        let entries = await recorder.entries
+        XCTAssertEqual(entries.filter { $0 == "checkpoint" }.count, 6)
+    }
+
+    func testModelCheckpointFailurePreventsProviderDispatch() async throws {
+        let script = ModelScript(turns: [[
+            .text("must not be requested"),
+            .finish(.stop)
+        ]])
+        let checkpoints = FailingCheckpoint(failOnInvocation: 1)
+        let runtime = AgentRuntime(
+            client: ScriptedModelClient(script: script),
+            registry: LocalToolRegistry(tools: []),
+            approvalHandler: { _ in true },
+            eventHandler: { _ in },
+            checkpointHandler: {
+                try await checkpoints.hit()
+            }
+        )
+
+        do {
+            try await runtime.run(
+                history: [.user("fail before provider dispatch")],
+                configuration: AgentConfiguration(),
+                apiKey: "test-only"
+            )
+            XCTFail("A failed model checkpoint must abort the run")
+        } catch let error as AgentRuntimeError {
+            guard case .sessionEventPersistenceFailed = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+        }
+
+        let requests = await script.requests
+        XCTAssertTrue(requests.isEmpty)
+    }
+
+    func testToolCheckpointFailurePreventsToolBody() async throws {
+        let script = ModelScript(turns: [[
+            .toolCallDelta(
+                index: 0,
+                id: "fail-closed-tool",
+                type: "function",
+                name: "echo",
+                arguments: "{\"value\":\"must not execute\"}"
+            ),
+            .finish(.toolCalls)
+        ], [
+            .text("handled safely"),
+            .finish(.stop)
+        ]])
+        let toolCounter = ToolCounter()
+        // Invocation 1 is the model request checkpoint; invocation 2 is the
+        // checkpoint after tool/call and immediately before the tool body.
+        let checkpoints = FailingCheckpoint(failOnInvocation: 2)
+        let sessionEvents = SessionEventRecorder()
+        let runtime = AgentRuntime(
+            client: ScriptedModelClient(script: script),
+            registry: LocalToolRegistry(tools: [EchoTool(counter: toolCounter)]),
+            approvalHandler: { _ in true },
+            eventHandler: { _ in },
+            sessionEventHandler: { draft in
+                try await sessionEvents.append(draft)
+            },
+            checkpointHandler: {
+                try await checkpoints.hit()
+            }
+        )
+
+        try await runtime.run(
+            history: [.user("fail before tool side effect")],
+            configuration: AgentConfiguration(),
+            apiKey: "test-only"
+        )
+
+        let executionCount = await toolCounter.value
+        XCTAssertEqual(executionCount, 0)
+        let events = await sessionEvents.events
+        let call = try XCTUnwrap(
+            events.first { $0.type == SessionEventVocabulary.toolCall }
+        )
+        let result = try XCTUnwrap(
+            events.first { $0.type == SessionEventVocabulary.toolResult }
+        )
+        XCTAssertEqual(result.sourceEventSeqs, [call.seq])
+        let resultMessage = try XCTUnwrap(result.toolResultData?.message)
+        XCTAssertTrue(resultMessage.displayText.contains("Error"))
+        XCTAssertEqual(
+            result.toolResultData?.error?.objectValue?["name"]?.stringValue,
+            "ToolExecutionError"
+        )
+    }
+
+    func testCodeModeChildIntentIsRecordedBeforeItsCheckpoint() async throws {
+        let script = ModelScript(turns: [
+            [
+                .toolCallDelta(
+                    index: 0,
+                    id: "code-parent-checkpoint",
+                    type: "function",
+                    name: "run_code",
+                    arguments: "{}"
+                ),
+                .finish(.toolCalls)
+            ],
+            [.text("continued after child checkpoint failure"), .finish(.stop)]
+        ])
+        let childCounter = ToolCounter()
+        let sessionEvents = SessionDraftRecorder()
+        let checkpoints = FailingCheckpoint(failOnInvocation: 3)
+        let codePreset = try XCTUnwrap(
+            AgentPresetRegistry.systemPresets.first { $0.id == "code" }
+        ).runtimeProjection
+        let runtime = AgentRuntime(
+            client: ScriptedModelClient(script: script),
+            registry: LocalToolRegistry(tools: [
+                CheckpointingRunCodeBridgeTool(),
+                CheckpointingCodeChildTool(counter: childCounter)
+            ]),
+            approvalHandler: { _ in true },
+            eventHandler: { _ in },
+            permissionMode: .dangerFullAccess,
+            agentPreset: codePreset,
+            sessionEventHandler: { draft in
+                _ = await sessionEvents.append(draft)
+                return nil
+            },
+            checkpointHandler: {
+                try await checkpoints.hit()
+            }
+        )
+
+        try await runtime.run(
+            history: [.user("exercise child checkpoint ordering")],
+            configuration: AgentConfiguration(),
+            apiKey: "test-only"
+        )
+
+        let childCount = await childCounter.value
+        XCTAssertEqual(childCount, 0)
+        let drafts = await sessionEvents.drafts
+        XCTAssertTrue(
+            drafts.contains { $0.type == "tool/code-dispatch-start" },
+            "the child intent must be present before the failing checkpoint"
+        )
     }
 
     func testSessionEventsLinkToolCallAndResultAcrossClosedSteps() async throws {
@@ -1235,10 +3064,13 @@ final class AgentRuntimeTests: XCTestCase {
         )
     }
 
-    func testTextOnlyLengthFinishCommitsIncompleteAssistantMessage() async throws {
+    func testTextOnlyLengthFinishRetriesAndCommitsOnlyCompleteAssistantMessage() async throws {
         let script = ModelScript(turns: [[
             .text("partial response"),
             .finish(.length)
+        ], [
+            .text("complete response"),
+            .finish(.stop)
         ]])
         let sessionEvents = SessionEventRecorder()
         let runtime = AgentRuntime(
@@ -1272,7 +3104,7 @@ final class AgentRuntimeTests: XCTestCase {
         let expectedContent: JSONValue = .array([
             .object([
                 "type": .string("text"),
-                "text": .string("partial response")
+                "text": .string("complete response")
             ])
         ])
         XCTAssertEqual(
@@ -1281,7 +3113,7 @@ final class AgentRuntimeTests: XCTestCase {
         )
 
         let reason = try XCTUnwrap(events.last?.turnEndData?.reason.objectValue)
-        XCTAssertEqual(reason["kind"], .string("truncated"))
+        XCTAssertEqual(reason["kind"], .string("completed"))
     }
 }
 
@@ -1302,6 +3134,43 @@ private actor ModelScript {
     }
 }
 
+private actor PreStepInjectionScript {
+    private var invocation = 0
+    private(set) var sawBaselineBeforeSecond = false
+
+    func next(visibleMessages: [AgentMessage]) -> [AgentRuntimeInstructionInjection] {
+        invocation += 1
+        let text: String
+        let action: WorkspaceInstructionTransitionAction
+        switch invocation {
+        case 1:
+            text = "workspace baseline"
+            action = .set
+        case 2:
+            sawBaselineBeforeSecond = visibleMessages.contains {
+                $0.content == "workspace baseline"
+            }
+            text = "workspace update"
+            action = .replace
+        default:
+            return []
+        }
+        let source = WorkspaceInstructionMessageSource(
+            baseline: invocation == 1,
+            baselineIdentity: invocation == 1 ? "fixture" : nil,
+            changes: [
+                WorkspaceInstructionChange(
+                    action: action,
+                    scope: ".\u{0}AGENTS.md",
+                    path: "AGENTS.md",
+                    digest: String(invocation)
+                )
+            ]
+        )
+        return [AgentRuntimeInstructionInjection(content: text, source: source.jsonValue)]
+    }
+}
+
 private struct ScriptedModelClient: LLMStreamingClient {
     let script: ModelScript
 
@@ -1316,6 +3185,175 @@ private struct ScriptedModelClient: LLMStreamingClient {
             }
             continuation.onTermination = { _ in
                 task.cancel()
+            }
+        }
+    }
+}
+
+private actor FallbackCompactionRequestRecorder {
+    private(set) var requests: [ModelRequest] = []
+
+    func append(_ request: ModelRequest) -> Int {
+        requests.append(request)
+        return requests.count
+    }
+}
+
+private struct FallbackCompactionClient: LLMStreamingClient {
+    let recorder: FallbackCompactionRequestRecorder
+
+    func stream(_ request: ModelRequest) -> AsyncThrowingStream<LLMStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                let invocation = await recorder.append(request)
+                if invocation == 1 {
+                    continuation.finish(
+                        throwing: ModelClientError.httpFailure(
+                            ModelProviderHTTPFailureMetadata(
+                                status: 400,
+                                code: "context_length_exceeded",
+                                retryAfterMilliseconds: nil,
+                                requestID: nil
+                            ),
+                            "context_length_exceeded"
+                        )
+                    )
+                    return
+                }
+
+                continuation.yield(
+                    .text(String(repeating: "summary ", count: 2_000))
+                )
+                continuation.yield(.finish(.stop))
+                continuation.finish()
+            }
+        }
+    }
+}
+
+private actor CompactionRuntimeContextScript {
+    private(set) var requests: [ModelRequest] = []
+
+    func next(_ request: ModelRequest) -> Int {
+        requests.append(request)
+        return requests.count
+    }
+}
+
+private actor CompactionRouteTraceRecorder {
+    private(set) var drafts: [HarnessTraceDraft] = []
+
+    func append(_ draft: HarnessTraceDraft) {
+        drafts.append(draft)
+    }
+}
+
+private actor CompactionRouteScript {
+    enum Mode: Sendable, Equatable { case failBeforeOutput, failAfterPartialOutput }
+
+    let mode: Mode
+    private(set) var requests: [ModelRequest] = []
+
+    init(mode: Mode) {
+        self.mode = mode
+    }
+
+    func next(_ request: ModelRequest) -> (Int, Mode) {
+        requests.append(request)
+        return (requests.count, mode)
+    }
+}
+
+private struct CompactionRouteClient: LLMStreamingClient {
+    let script: CompactionRouteScript
+
+    func stream(_ request: ModelRequest) -> AsyncThrowingStream<LLMStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                let (invocation, mode) = await script.next(request)
+                switch invocation {
+                case 1:
+                    continuation.finish(
+                        throwing: ModelClientError.httpFailure(
+                            ModelProviderHTTPFailureMetadata(
+                                status: 400,
+                                code: "context_length_exceeded",
+                                retryAfterMilliseconds: nil,
+                                requestID: nil
+                            ),
+                            "context_length_exceeded"
+                        )
+                    )
+                case 2:
+                    if mode == .failAfterPartialOutput {
+                        continuation.yield(.text("partial checkpoint"))
+                    }
+                    continuation.finish(
+                        throwing: ModelClientError.httpFailure(
+                            ModelProviderHTTPFailureMetadata(
+                                status: 503,
+                                code: "summary_unavailable",
+                                retryAfterMilliseconds: nil,
+                                requestID: "summary-route"
+                            ),
+                            "summary unavailable"
+                        )
+                    )
+                case 3:
+                    continuation.yield(.text("checkpoint: retain the active task"))
+                    continuation.yield(.finish(.stop))
+                    continuation.finish()
+                default:
+                    continuation.yield(.text("done"))
+                    continuation.yield(.finish(.stop))
+                    continuation.finish()
+                }
+            }
+        }
+    }
+}
+
+private struct CompactionRuntimeContextClient: LLMStreamingClient {
+    let script: CompactionRuntimeContextScript
+
+    func stream(_ request: ModelRequest) -> AsyncThrowingStream<LLMStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                let invocation = await script.next(request)
+                switch invocation {
+                case 1:
+                    continuation.finish(
+                        throwing: ModelClientError.httpFailure(
+                            ModelProviderHTTPFailureMetadata(
+                                status: 400,
+                                code: "context_length_exceeded",
+                                retryAfterMilliseconds: nil,
+                                requestID: nil
+                            ),
+                            "context_length_exceeded"
+                        )
+                    )
+                case 2:
+                    continuation.yield(.text("checkpoint: preserve the active task"))
+                    continuation.yield(.finish(.stop))
+                    continuation.finish()
+                case 3:
+                    continuation.yield(
+                        .toolCallDelta(
+                            index: 0,
+                            id: "runtime-context-call",
+                            type: "function",
+                            name: "echo",
+                            arguments: "{\"value\":\"step\"}"
+                        )
+                    )
+                    continuation.yield(.finish(.toolCalls))
+                    continuation.finish()
+                default:
+                    continuation.yield(.text("done"))
+                    continuation.yield(.finish(.stop))
+                    continuation.finish()
+                }
             }
         }
     }
@@ -1353,6 +3391,22 @@ private struct SilentFinishModelClient: LLMStreamingClient {
     func stream(_ request: ModelRequest) -> AsyncThrowingStream<LLMStreamEvent, Error> {
         AsyncThrowingStream { continuation in
             Task {
+                await gate.install(continuation)
+            }
+        }
+    }
+}
+
+private struct PrefixThenHangModelClient: LLMStreamingClient {
+    let events: [LLMStreamEvent]
+    let gate: SilentStreamGate
+
+    func stream(_ request: ModelRequest) -> AsyncThrowingStream<LLMStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                for event in events {
+                    continuation.yield(event)
+                }
                 await gate.install(continuation)
             }
         }
@@ -1398,6 +3452,166 @@ private struct EchoTool: LocalAgentTool {
     }
 }
 
+private struct FinalizingEchoTool: LocalAgentTool {
+    let counter: FinalizerCounter
+    let shouldThrow: Bool
+    let definition = ModelToolDefinition(
+        name: "finalizing",
+        description: "Test definition finalizer.",
+        parameters: .object(["type": .string("object")])
+    )
+    let risk: ToolRisk = .pure
+
+    func validate(arguments: [String: JSONValue]) throws {
+        try arguments.requireOnlyKeys([])
+    }
+
+    func summary(arguments: [String: JSONValue]) -> String { "finalizing" }
+
+    func execute(arguments: [String: JSONValue]) async throws -> String { "raw" }
+
+    func finalizeContent(
+        execution: CordisToolExecution?,
+        result: CordisToolExecutionResult
+    ) throws -> String? {
+        counter.increment()
+        if shouldThrow { throw FinalizerError() }
+        return result.isError ? "presented-error" : "presented"
+    }
+
+    private struct FinalizerError: Error {}
+}
+
+private final class FinalizerCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage = 0
+    var value: Int {
+        lock.lock(); defer { lock.unlock() }
+        return storage
+    }
+    func increment() {
+        lock.lock(); storage += 1; lock.unlock()
+    }
+}
+
+private struct TestRunCodeBridgeTool: LocalAgentTool {
+    let definition = ModelToolDefinition(
+        name: "run_code",
+        description: "Test Code Mode bridge.",
+        parameters: .object([
+            "type": .string("object"),
+            "properties": .object([:]),
+            "additionalProperties": .bool(false)
+        ])
+    )
+    let risk: ToolRisk = .pure
+
+    func validate(arguments: [String: JSONValue]) throws {
+        try arguments.requireOnlyKeys([])
+    }
+
+    func summary(arguments: [String: JSONValue]) -> String { "test run_code" }
+
+    func execute(arguments: [String: JSONValue]) async throws -> String {
+        guard let context = CodeModeExecutionScope.context else {
+            throw LocalToolError.pluginFailed("missing Code Mode context")
+        }
+        let result = await context.dispatch(
+            CodeModeChildDispatchRequest(
+                callID: "code-child-1",
+                name: "failing_child",
+                arguments: [:]
+            )
+        )
+        return JSONValue.object([
+            "error": result.error.map(JSONValue.string) ?? .null
+        ]).displayText
+    }
+}
+
+private struct FailingCodeChildTool: LocalAgentTool {
+    let definition = ModelToolDefinition(
+        name: "failing_child",
+        description: "Fail inside a Code Mode child dispatch.",
+        parameters: .object([
+            "type": .string("object"),
+            "properties": .object([:]),
+            "additionalProperties": .bool(false)
+        ])
+    )
+    let risk: ToolRisk = .pure
+
+    func validate(arguments: [String: JSONValue]) throws {
+        try arguments.requireOnlyKeys([])
+    }
+
+    func summary(arguments: [String: JSONValue]) -> String { "failing child" }
+
+    func execute(arguments: [String: JSONValue]) async throws -> String {
+        throw LocalToolError.pluginFailed("nested failure")
+    }
+}
+
+private struct CheckpointingRunCodeBridgeTool: LocalAgentTool {
+    let definition = ModelToolDefinition(
+        name: "run_code",
+        description: "Test Code Mode checkpoint ordering.",
+        parameters: .object([
+            "type": .string("object"),
+            "properties": .object([:]),
+            "additionalProperties": .bool(false)
+        ])
+    )
+    let risk: ToolRisk = .pure
+
+    func validate(arguments: [String: JSONValue]) throws {
+        try arguments.requireOnlyKeys([])
+    }
+
+    func summary(arguments: [String: JSONValue]) -> String { "test run_code" }
+
+    func execute(arguments: [String: JSONValue]) async throws -> String {
+        guard let context = CodeModeExecutionScope.context else {
+            throw LocalToolError.pluginFailed("missing Code Mode context")
+        }
+        let result = await context.dispatch(
+            CodeModeChildDispatchRequest(
+                callID: "checkpoint-child-1",
+                name: "checkpoint_child",
+                arguments: [:]
+            )
+        )
+        return JSONValue.object([
+            "error": result.error.map(JSONValue.string) ?? .null
+        ]).displayText
+    }
+}
+
+private struct CheckpointingCodeChildTool: LocalAgentTool {
+    let counter: ToolCounter
+    let definition = ModelToolDefinition(
+        name: "checkpoint_child",
+        description: "Count a Code Mode child dispatch.",
+        parameters: .object([
+            "type": .string("object"),
+            "properties": .object([:]),
+            "additionalProperties": .bool(false)
+        ])
+    )
+    let risk: ToolRisk = .pure
+
+    func validate(arguments: [String: JSONValue]) throws {
+        try arguments.requireOnlyKeys([])
+    }
+
+    func summary(arguments: [String: JSONValue]) -> String { "checkpoint child" }
+
+    func execute(arguments: [String: JSONValue]) async throws -> String {
+        await counter.increment()
+        return "child ran"
+    }
+}
+
 private struct ApprovalEchoTool: LocalAgentTool {
     let definition = ModelToolDefinition(
         name: "approved_echo",
@@ -1423,6 +3637,39 @@ private struct ApprovalEchoTool: LocalAgentTool {
     func execute(arguments: [String: JSONValue]) async throws -> String {
         try arguments.requiredString("value")
     }
+}
+
+private struct ApprovalCountingTool: LocalAgentTool {
+    let counter: ToolCounter
+    let definition = ModelToolDefinition(
+        name: "approval_counting",
+        description: "Test approval audit ordering.",
+        parameters: .object([
+            "type": .string("object"),
+            "properties": .object([
+                "value": .object(["type": .string("string")])
+            ]),
+            "required": .array([.string("value")]),
+            "additionalProperties": .bool(false)
+        ])
+    )
+    let risk: ToolRisk = .sideEffect
+
+    func validate(arguments: [String: JSONValue]) throws {
+        try arguments.requireOnlyKeys(["value"])
+        _ = try arguments.requiredString("value", maximumUTF8Bytes: 128)
+    }
+
+    func summary(arguments: [String: JSONValue]) -> String { "approval counting" }
+
+    func execute(arguments: [String: JSONValue]) async throws -> String {
+        await counter.increment()
+        return try arguments.requiredString("value", maximumUTF8Bytes: 128)
+    }
+}
+
+private enum ApprovalAuditTestError: Error {
+    case persistenceFailed
 }
 
 private struct StreamingEchoTool: LocalAgentTool {
@@ -1457,6 +3704,53 @@ private struct StreamingEchoTool: LocalAgentTool {
         await onOutput(AgentToolOutputChunk(channel: .stdout, text: "first\n"))
         await onOutput(AgentToolOutputChunk(channel: .stderr, text: "warning\n"))
         return "stream complete"
+    }
+}
+
+private struct ReadImageEnvelopeTool: LocalAgentTool {
+    let attachment: AgentImageAttachmentRef
+    let definition = ModelToolDefinition(
+        name: "read_image",
+        description: "Return a test image attachment envelope.",
+        parameters: .object([
+            "type": .string("object"),
+            "properties": .object([:]),
+            "additionalProperties": .bool(false)
+        ])
+    )
+    let risk: ToolRisk = .pure
+
+    func validate(arguments: [String: JSONValue]) throws {
+        try arguments.requireOnlyKeys([])
+    }
+
+    func summary(arguments: [String: JSONValue]) -> String { "read image" }
+
+    func execute(arguments: [String: JSONValue]) async throws -> String {
+        try validate(arguments: arguments)
+        return WorkspaceReadImageToolValue(
+            path: "/workspace/screenshot.jpg",
+            attachment: attachment,
+            width: 1,
+            height: 1,
+            originalWidth: 1,
+            originalHeight: 1
+        ).jsonValue.displayText
+    }
+}
+
+private actor TestImageAttachmentProvider {
+    let expected: AgentImageAttachmentRef
+    let data: Data
+
+    init(expected: AgentImageAttachmentRef, data: Data) {
+        self.expected = expected
+        self.data = data
+    }
+
+    func resolve(_ refs: [AgentImageAttachmentRef]) throws -> [ModelImagePayload] {
+        guard refs == [expected] else { throw AgentRuntimeError.imageAttachmentUnavailable }
+        return [ModelImagePayload(id: expected.id, mimeType: expected.mimeType, data: data)]
     }
 }
 
@@ -1653,6 +3947,38 @@ private actor SessionDraftRecorder {
     }
 }
 
+private actor CheckpointRecorder {
+    private(set) var entries: [String] = []
+
+    func record(_ entry: String) {
+        entries.append(entry)
+    }
+}
+
+private actor FailingCheckpoint {
+    private let failOnInvocation: Int
+    private var invocation = 0
+
+    init(failOnInvocation: Int) {
+        self.failOnInvocation = failOnInvocation
+    }
+
+    func hit() throws {
+        invocation += 1
+        if invocation == failOnInvocation {
+            throw FailingCheckpointError.injectedFailure
+        }
+    }
+}
+
+private enum FailingCheckpointError: LocalizedError {
+    case injectedFailure
+
+    var errorDescription: String? {
+        "injected checkpoint persistence failure"
+    }
+}
+
 private actor TestQueuedInputInbox {
     private var inputs: [QueuedAgentInput]
 
@@ -1674,5 +4000,79 @@ private actor TestQueuedInputInbox {
     func acknowledge(messageIDs: [UUID]) {
         let committed = Set(messageIDs)
         inputs.removeAll { committed.contains($0.id) }
+    }
+
+    func claim(messageID: UUID) -> Bool {
+        guard let index = inputs.firstIndex(where: { $0.id == messageID }) else {
+            return false
+        }
+        inputs.remove(at: index)
+        return true
+    }
+}
+
+private actor InboxCheckpointRecorder {
+    private var storage: [CordisAgentInboxPreClaimContext] = []
+
+    var values: [CordisAgentInboxPreClaimContext] { storage }
+
+    func append(_ value: CordisAgentInboxPreClaimContext) {
+        storage.append(value)
+    }
+}
+
+private enum InboxLifecycleEventKind: Equatable, Sendable {
+    case claimed
+    case discarded
+}
+
+private struct InboxLifecycleEventRecord: Equatable, Sendable {
+    let kind: InboxLifecycleEventKind
+    let agentID: UUID
+    let runID: UUID
+    let messageID: UUID
+    let text: String
+    let source: String
+    let boundary: QueuedInputBoundary
+    let reason: String?
+}
+
+private enum TestInboxLifecycleError: Error {
+    case injected
+}
+
+private actor InboxLifecycleEventRecorder {
+    private(set) var events: [InboxLifecycleEventRecord] = []
+
+    var count: Int { events.count }
+
+    func recordClaimed(_ input: CordisAgentInboxClaimedContext) {
+        events.append(
+            InboxLifecycleEventRecord(
+                kind: .claimed,
+                agentID: input.agentID,
+                runID: input.runID,
+                messageID: input.message.id,
+                text: input.message.text,
+                source: input.source,
+                boundary: input.boundary,
+                reason: nil
+            )
+        )
+    }
+
+    func recordDiscarded(_ input: CordisAgentInboxDiscardedContext) {
+        events.append(
+            InboxLifecycleEventRecord(
+                kind: .discarded,
+                agentID: input.agentID,
+                runID: input.runID,
+                messageID: input.message.id,
+                text: input.message.text,
+                source: input.source,
+                boundary: input.boundary,
+                reason: input.reason
+            )
+        )
     }
 }

@@ -106,7 +106,7 @@ private struct DevicePermissionRow: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(capability.title)
-                Text(capability.purpose)
+                Text(capability.purpose(for: status))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -147,7 +147,7 @@ private extension DevicePermissionCapability {
         }
     }
 
-    var purpose: String {
+    func purpose(for status: DevicePermissionStatus) -> String {
         switch self {
         case .camera: "用于拍照和本机 OCR。"
         case .microphone: "用于手机上的语音输入。"
@@ -162,7 +162,15 @@ private extension DevicePermissionCapability {
         case .calendar: "支持只写或完全访问，按工具实际请求。"
         case .reminders: "支持只写或完全访问，按工具实际请求。"
         case .mediaLibrary: "用于访问本机音乐资料库。"
-        case .healthKit: "当前未配置 HealthKit capability。"
+        case .healthKit:
+            switch status {
+            case .notIntegrated:
+                "当前签名未包含 HealthKit capability；请使用启用该 entitlement 的设备构建。"
+            case .unavailable:
+                "此设备不支持 HealthKit。"
+            default:
+                "已编译 OpenMinis HealthKit；具体数据类型的读取或写入由健康 App 管理授权。"
+            }
         case .homeKit: "当前未配置 HomeKit capability。"
         case .nfc: "没有永久授权；每次扫描使用系统会话。"
         }
@@ -216,6 +224,7 @@ private extension DevicePermissionStatus {
         case .restricted: "受限制"
         case .unavailable: "不可用"
         case .notIntegrated: "未接入"
+        case .systemManaged: "系统管理"
         case .sessionOnly: "会话授权"
         }
     }
@@ -230,13 +239,14 @@ private extension DevicePermissionStatus {
         case .restricted: "lock.circle"
         case .unavailable: "minus.circle"
         case .notIntegrated: "wrench.and.screwdriver"
+        case .systemManaged: "gearshape.circle"
         }
     }
 
     var tint: Color {
         switch self {
         case .authorized: .green
-        case .limited, .sessionOnly, .writeOnly: .orange
+        case .limited, .sessionOnly, .writeOnly, .systemManaged: .orange
         case .denied, .restricted: .red
         case .notDetermined, .unavailable, .notIntegrated: .secondary
         }

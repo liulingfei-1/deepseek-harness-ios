@@ -4,8 +4,14 @@ enum NativeToolEventPresentation: Equatable, Sendable {
     case workspaceRead(NativeWorkspaceReadPresentation)
     case workspaceWrite(NativeWorkspaceWritePresentation)
     case workspaceFiles(NativeWorkspaceFilesPresentation)
+    case diff(NativeDiffPresentation)
+    case deliverable(NativeDeliverablePresentation)
+    case search(NativeSearchPresentation)
+    case web(NativeWebPresentation)
+    case job(NativeJobPresentation)
     case workItems(NativeWorkItemsPresentation)
     case terminal(NativeTerminalPresentation)
+    case workflow(NativeWorkflowPresentation)
     case generic
 
     var terminalExitCode: Int? {
@@ -14,7 +20,19 @@ enum NativeToolEventPresentation: Equatable, Sendable {
     }
 
     static func derive(for event: AgentToolEvent) -> NativeToolEventPresentation {
-        derive(
+        if event.name == "workflow" {
+            let duration = event.startedAt.map { start in
+                Int(max(0, (event.finishedAt ?? .now).timeIntervalSince(start) * 1_000).rounded())
+            }
+            return workflow(
+                arguments: event.arguments,
+                result: event.result,
+                output: event.output,
+                status: event.status,
+                durationMilliseconds: duration
+            )
+        }
+        return derive(
             name: event.name,
             arguments: event.arguments,
             result: event.result,
@@ -31,12 +49,22 @@ enum NativeToolEventPresentation: Equatable, Sendable {
         status: AgentToolEventStatus = .succeeded
     ) -> NativeToolEventPresentation {
         switch name {
-        case "workspace_read_text":
+        case "read", "workspace_read_text":
             return workspaceRead(arguments: arguments, result: result)
-        case "workspace_write_text":
+        case "write", "workspace_write_text":
             return workspaceWrite(arguments: arguments)
         case "workspace_list_files":
             return workspaceFiles(result: result)
+        case "workspace_diff":
+            return diff(result: result)
+        case "deliverable_write":
+            return deliverable(result: result)
+        case "workspace_search", "glob", "grep":
+            return search(name: name, arguments: arguments, result: result)
+        case "web_search", "web_fetch":
+            return web(name: name, arguments: arguments, result: result)
+        case "job_output", "job_list", "job_kill":
+            return job(name: name, arguments: arguments, result: result, status: status)
         case "work_state_replace_todos":
             return workItems(
                 kind: .todos,
@@ -57,6 +85,20 @@ enum NativeToolEventPresentation: Equatable, Sendable {
             )
         case "shell_execute":
             return terminal(
+                arguments: arguments,
+                result: result,
+                output: output,
+                status: status
+            )
+        case "run_code", "code_execute":
+            return terminal(
+                arguments: arguments,
+                result: result,
+                output: output,
+                status: status
+            )
+        case "workflow":
+            return workflow(
                 arguments: arguments,
                 result: result,
                 output: output,
@@ -109,6 +151,24 @@ struct NativeWorkspaceFilePresentation: Identifiable, Equatable, Sendable {
 
 struct NativeWorkspaceFilesPresentation: Equatable, Sendable {
     let files: [NativeWorkspaceFilePresentation]
+}
+
+struct NativeDiffPresentation: Equatable, Sendable {
+    let path: String
+    let diff: String
+    let added: Int
+    let removed: Int
+    let changed: Bool
+    let truncated: Bool
+}
+
+struct NativeDeliverablePresentation: Equatable, Sendable {
+    let path: String
+    let title: String?
+    let preview: String
+    let bytes: Int
+    let lines: Int
+    let truncated: Bool
 }
 
 enum NativeWorkItemsKind: String, Equatable, Sendable {
@@ -173,6 +233,48 @@ struct NativeTerminalPresentation: Equatable, Sendable {
     }
 }
 
+struct NativeWorkflowPhasePresentation: Identifiable, Equatable, Sendable {
+    let id: String
+    let title: String
+    let detail: String?
+    let isCurrent: Bool
+    let isCompleted: Bool
+}
+
+enum NativeWorkflowMemberStatus: String, Equatable, Sendable {
+    case running
+    case completed
+    case failed
+    case cancelled
+}
+
+struct NativeWorkflowMemberPresentation: Identifiable, Equatable, Sendable {
+    let id: String
+    let sequence: Int
+    let label: String
+    let phase: String?
+    let status: NativeWorkflowMemberStatus
+    let durationMilliseconds: Int?
+    let error: String?
+}
+
+struct NativeWorkflowPresentation: Equatable, Sendable {
+    let name: String
+    let description: String?
+    let phases: [NativeWorkflowPhasePresentation]
+    let members: [NativeWorkflowMemberPresentation]
+    let logs: [String]
+    let resultSummary: String?
+    let errorMessage: String?
+    let durationMilliseconds: Int?
+    let isRunning: Bool
+    let status: AgentToolEventStatus
+
+    var completedMembers: Int {
+        members.count { $0.status == .completed }
+    }
+}
+
 private extension NativeToolEventPresentation {
     static let maximumJSONBytes = 256 * 1_024
     static let maximumPreviewLines = 256
@@ -183,11 +285,14 @@ private extension NativeToolEventPresentation {
         result: String?
     ) -> NativeToolEventPresentation {
         guard let arguments = jsonObject(arguments),
-              let path = boundedString(arguments["path"], maximumBytes: 512),
+              let path = boundedString(
+                arguments["file_path"] ?? arguments["path"],
+                maximumBytes: 512
+              ),
               let result else {
             return .generic
         }
-        let projection = textProjection(result)
+        let projection = textProjection(fileToolContent(result) ?? result)
         return .workspaceRead(
             NativeWorkspaceReadPresentation(
                 path: path,
@@ -201,9 +306,12 @@ private extension NativeToolEventPresentation {
 
     static func workspaceWrite(arguments: String) -> NativeToolEventPresentation {
         guard let arguments = jsonObject(arguments),
-              let path = boundedString(arguments["path"], maximumBytes: 512),
+              let path = boundedString(
+                arguments["file_path"] ?? arguments["path"],
+                maximumBytes: 512
+              ),
               let text = boundedString(
-                arguments["text"],
+                arguments["content"] ?? arguments["text"],
                 maximumBytes: 60 * 1_024,
                 allowEmpty: true
               ) else {
@@ -220,6 +328,17 @@ private extension NativeToolEventPresentation {
                 languageHint: languageHint(for: path)
             )
         )
+    }
+
+    static func fileToolContent(_ result: String) -> String? {
+        guard let opening = result.range(of: "<content>\n"),
+              let closing = result.range(
+                of: "\n</content>",
+                range: opening.upperBound..<result.endIndex
+              ) else {
+            return nil
+        }
+        return String(result[opening.upperBound..<closing.lowerBound])
     }
 
     static func workspaceFiles(result: String?) -> NativeToolEventPresentation {
@@ -243,6 +362,47 @@ private extension NativeToolEventPresentation {
             files.append(NativeWorkspaceFilePresentation(path: path, size: size))
         }
         return .workspaceFiles(NativeWorkspaceFilesPresentation(files: files))
+    }
+
+    static func diff(result: String?) -> NativeToolEventPresentation {
+        guard let object = result.flatMap(jsonObject),
+              object["kind"]?.stringValue == "diff",
+              let path = boundedString(object["path"], maximumBytes: 1_024),
+              let diff = boundedString(object["diff"], maximumBytes: 96 * 1_024, allowEmpty: true),
+              let added = nonnegativeInteger(object["added"]),
+              let removed = nonnegativeInteger(object["removed"]),
+              let changed = boolean(object["changed"]),
+              let truncated = boolean(object["truncated"]) else {
+            return .generic
+        }
+        return .diff(NativeDiffPresentation(
+            path: path,
+            diff: diff,
+            added: added,
+            removed: removed,
+            changed: changed,
+            truncated: truncated
+        ))
+    }
+
+    static func deliverable(result: String?) -> NativeToolEventPresentation {
+        guard let object = result.flatMap(jsonObject),
+              object["kind"]?.stringValue == "deliverable",
+              let path = boundedString(object["path"], maximumBytes: 1_024),
+              let preview = boundedString(object["preview"], maximumBytes: 4 * 1_024, allowEmpty: true),
+              let bytes = nonnegativeInteger(object["bytes"]),
+              let lines = nonnegativeInteger(object["lines"]),
+              let truncated = boolean(object["preview_truncated"]) else {
+            return .generic
+        }
+        return .deliverable(NativeDeliverablePresentation(
+            path: path,
+            title: boundedString(object["title"], maximumBytes: 512, allowEmpty: true),
+            preview: preview,
+            bytes: bytes,
+            lines: lines,
+            truncated: truncated
+        ))
     }
 
     static func workItems(
@@ -374,6 +534,122 @@ private extension NativeToolEventPresentation {
         )
     }
 
+    static func workflow(
+        arguments: String,
+        result: String?,
+        output: [AgentToolOutputChunk],
+        status: AgentToolEventStatus,
+        durationMilliseconds: Int? = nil
+    ) -> NativeToolEventPresentation {
+        guard let root = jsonObject(arguments),
+              let meta = root["meta"]?.objectValue,
+              let name = boundedString(meta["name"], maximumBytes: 256) else {
+            return .generic
+        }
+
+        var phases: [(title: String, detail: String?)] = []
+        if case let .array(values)? = meta["phases"], values.count <= 32 {
+            for value in values {
+                guard let object = value.objectValue,
+                      let title = boundedString(object["title"], maximumBytes: 256) else {
+                    continue
+                }
+                phases.append((title, boundedString(object["detail"], maximumBytes: 2_048, allowEmpty: true)))
+            }
+        }
+
+        var members: [Int: NativeWorkflowMemberPresentation] = [:]
+        var logs: [String] = []
+        var currentPhase: String?
+        let lines = output.flatMap { chunk in
+            chunk.text.split(whereSeparator: \Character.isNewline).map { (chunk.channel, String($0)) }
+        }
+        for (channel, rawLine) in lines {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty else { continue }
+            if line.hasPrefix("Workflow phase:") {
+                currentPhase = line.dropFirst("Workflow phase:".count).trimmingCharacters(in: .whitespaces)
+                continue
+            }
+            if line.hasPrefix("Workflow:") {
+                let message = line.dropFirst("Workflow:".count).trimmingCharacters(in: .whitespaces)
+                if !message.isEmpty { logs.append(String(message)) }
+                continue
+            }
+            if line.hasPrefix("Workflow child ") {
+                let remainder = line.dropFirst("Workflow child ".count)
+                let parts = remainder.split(separator: " ", maxSplits: 2).map(String.init)
+                guard let sequence = Int(parts.first ?? ""), parts.count >= 3 else { continue }
+                let state = parts[1].trimmingCharacters(in: CharacterSet(charactersIn: ":"))
+                var label = parts[2].trimmingCharacters(in: CharacterSet(charactersIn: ":"))
+                var durationMilliseconds: Int?
+                if let markerStart = label.range(of: " [duration_ms="),
+                   label.hasSuffix("]") {
+                    let rawDuration = label[markerStart.upperBound..<label.index(before: label.endIndex)]
+                    durationMilliseconds = Int(rawDuration)
+                    label = String(label[..<markerStart.lowerBound])
+                }
+                let memberStatus: NativeWorkflowMemberStatus = state == "started" ? .running : (state == "completed" ? .completed : (state == "cancelled" ? .cancelled : .failed))
+                let previous = members[sequence]
+                members[sequence] = NativeWorkflowMemberPresentation(
+                    id: previous?.id ?? "workflow-member-\(sequence)",
+                    sequence: sequence,
+                    label: label,
+                    phase: previous?.phase ?? currentPhase,
+                    status: memberStatus,
+                    durationMilliseconds: durationMilliseconds ?? previous?.durationMilliseconds,
+                    error: memberStatus == .failed || memberStatus == .cancelled ? label : previous?.error
+                )
+                continue
+            }
+            if channel == .stderr {
+                logs.append(line)
+            }
+        }
+
+        var resultSummary: String?
+        if let resultObject = result.flatMap(jsonObject) {
+            if let value = resultObject["result"], value != .null {
+                resultSummary = compactJSON(value, maximumBytes: 4_096)
+            }
+        }
+        let orderedMembers = members.values.sorted { $0.sequence < $1.sequence }
+        let currentTitle = currentPhase
+        let currentIndex = currentTitle.flatMap { title in phases.firstIndex { $0.title == title } }
+        let projectedPhases = phases.enumerated().map { index, phase in
+            let completedPhase = currentIndex.map { index < $0 } ?? false
+            return NativeWorkflowPhasePresentation(
+                id: "workflow-phase-\(index)",
+                title: phase.title,
+                detail: phase.detail,
+                isCurrent: phase.title == currentTitle,
+                isCompleted: completedPhase
+            )
+        }
+        return .workflow(NativeWorkflowPresentation(
+            name: name,
+            description: boundedString(meta["description"], maximumBytes: 2_048, allowEmpty: true),
+            phases: projectedPhases,
+            members: orderedMembers,
+            logs: Array(logs.suffix(8)),
+            resultSummary: resultSummary,
+            errorMessage: logs.last(where: { !$0.isEmpty && status != .succeeded }),
+            durationMilliseconds: durationMilliseconds,
+            isRunning: status == .pending || status == .awaitingApproval || status == .running,
+            status: status
+        ))
+    }
+
+    private static func compactJSON(_ value: JSONValue, maximumBytes: Int) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let text = (try? encoder.encode(value))
+            .flatMap { String(data: $0, encoding: .utf8) }
+            ?? value.displayText
+        guard text.utf8.count > maximumBytes else { return text }
+        return String(text.prefix(maximumBytes)) + "…"
+    }
+
     static func displayCommandToken(_ value: String) -> String {
         let needsQuotes = value.isEmpty || value.contains { character in
             character.isWhitespace || "'\"\\$`;&|<>()".contains(character)
@@ -416,6 +692,20 @@ private extension NativeToolEventPresentation {
     static func jsonValue(_ text: String) -> JSONValue? {
         guard !text.isEmpty, text.utf8.count <= maximumJSONBytes else { return nil }
         return try? JSONDecoder().decode(JSONValue.self, from: Data(text.utf8))
+    }
+
+    static func nonnegativeInteger(_ value: JSONValue?) -> Int? {
+        guard case let .number(number)? = value,
+              number.isFinite,
+              number.rounded() == number,
+              number >= 0,
+              number <= Double(Int.max) else { return nil }
+        return Int(number)
+    }
+
+    static func boolean(_ value: JSONValue?) -> Bool? {
+        guard case let .bool(result)? = value else { return nil }
+        return result
     }
 
     static func boundedString(

@@ -245,47 +245,41 @@ struct AgentPresetRuntimeProjection: Sendable, Equatable {
     let id: String
     let composition: AgentPresetNativeComposition
 
+    var isCodeMode: Bool { id == "code" }
+
     func allowsTool(_ name: String) -> Bool {
-        composition.tools.allows(name)
+        if isCodeMode { return name == "run_code" }
+        if name == "run_code" { return false }
+        return composition.tools.allows(name)
     }
 
     func filterTools(_ definitions: [ModelToolDefinition]) -> [ModelToolDefinition] {
-        definitions.filter { allowsTool($0.name) }
+        definitions.filter { definition in
+            if isCodeMode { return definition.name == "run_code" }
+            return definition.name != "run_code" && allowsTool(definition.name)
+        }
     }
 
     func systemPrompt(
         assembledSystemPrompt: String,
-        runtimeContext: String,
         fallback: String
     ) -> String {
-        let inheritedParts = [assembledSystemPrompt, runtimeContext]
-            .filter { !$0.isEmpty }
-        let inherited = inheritedParts.isEmpty
-            ? fallback
-            : inheritedParts.joined(separator: "\n\n")
+        let inherited = assembledSystemPrompt.isEmpty ? fallback : assembledSystemPrompt
 
         switch composition.prompt.mode {
         case .inherit:
-            return composition.prompt.includeRuntimeContext
-                ? inherited
-                : (assembledSystemPrompt.isEmpty ? fallback : assembledSystemPrompt)
+            return inherited
         case .append:
-            let base: String
-            if composition.prompt.includeRuntimeContext {
-                base = inherited
-            } else {
-                base = assembledSystemPrompt.isEmpty ? fallback : assembledSystemPrompt
-            }
-            return [base, composition.prompt.text ?? ""]
+            return [inherited, composition.prompt.text ?? ""]
                 .filter { !$0.isEmpty }
                 .joined(separator: "\n\n")
         case .complete:
-            let prompt = composition.prompt.text ?? fallback
-            guard composition.prompt.includeRuntimeContext, !runtimeContext.isEmpty else {
-                return prompt
-            }
-            return prompt + "\n\n" + runtimeContext
+            return composition.prompt.text ?? fallback
         }
+    }
+
+    func runtimeContext(_ context: String) -> String {
+        composition.prompt.includeRuntimeContext ? context : ""
     }
 }
 
@@ -313,7 +307,7 @@ enum AgentPresetRegistry {
             trust: .system,
             manifest: AgentPresetManifest(
                 name: "PTC 模式",
-                description: "通过 Code Mode SDK 组合多步工具；移动版尚未完成该运行时。",
+                description: "通过生成的 Python Code Mode SDK 在手机 iSH 中组合多步本机工具。",
                 order: 2
             ),
             composition: AgentPresetNativeComposition(
@@ -321,8 +315,7 @@ enum AgentPresetRegistry {
                     mode: .all,
                     excludedPrefixes: ["cordis_"]
                 )
-            ),
-            broken: "iOS 原生 Code Mode 运行时尚未移植；不能用普通工具调用冒充 PTC。"
+            )
         ),
         AgentPresetDefinition(
             id: "minimal",
@@ -335,16 +328,20 @@ enum AgentPresetRegistry {
             composition: AgentPresetNativeComposition(
                 prompt: AgentPresetPromptComposition(
                     mode: .complete,
-                    text: "You are a helpful software engineer assistant.",
+                    text: MobileHarnessPrompt.text,
                     includeRuntimeContext: false
                 ),
                 tools: AgentPresetToolSelection(
                     mode: .only,
                     names: [
+                        "edit",
+                        "job_kill",
+                        "job_list",
+                        "job_output",
+                        "read",
                         "shell_execute",
                         "workspace_list_files",
-                        "workspace_read_text",
-                        "workspace_write_text"
+                        "write"
                     ]
                 ),
                 defaultPermissionMode: .workspaceWrite,

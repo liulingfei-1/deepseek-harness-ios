@@ -19,7 +19,16 @@ enum SessionEventVocabulary {
     static let commandDone = "command/done"
     static let requestHeader = "request/header"
     static let requestContext = "request/context"
+    static let questionRequested = "question/requested"
+    static let questionResolved = "question/resolved"
+    static let approvalAsked = "approval/asked"
+    static let approvalDecided = "approval/decided"
     static let sessionEndSeed = "session/end-seed"
+    static let subagentDescriptor = "subagent/descriptor"
+    static let subagentLifecycle = "subagent/lifecycle"
+    /// Metadata for one structured-output contract result. Raw model output
+    /// is intentionally never stored in this event.
+    static let subagentOutput = "subagent/output"
 
     static let upstreamKnown: Set<String> = [
         "agent-preset/selected",
@@ -43,6 +52,8 @@ enum SessionEventVocabulary {
         "llm/retry-started",
         "permission/preset",
         "plan/mode",
+        questionRequested,
+        questionResolved,
         requestContext,
         requestHeader,
         "sandbox/mode",
@@ -53,6 +64,8 @@ enum SessionEventVocabulary {
         stepEnd,
         stepStart,
         "subagent/descriptor",
+        subagentLifecycle,
+        subagentOutput,
         "todo/write",
         "tool-workflow/agent-end",
         "tool-workflow/agent-start",
@@ -67,6 +80,155 @@ enum SessionEventVocabulary {
         userMessage,
         "web/deepseek-search-llm-request"
     ]
+}
+
+/// Error identities used by the upstream session crash-repair contract.
+enum SessionRecoveryErrorCode {
+    static let toolNotStarted = "TOOL_NOT_STARTED"
+    static let toolOutcomeUnknown = "TOOL_OUTCOME_UNKNOWN"
+}
+
+/// Builds deterministic events that close a cold session whose last turn was
+/// interrupted. Complete durable events are preserved; only missing tool
+/// results and lifecycle boundaries are synthesized.
+enum SessionEventRecovery {
+    private struct PendingTool {
+        let step: Int
+        var callSequence: UInt64?
+    }
+
+    static func interruptedTurnClosers(_ events: [SessionEvent]) throws -> [SessionEvent] {
+        var openTurn: Int?
+        var openStep: Int?
+        var pending: [(String, PendingTool)] = []
+
+        for event in events {
+            switch event.type {
+            case SessionEventVocabulary.turnStart:
+                openTurn = event.turnStartData?.turn
+                openStep = nil
+                pending.removeAll(keepingCapacity: true)
+            case SessionEventVocabulary.turnEnd:
+                openTurn = nil
+                openStep = nil
+                pending.removeAll(keepingCapacity: true)
+            case SessionEventVocabulary.stepStart:
+                openStep = event.stepData?.step
+            case SessionEventVocabulary.stepEnd:
+                pending.removeAll(keepingCapacity: true)
+                openStep = nil
+            case SessionEventVocabulary.assistantMessage:
+                guard let assistant = event.assistantMessageData,
+                      case let .array(content)? = assistant.message.objectValue?["content"] else {
+                    continue
+                }
+                for block in content {
+                    guard let object = block.objectValue,
+                          object["type"]?.stringValue == "tool-call",
+                          let callID = object["id"]?.stringValue ?? object["callId"]?.stringValue,
+                          !callID.isEmpty else { continue }
+                    if let index = pending.firstIndex(where: { $0.0 == callID }) {
+                        pending[index] = (
+                            callID,
+                            PendingTool(step: assistant.step, callSequence: nil)
+                        )
+                    } else {
+                        pending.append(
+                            (callID, PendingTool(step: assistant.step, callSequence: nil))
+                        )
+                    }
+                }
+            case SessionEventVocabulary.toolCall:
+                guard let call = event.toolCallData,
+                      let index = pending.firstIndex(where: { $0.0 == call.callID }) else { continue }
+                pending[index].1.callSequence = event.seq
+            case SessionEventVocabulary.toolResult:
+                if let callID = event.toolResultData?.callID {
+                    pending.removeAll { $0.0 == callID }
+                }
+            default:
+                continue
+            }
+        }
+
+        guard let turn = openTurn, let last = events.last else { return [] }
+
+        var sequence = last.seq + 1
+        let time = last.time
+        var closers: [SessionEvent] = []
+        for (callID, pendingTool) in pending {
+            let started = pendingTool.callSequence != nil
+            let code = started
+                ? SessionRecoveryErrorCode.toolOutcomeUnknown
+                : SessionRecoveryErrorCode.toolNotStarted
+            let name = started ? "ToolOutcomeUnknownError" : "ToolNotStartedError"
+            let text = started
+                ? "The tool call was interrupted after it was recorded, but no result was durably recorded. Its outcome is unknown. Decide whether to retry from the tool semantics: retry only if the operation is read-only or idempotent; if it may have side effects, first verify external state or ask the user. Do not retry blindly."
+                : "The tool call was interrupted before the Harness recorded it as started. Retry it if it is still needed."
+            let message: JSONValue = .object([
+                "id": .string("interrupted-tool-result-\(callID)-\(sequence)"),
+                "role": .string("user"),
+                "source": .object([
+                    "kind": .string("tool"),
+                    "callId": .string(callID)
+                ]),
+                "content": .array([
+                    .object([
+                        "type": .string("tool-result"),
+                        "toolCallId": .string(callID),
+                        "isError": .bool(true),
+                        "content": .array([
+                            .object([
+                                "type": .string("text"),
+                                "text": .string(text)
+                            ])
+                        ])
+                    ])
+                ])
+            ])
+            let sourceEventSeqs = pendingTool.callSequence.map { [$0] }
+            closers.append(try SessionEvent(
+                type: SessionEventVocabulary.toolResult,
+                seq: sequence,
+                time: time,
+                data: .object([
+                    "turn": .number(Double(turn)),
+                    "step": .number(Double(pendingTool.step)),
+                    "message": message,
+                    "error": .object([
+                        "name": .string(name),
+                        "code": .string(code)
+                    ])
+                ]),
+                sourceEventSeqs: sourceEventSeqs,
+                surfaceOp: .append
+            ))
+            sequence += 1
+        }
+
+        if let step = openStep {
+            closers.append(try SessionEvent(
+                type: SessionEventVocabulary.stepEnd,
+                seq: sequence,
+                time: time,
+                data: .object([
+                    "turn": .number(Double(turn)),
+                    "step": .number(Double(step))
+                ])
+            ))
+            sequence += 1
+        }
+        closers.append(try SessionEvent(
+            type: SessionEventVocabulary.turnEnd,
+            seq: sequence,
+            time: time,
+            data: .object([
+                "turn": .number(Double(turn)),
+                "reason": .object(["kind": .string("interrupted")])
+            ])
+        ))
+        return closers
+    }
 }
 
 /// How a message-producing event entered the ordered conversation surface.
@@ -315,6 +477,7 @@ struct SessionAssistantMessageData: Sendable, Equatable {
     let step: Int
     let message: JSONValue
     let usage: SessionTokenUsage?
+    let interrupted: Bool
 }
 
 struct SessionToolCallData: Sendable, Equatable {
@@ -354,7 +517,156 @@ struct SessionCommandDoneData: Sendable, Equatable {
     let sourceEventSequence: Int?
 }
 
+struct SessionQuestionItemData: Sendable, Equatable {
+    let id: String
+    let question: String
+    let header: String?
+    let multiSelect: Bool
+    let optionCount: Int
+    let intent: String?
+}
+
+struct SessionQuestionRequestedData: Sendable, Equatable {
+    let requestID: String
+    let questionCount: Int
+    let questions: [SessionQuestionItemData]
+}
+
+struct SessionQuestionResolvedData: Sendable, Equatable {
+    let requestID: String
+    let outcome: String
+    let answerCount: Int?
+    let skippedIDs: [String]
+}
+
 extension SessionEventDraft {
+    static func compactionStart(
+        compactionID: String,
+        turn: Int,
+        step: Int,
+        trigger: String,
+        time: Int64 = SessionEventTimestamp.nowMilliseconds()
+    ) -> Self {
+        Self(
+            type: "compaction/start",
+            time: time,
+            data: .object([
+                "compactionId": .string(compactionID),
+                "turn": .number(Double(turn)),
+                "step": .number(Double(step)),
+                "trigger": .string(trigger)
+            ])
+        )
+    }
+
+    static func compactionSummary(
+        compactionID: String,
+        turn: Int,
+        step: Int,
+        omittedMessageCount: Int,
+        beforeBytes: Int,
+        afterBytes: Int,
+        summary: String?,
+        shadowedRange: ClosedRange<UInt64>? = nil,
+        shadowedTokens: Int? = nil,
+        beforeTokens: Int? = nil,
+        afterTokens: Int? = nil,
+        provider: String? = nil,
+        model: String? = nil,
+        maxTokens: Int? = nil,
+        usage: SessionTokenUsage? = nil,
+        time: Int64 = SessionEventTimestamp.nowMilliseconds()
+    ) -> Self {
+        var data: [String: JSONValue] = [
+            "compactionId": .string(compactionID),
+            "turn": .number(Double(turn)),
+            "step": .number(Double(step)),
+            "omittedMessageCount": .number(Double(omittedMessageCount)),
+            "beforeBytes": .number(Double(beforeBytes)),
+            "afterBytes": .number(Double(afterBytes))
+        ]
+        if let summary, !summary.isEmpty { data["summary"] = .string(summary) }
+        if let shadowedRange {
+            data["shadowedRange"] = .object([
+                "start": .number(Double(shadowedRange.lowerBound)),
+                "end": .number(Double(shadowedRange.upperBound))
+            ])
+        }
+        if let shadowedTokens { data["shadowedTokens"] = .number(Double(shadowedTokens)) }
+        if let beforeTokens { data["beforeTokens"] = .number(Double(beforeTokens)) }
+        if let afterTokens { data["afterTokens"] = .number(Double(afterTokens)) }
+        if let provider { data["provider"] = .string(provider) }
+        if let model { data["model"] = .string(model) }
+        if let maxTokens { data["maxTokens"] = .number(Double(maxTokens)) }
+        if let usage { data["usage"] = usage.jsonValue }
+        return Self(type: "compaction/summary", time: time, data: .object(data))
+    }
+
+    static func compactionEnd(
+        compactionID: String,
+        turn: Int,
+        step: Int,
+        error: String? = nil,
+        time: Int64 = SessionEventTimestamp.nowMilliseconds()
+    ) -> Self {
+        var data: [String: JSONValue] = [
+            "compactionId": .string(compactionID),
+            "turn": .number(Double(turn)),
+            "step": .number(Double(step))
+        ]
+        if let error, !error.isEmpty { data["error"] = .string(error) }
+        return Self(type: "compaction/end", time: time, data: .object(data))
+    }
+
+    static func llmRetry(
+        retryID: String,
+        turn: Int,
+        step: Int,
+        provider: String,
+        mode: String = "normal",
+        policyKey: String,
+        retry: Int,
+        maxRetries: Int = 2,
+        delayMilliseconds: Double,
+        failure: JSONValue,
+        time: Int64 = SessionEventTimestamp.nowMilliseconds()
+    ) -> Self {
+        var data: [String: JSONValue] = [
+            "retryId": .string(retryID),
+            "turn": .number(Double(turn)),
+            "step": .number(Double(step)),
+            "provider": .string(provider),
+            "mode": .string(mode),
+            "policyKey": .string(policyKey),
+            "retry": .number(Double(retry)),
+            "delayMs": .number(Double(delayMilliseconds)),
+            "failure": failure
+        ]
+        if mode == "normal" {
+            data["maxRetries"] = .number(Double(maxRetries))
+        }
+        return Self(type: "llm/retry", time: time, data: .object(data))
+    }
+
+    static func llmRetryStarted(
+        retryID: String,
+        turn: Int,
+        step: Int,
+        retry: Int,
+        time: Int64 = SessionEventTimestamp.nowMilliseconds()
+    ) -> Self {
+        Self(
+            type: "llm/retry-started",
+            time: time,
+            data: .object([
+                "retryId": .string(retryID),
+                "turn": .number(Double(turn)),
+                "step": .number(Double(step)),
+                "retry": .number(Double(retry))
+            ])
+        )
+    }
+
     static func turnStart(
         turn: Int,
         time: Int64 = SessionEventTimestamp.nowMilliseconds()
@@ -496,6 +808,7 @@ extension SessionEventDraft {
         step: Int,
         message: JSONValue,
         usage: SessionTokenUsage? = nil,
+        interrupted: Bool = false,
         sourceEventSeqs: [UInt64]? = nil,
         surfaceOp: SessionSurfaceOperation = .append,
         time: Int64 = SessionEventTimestamp.nowMilliseconds()
@@ -506,6 +819,7 @@ extension SessionEventDraft {
             "message": message
         ]
         if let usage { data["usage"] = usage.jsonValue }
+        if interrupted { data["interrupted"] = .bool(true) }
         return Self(
             type: SessionEventVocabulary.assistantMessage,
             time: time,
@@ -562,6 +876,62 @@ extension SessionEventDraft {
         )
     }
 
+    /// Durable approval request lifecycle record. The payload mirrors the
+    /// upstream `@deepseek-ai/dsh-user-approval` event contract and contains
+    /// only the tool identity and user-facing reason, never raw credentials.
+    static func approvalAsked(
+        requestID: String,
+        toolName: String,
+        callID: String? = nil,
+        reason: String? = nil,
+        risk: ToolRisk? = nil,
+        modelDestination: String? = nil,
+        resources: [String] = [],
+        time: Int64 = SessionEventTimestamp.nowMilliseconds()
+    ) -> Self {
+        var data: [String: JSONValue] = [
+            "id": .string(requestID),
+            "toolName": .string(toolName)
+        ]
+        if let callID, !callID.isEmpty {
+            data["callId"] = .string(callID)
+        }
+        if let reason, !reason.isEmpty {
+            data["reason"] = .string(reason)
+        }
+        if let risk {
+            data["risk"] = .string(risk.rawValue)
+        }
+        if let modelDestination, !modelDestination.isEmpty {
+            data["modelDestination"] = .string(modelDestination)
+        }
+        if !resources.isEmpty {
+            data["resources"] = .array(resources.map(JSONValue.string))
+        }
+        return Self(
+            type: SessionEventVocabulary.approvalAsked,
+            time: time,
+            data: .object(data)
+        )
+    }
+
+    /// Durable approval decision record paired with ``approvalAsked``.
+    /// Outcomes use the upstream closed vocabulary.
+    static func approvalDecided(
+        requestID: String,
+        outcome: String,
+        time: Int64 = SessionEventTimestamp.nowMilliseconds()
+    ) -> Self {
+        Self(
+            type: SessionEventVocabulary.approvalDecided,
+            time: time,
+            data: .object([
+                "id": .string(requestID),
+                "outcome": .string(outcome)
+            ])
+        )
+    }
+
     /// Log-only lifecycle record for a resolved human command. This is kept
     /// outside the model surface and preserves the parser-owned raw argument
     /// whitespace when `recordInput` is enabled.
@@ -569,6 +939,7 @@ extension SessionEventDraft {
         commandID: String,
         name: String,
         args: String? = nil,
+        imageAttachments: [AgentImageAttachmentRef] = [],
         sourceKind: String = "user",
         time: Int64 = SessionEventTimestamp.nowMilliseconds()
     ) -> Self {
@@ -578,6 +949,16 @@ extension SessionEventDraft {
             "source": .object(["kind": .string(sourceKind)])
         ]
         if let args { data["args"] = .string(args) }
+        if !imageAttachments.isEmpty {
+            data["imageAttachments"] = .array(imageAttachments.map { attachment in
+                .object([
+                    "id": .string(attachment.id.uuidString.lowercased()),
+                    "path": .string(attachment.path),
+                    "mimeType": .string(attachment.mimeType),
+                    "byteCount": .number(Double(attachment.byteCount))
+                ])
+            })
+        }
         return Self(
             type: SessionEventVocabulary.commandRun,
             time: time,
@@ -634,6 +1015,57 @@ extension SessionEventDraft {
         return Self(type: SessionEventVocabulary.requestContext, time: time, data: .object(data))
     }
 
+    static func questionRequested(
+        requestID: UUID,
+        questions: [AskUserQuestionItem],
+        time: Int64 = SessionEventTimestamp.nowMilliseconds()
+    ) -> Self {
+        let items = questions.map { question in
+            JSONValue.object([
+                "id": .string(question.id),
+                "question": .string(question.question),
+                "header": question.header.map(JSONValue.string) ?? .null,
+                "multiSelect": .bool(question.multiSelect),
+                "optionCount": .number(Double(question.options?.count ?? 0)),
+                "intent": question.intent.map { .string($0.kind.rawValue) } ?? .null
+            ])
+        }
+        return Self(
+            type: SessionEventVocabulary.questionRequested,
+            time: time,
+            data: .object([
+                "requestId": .string(requestID.uuidString),
+                "questionCount": .number(Double(questions.count)),
+                "questions": .array(items)
+            ]),
+            ignorable: true
+        )
+    }
+
+    static func questionResolved(
+        requestID: UUID,
+        outcome: String,
+        answer: AskUserQuestionAnswer? = nil,
+        time: Int64 = SessionEventTimestamp.nowMilliseconds()
+    ) -> Self {
+        var data: [String: JSONValue] = [
+            "requestId": .string(requestID.uuidString),
+            "outcome": .string(outcome)
+        ]
+        if let answer {
+            data["answerCount"] = .number(Double(answer.answers.count))
+            data["skippedIds"] = .array(
+                answer.answers.filter(\.isSkipped).map { .string($0.id) }
+            )
+        }
+        return Self(
+            type: SessionEventVocabulary.questionResolved,
+            time: time,
+            data: .object(data),
+            ignorable: true
+        )
+    }
+
     static func sessionEndSeed(
         time: Int64 = SessionEventTimestamp.nowMilliseconds()
     ) -> Self {
@@ -688,7 +1120,14 @@ extension SessionEvent {
               let step = data.jsonInteger(named: "step"),
               let message = data.objectValue?["message"] else { return nil }
         let usage = data.objectValue?["usage"].flatMap(SessionTokenUsage.init(jsonValue:))
-        return SessionAssistantMessageData(turn: turn, step: step, message: message, usage: usage)
+        let interrupted = data.objectValue?["interrupted"] == .bool(true)
+        return SessionAssistantMessageData(
+            turn: turn,
+            step: step,
+            message: message,
+            usage: usage,
+            interrupted: interrupted
+        )
     }
 
     var toolCallData: SessionToolCallData? {
@@ -768,6 +1207,55 @@ extension SessionEvent {
             provider: provider,
             model: model,
             contextWindow: object.jsonInteger(named: "contextWindow")
+        )
+    }
+
+    var questionRequestedData: SessionQuestionRequestedData? {
+        guard type == SessionEventVocabulary.questionRequested,
+              let object = data.objectValue,
+              let requestID = object["requestId"]?.stringValue,
+              let questionCount = object.jsonInteger(named: "questionCount"),
+              case let .array(values)? = object["questions"] else { return nil }
+        let questions = values.compactMap { value -> SessionQuestionItemData? in
+            guard let item = value.objectValue,
+                  let id = item["id"]?.stringValue,
+                  let question = item["question"]?.stringValue,
+                  case let .bool(multiSelect)? = item["multiSelect"],
+                  let optionCount = item.jsonInteger(named: "optionCount") else { return nil }
+            return SessionQuestionItemData(
+                id: id,
+                question: question,
+                header: item["header"]?.stringValue,
+                multiSelect: multiSelect,
+                optionCount: optionCount,
+                intent: item["intent"]?.stringValue
+            )
+        }
+        guard questions.count == values.count else { return nil }
+        return SessionQuestionRequestedData(
+            requestID: requestID,
+            questionCount: questionCount,
+            questions: questions
+        )
+    }
+
+    var questionResolvedData: SessionQuestionResolvedData? {
+        guard type == SessionEventVocabulary.questionResolved,
+              let object = data.objectValue,
+              let requestID = object["requestId"]?.stringValue,
+              let outcome = object["outcome"]?.stringValue else { return nil }
+        let skippedIDs: [String]
+        if case let .array(values)? = object["skippedIds"] {
+            skippedIDs = values.compactMap(\.stringValue)
+            guard skippedIDs.count == values.count else { return nil }
+        } else {
+            skippedIDs = []
+        }
+        return SessionQuestionResolvedData(
+            requestID: requestID,
+            outcome: outcome,
+            answerCount: object.jsonInteger(named: "answerCount"),
+            skippedIDs: skippedIDs
         )
     }
 }
@@ -854,6 +1342,7 @@ actor SessionEventJSONLStore {
     private let fileURL: URL
     private let streamID: String
     private let durability: SessionEventDurability
+    private let maximumRetainedEvents: Int
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
     private var knownEventTypes: Set<String>
@@ -869,12 +1358,14 @@ actor SessionEventJSONLStore {
         fileURL: URL,
         streamID: String? = nil,
         knownEventTypes: Set<String> = SessionEventVocabulary.upstreamKnown,
-        durability: SessionEventDurability = .buffered
+        durability: SessionEventDurability = .buffered,
+        maximumRetainedEvents: Int = 4_096
     ) {
         self.fileURL = fileURL
         self.streamID = streamID ?? fileURL.deletingPathExtension().lastPathComponent
         self.knownEventTypes = knownEventTypes
         self.durability = durability
+        self.maximumRetainedEvents = max(1, maximumRetainedEvents)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         self.encoder = encoder
@@ -940,7 +1431,40 @@ actor SessionEventJSONLStore {
 
     func allEvents() throws -> [SessionEvent] {
         try ensureLoaded()
-        return events
+        // The live actor deliberately retains only a tail. Read the lossless
+        // JSONL stream when an export or forensic caller explicitly asks for it.
+        let data = try Data(contentsOf: fileURL, options: [.mappedIfSafe])
+        let recovery = try decodeLog(data)
+        return recovery.events
+    }
+
+    /// Decodes the complete persisted stream while retaining only matching
+    /// events. Sequence and event-vocabulary validation still covers every
+    /// JSONL record, which keeps this suitable for compact downstream views.
+    func persistedEvents(
+        matching shouldRetain: @Sendable (SessionEvent) -> Bool
+    ) throws -> [SessionEvent] {
+        try ensureLoaded()
+        let data = try Data(contentsOf: fileURL, options: [.mappedIfSafe])
+        return try decodeLog(data, retaining: shouldRetain).events
+    }
+
+    /// Reads one bounded page immediately before `sequence`. The full stream is
+    /// still validated, while only matching rows are retained for the caller.
+    /// This keeps long trajectory history out of observable UI state.
+    func persistedEventPage(
+        before sequence: UInt64,
+        limit: Int,
+        matching shouldRetain: @Sendable (SessionEvent) -> Bool
+    ) throws -> [SessionEvent] {
+        try ensureLoaded()
+        guard limit > 0 else { return [] }
+        let boundary = min(sequence, nextSequence)
+        let data = try Data(contentsOf: fileURL, options: [.mappedIfSafe])
+        let matches = try decodeLog(data, retaining: { event in
+            event.seq < boundary && shouldRetain(event)
+        }).events
+        return Array(matches.suffix(limit))
     }
 
     func currentMetrics() throws -> SessionTrajectoryMetrics {
@@ -978,6 +1502,9 @@ actor SessionEventJSONLStore {
         let data = try encodedLines(assignedEvents)
         try fileHandle?.write(contentsOf: data)
         events.append(contentsOf: assignedEvents)
+        if events.count > maximumRetainedEvents {
+            events.removeFirst(events.count - maximumRetainedEvents)
+        }
         nextSequence = expected
         for event in assignedEvents { metrics.apply(event) }
         if durability == .synchronized { try fileHandle?.synchronize() }
@@ -1002,7 +1529,6 @@ actor SessionEventJSONLStore {
         do {
             let data = try Data(contentsOf: fileURL, options: [.mappedIfSafe])
             let recovery = try decodeLog(data)
-            for event in recovery.events { try assertSupported(event) }
 
             if recovery.truncateTo < UInt64(data.count) {
                 try handle.truncate(atOffset: recovery.truncateTo)
@@ -1014,40 +1540,55 @@ actor SessionEventJSONLStore {
             }
             try handle.seekToEnd()
 
-            events = recovery.events
-            nextSequence = UInt64(events.count)
             metrics = SessionTrajectoryAccumulator()
-            for event in events { metrics.apply(event) }
+            for event in recovery.events { metrics.apply(event) }
+            events = Array(recovery.events.suffix(maximumRetainedEvents))
+            nextSequence = UInt64(recovery.events.count)
             fileHandle = handle
             isLoaded = true
+
+            // Cold recovery must leave the logical session balanced. The
+            // repair is append-only and therefore idempotent: once the
+            // synthetic closers are present, a subsequent open sees a closed
+            // turn and produces no additional events.
+            let closers = try SessionEventRecovery.interruptedTurnClosers(recovery.events)
+            if !closers.isEmpty {
+                _ = try appendAssigned(closers)
+                try fileHandle?.synchronize()
+            }
         } catch {
             try? handle.close()
             throw error
         }
     }
 
-    private func decodeLog(_ data: Data) throws -> SessionLogRecovery {
+    private func decodeLog(
+        _ data: Data,
+        retaining shouldRetain: (SessionEvent) -> Bool = { _ in true }
+    ) throws -> SessionLogRecovery {
         guard !data.isEmpty else {
             return SessionLogRecovery(events: [], truncateTo: 0, needsTrailingNewline: false)
         }
 
-        let bytes = [UInt8](data)
         var decoded: [SessionEvent] = []
-        var lineStart = 0
+        var lineStart = data.startIndex
         var lineNumber = 1
         var expectedSequence: UInt64 = 0
 
-        func decodeLine(_ range: Range<Int>, isTrailingFragment: Bool) throws -> Bool {
+        func decodeLine(_ range: Range<Data.Index>, isTrailingFragment: Bool) throws -> Bool {
             guard !range.isEmpty else {
                 if isTrailingFragment { return true }
                 throw SessionEventLogError.corruptLine(line: lineNumber, description: "Empty JSONL record")
             }
             do {
-                let event = try decoder.decode(SessionEvent.self, from: Data(bytes[range]))
+                let event = try decoder.decode(SessionEvent.self, from: data.subdata(in: range))
                 guard event.seq == expectedSequence else {
                     throw SessionEventLogError.invalidSequence(expected: expectedSequence, actual: event.seq)
                 }
-                decoded.append(event)
+                try assertSupported(event)
+                if shouldRetain(event) {
+                    decoded.append(event)
+                }
                 expectedSequence &+= 1
                 return true
             } catch let error as SessionEventLogError {
@@ -1058,25 +1599,25 @@ actor SessionEventJSONLStore {
             }
         }
 
-        for index in bytes.indices where bytes[index] == 0x0A {
+        for index in data.indices where data[index] == 0x0A {
             _ = try decodeLine(lineStart..<index, isTrailingFragment: false)
             lineStart = index + 1
             lineNumber += 1
         }
 
-        if lineStart == bytes.count {
+        if lineStart == data.endIndex {
             return SessionLogRecovery(
                 events: decoded,
-                truncateTo: UInt64(bytes.count),
+                truncateTo: UInt64(data.count),
                 needsTrailingNewline: false
             )
         }
 
-        let trailingWasValid = try decodeLine(lineStart..<bytes.count, isTrailingFragment: true)
+        let trailingWasValid = try decodeLine(lineStart..<data.endIndex, isTrailingFragment: true)
         if trailingWasValid {
             return SessionLogRecovery(
                 events: decoded,
-                truncateTo: UInt64(bytes.count),
+                truncateTo: UInt64(data.count),
                 needsTrailingNewline: true
             )
         }
@@ -1101,13 +1642,17 @@ actor SessionEventJSONLStore {
         guard fromSequence <= nextSequence else {
             throw SessionEventLogError.cursorBeyondEnd(cursor: fromSequence, end: nextSequence)
         }
-        let startIndex = Int(fromSequence)
+        let oldestRetainedSequence = events.first?.seq ?? nextSequence
+        let effectiveStartSequence = max(fromSequence, oldestRetainedSequence)
+        let startIndex = effectiveStartSequence >= oldestRetainedSequence
+            ? Int(effectiveStartSequence - oldestRetainedSequence)
+            : 0
         return SessionTrajectorySnapshot(
             schemaVersion: SessionTrajectorySnapshot.currentSchemaVersion,
             streamID: streamID,
             fromSequence: fromSequence,
             cursor: SessionTrajectoryCursor(streamID: streamID, nextSequence: nextSequence),
-            events: Array(events[startIndex...]),
+            events: startIndex < events.count ? Array(events[startIndex...]) : [],
             metrics: metrics.snapshot,
             recoveredTornTail: recoveredTornTail
         )
@@ -1198,9 +1743,19 @@ private struct SessionTrajectoryAccumulator {
             pendingCalls[call.callID] = event.time
             calls = saturatingAdd(calls, 1)
 
+        case "tool/code-dispatch-start":
+            guard let subCallID = event.data.objectValue?["subCallId"]?.stringValue else { return }
+            pendingCalls[subCallID] = event.time
+            calls = saturatingAdd(calls, 1)
+
         case SessionEventVocabulary.toolResult:
             guard let callID = event.toolResultData?.callID,
                   let start = pendingCalls.removeValue(forKey: callID) else { return }
+            toolMilliseconds += elapsed(from: start, to: event.time)
+
+        case "tool/code-dispatch":
+            guard let subCallID = event.data.objectValue?["subCallId"]?.stringValue,
+                  let start = pendingCalls.removeValue(forKey: subCallID) else { return }
             toolMilliseconds += elapsed(from: start, to: event.time)
 
         case SessionEventVocabulary.stepEnd:

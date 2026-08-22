@@ -78,6 +78,45 @@ actor SessionTrajectoryRepository {
         try await store(for: sessionID).snapshot(after: cursor)
     }
 
+    /// Reads the complete persisted stream on demand. The live AppModel keeps
+    /// only a bounded UI tail so long streaming sessions do not retain every
+    /// delta in SwiftUI state; exports and forensic diagnostics can still get
+    /// the lossless JSONL history explicitly.
+    func allEvents(sessionID: UUID) async throws -> [SessionEvent] {
+        try await store(for: sessionID).allEvents()
+    }
+
+    func replacementRangeForSurfacePrefix(
+        count: Int,
+        sessionID: UUID
+    ) async throws -> ClosedRange<UInt64>? {
+        let events = try await store(for: sessionID).allEvents()
+        return SessionTrajectoryConversationProjection.replacementRangeForPrefix(
+            count: count,
+            events: events
+        )
+    }
+
+    func persistedEvents(
+        sessionID: UUID,
+        matching shouldRetain: @Sendable (SessionEvent) -> Bool
+    ) async throws -> [SessionEvent] {
+        try await store(for: sessionID).persistedEvents(matching: shouldRetain)
+    }
+
+    func page(
+        sessionID: UUID,
+        before sequence: UInt64,
+        limit: Int,
+        matching shouldRetain: @Sendable (SessionEvent) -> Bool
+    ) async throws -> [SessionEvent] {
+        try await store(for: sessionID).persistedEventPage(
+            before: sequence,
+            limit: limit,
+            matching: shouldRetain
+        )
+    }
+
     func registerKnownEventTypes(_ eventTypes: Set<String>) async throws {
         guard !isResetting else { throw SessionTrajectoryRepositoryError.resetInProgress }
         guard !eventTypes.isEmpty else { return }

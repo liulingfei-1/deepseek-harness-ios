@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "project": "deepseek-ai/deepseek-harness",
+    "tag": "dsh-v0.1.1-rc.2",
+    "commit": "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
+    "contracts": [
+      "packages/llm/llm-deepseek/tests/serialize.spec.ts",
+      "packages/core/agent-loop/tests/cancel.spec.ts",
+      "packages/core/session/src/types.ts"
+    ]
+  },
+  "reasoningReplay": [
+    {
+      "name": "tool-call-free",
+      "assistant": {
+        "content": "answer",
+        "reasoning": "thinking…",
+        "toolCalls": []
+      },
+      "expectedWire": {
+        "role": "assistant",
+        "content": "answer",
+        "reasoning_content": "thinking…"
+      }
+    },
+    {
+      "name": "tool-call",
+      "assistant": {
+        "content": "",
+        "reasoning": "I should check the weather.",
+        "toolCalls": [
+          {
+            "id": "call-1",
+            "name": "get_weather",
+            "arguments": "{\"city\":\"Paris\"}"
+          }
+        ]
+      },
+      "expectedWire": {
+        "role": "assistant",
+        "content": "",
+        "reasoning_content": "I should check the weather.",
+        "tool_calls": [
+          {
+            "id": "call-1",
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "arguments": "{\"city\":\"Paris\"}"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "cancelPrefix": {
+    "messageID": "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA",
+    "turn": 1,
+    "step": 1,
+    "content": "partial",
+    "reasoning": "thinking about it",
+    "sourceEventSeqs": [3, 4],
+    "eventSequence": 5,
+    "eventTime": 1777777777000,
+    "usage": {
+      "inputTokens": 7,
+      "outputTokens": 4,
+      "reasoningTokens": 4
+    },
+    "expectedEventData": {
+      "turn": 1,
+      "step": 1,
+      "message": {
+        "id": "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "reasoning",
+            "text": "thinking about it"
+          },
+          {
+            "type": "text",
+            "text": "partial"
+          }
+        ],
+        "source": {
+          "kind": "model",
+          "provider": "deepseek",
+          "model": "deepseek-v4-flash"
+        }
+      },
+      "usage": {
+        "inputTokens": 7,
+        "outputTokens": 4,
+        "reasoningTokens": 4
+      },
+      "interrupted": true
+    }
+  }
+}

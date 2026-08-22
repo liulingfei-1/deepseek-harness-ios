@@ -28,6 +28,7 @@ struct CommunityPluginMarketView: View {
     @State private var query = ""
     @State private var presentedSheet: CommunityPluginMarketSheet?
     @State private var isFileImporterPresented = false
+    @State private var isActionsPresented = false
 
     var body: some View {
         List {
@@ -44,8 +45,13 @@ struct CommunityPluginMarketView: View {
             .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
             .listRowSeparator(.hidden)
 
-            CommunityPluginMarketHeader()
+            CommunityPluginMarketHeader {
+                isActionsPresented = true
+            }
             CommunityPluginMarketplaceStateSections()
+            if let trace = model.nativePluginCompilationTrace {
+                CommunityPluginCompilationTraceSection(trace: trace)
+            }
 
             switch mode {
             case .catalog:
@@ -72,38 +78,26 @@ struct CommunityPluginMarketView: View {
                 .accessibilityLabel("刷新插件目录")
                 .disabled(model.isISHPluginMarketplaceWorking)
             }
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Button {
-                        Task { await model.refreshISHPluginMarketplace(forceRefresh: true) }
-                    } label: {
-                        Label("刷新目录", systemImage: "arrow.clockwise")
-                    }
-                    Button {
-                        model.clearISHPluginMarketplaceFailure()
-                        presentedSheet = .github
-                    } label: {
-                        Label("GitHub 仓库", systemImage: "link")
-                    }
-                    Button {
-                        isFileImporterPresented = true
-                    } label: {
-                        Label("导入 ZIP", systemImage: "doc.zipper")
-                    }
-                    Divider()
-                    Button {
-                        Task { await model.clearISHPluginMarketplaceCache() }
-                    } label: {
-                        Label("清理下载缓存", systemImage: "trash")
-                    }
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .accessibilityIdentifier("community-plugin-market-actions")
-                .disabled(model.isISHPluginMarketplaceWorking)
-                .accessibilityLabel("插件操作")
-                .help("插件操作")
+        }
+        .confirmationDialog(
+            "插件操作",
+            isPresented: $isActionsPresented,
+            titleVisibility: .visible
+        ) {
+            Button("刷新目录") {
+                Task { await model.refreshISHPluginMarketplace(forceRefresh: true) }
             }
+            Button("GitHub 仓库") {
+                model.clearISHPluginMarketplaceFailure()
+                presentedSheet = .github
+            }
+            Button("导入 ZIP") {
+                isFileImporterPresented = true
+            }
+            Button("清理下载缓存") {
+                Task { await model.clearISHPluginMarketplaceCache() }
+            }
+            Button("取消", role: .cancel) {}
         }
         .sheet(item: $presentedSheet) { sheet in
             switch sheet {
@@ -273,7 +267,7 @@ private struct CommunityPluginMarketplaceStateSections: View {
                         .foregroundStyle(.orange)
                         .padding(.top, 1)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("目录暂时不可用")
+                        Text("操作失败")
                             .font(.subheadline.weight(.semibold))
                         Text(failure.message)
                             .font(.caption)
@@ -309,10 +303,155 @@ private struct CommunityPluginMarketplaceStateSections: View {
     }
 }
 
+private struct CommunityPluginCompilationTraceSection: View {
+    let trace: NativePluginCompilationTrace
+    @State private var isExpanded = true
+    @State private var areLogsExpanded = false
+
+    var body: some View {
+        Section {
+            DisclosureGroup(isExpanded: $isExpanded) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(trace.steps) { step in
+                        CommunityPluginCompilationStepRow(step: step)
+                    }
+                }
+
+                if !trace.logs.isEmpty {
+                    DisclosureGroup("详细日志", isExpanded: $areLogsExpanded) {
+                        LazyVStack(alignment: .leading, spacing: 7) {
+                            ForEach(trace.logs) { entry in
+                                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                    Text(entry.timestamp, format: .dateTime.hour().minute().second())
+                                        .foregroundStyle(.tertiary)
+                                    Text(entry.stage.title)
+                                        .foregroundStyle(entry.state.tint)
+                                    Text(entry.message)
+                                        .foregroundStyle(.secondary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .font(.caption2.monospaced())
+                                .textSelection(.enabled)
+                            }
+                        }
+                        .padding(.top, 6)
+                    }
+                    .font(.caption)
+                    .padding(.top, 8)
+                }
+
+                if let diagnostic = trace.diagnostic {
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack(spacing: 6) {
+                            Image(systemName: diagnostic.retryable ? "arrow.triangle.2.circlepath" : "hand.raised.fill")
+                                .foregroundStyle(diagnostic.retryable ? .orange : .red)
+                            Text("结构化诊断 · \(diagnostic.code)")
+                                .font(.caption.weight(.semibold))
+                        }
+                        Text(diagnostic.message)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(diagnostic.suggestedAction)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.top, 10)
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: trace.isFinished ? "checklist.checked" : "hammer.fill")
+                        .foregroundStyle(trace.isFinished ? Color.green : Color.accentColor)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(trace.isFinished ? "最近一次编译结果" : "手机 Agent 编译中")
+                            .font(.subheadline.weight(.semibold))
+                        Text(trace.outcome ?? currentSummary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+            }
+            .accessibilityIdentifier("community-plugin-compilation-trace")
+        } header: {
+            Text("Agent 原生编译")
+        } footer: {
+            Text(trace.source)
+                .fontDesign(.monospaced)
+                .textSelection(.enabled)
+        }
+        .onChange(of: trace.id) {
+            isExpanded = true
+            areLogsExpanded = false
+        }
+    }
+
+    private var currentSummary: String {
+        trace.steps.last(where: { $0.state == .running })?.detail
+            ?? trace.steps.last(where: { $0.state == .failed })?.detail
+            ?? "等待开始"
+    }
+}
+
+private struct CommunityPluginCompilationStepRow: View {
+    let step: NativePluginCompilationStep
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Group {
+                if step.state == .running {
+                    ProgressView()
+                        .controlSize(.mini)
+                } else {
+                    Image(systemName: step.state.iconName)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(step.state.tint)
+                }
+            }
+            .frame(width: 18, height: 18)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(step.stage.title)
+                    .font(.subheadline.weight(.medium))
+                Text(step.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, 6)
+    }
+}
+
+private extension NativePluginCompilationStageState {
+    var iconName: String {
+        switch self {
+        case .pending: "clock"
+        case .running: "circle.dotted"
+        case .succeeded: "checkmark.circle.fill"
+        case .failed: "xmark.octagon.fill"
+        case .skipped: "minus.circle"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .pending, .skipped: .secondary
+        case .running: .accentColor
+        case .succeeded: .green
+        case .failed: .red
+        }
+    }
+}
+
 /// A compact, Minis-style summary sits above the catalog so the page remains
 /// useful while the Host is starting or the remote catalog is unavailable.
 private struct CommunityPluginMarketHeader: View {
     @Environment(AppModel.self) private var model
+    let onOpenActions: () -> Void
 
     var body: some View {
         Section {
@@ -353,6 +492,17 @@ private struct CommunityPluginMarketHeader: View {
                     tint: .orange
                 )
             }
+
+            Button(action: onOpenActions) {
+                Label("插件操作", systemImage: "ellipsis.circle")
+                    .font(.subheadline.weight(.medium))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(model.isISHPluginMarketplaceWorking)
+            .accessibilityIdentifier("community-plugin-market-actions")
+            .accessibilityLabel("插件操作")
         } header: {
             Text("插件中心")
         } footer: {
@@ -742,6 +892,17 @@ private struct CommunityInstalledPluginDetailView: View {
                         }
                     }
 
+                    if nativeAgentPlugin?.settings != nil {
+                        Section("原生插件") {
+                            NavigationLink {
+                                NativeAgentPluginSettingsView(pluginID: pluginID)
+                            } label: {
+                                Label("插件设置", systemImage: "slider.horizontal.3")
+                            }
+                            .accessibilityIdentifier("native-agent-settings-\(pluginID)")
+                        }
+                    }
+
                     if !nativeClientFailures.isEmpty {
                         Section("原生扩展加载失败") {
                             ForEach(nativeClientFailures) { failure in
@@ -757,6 +918,18 @@ private struct CommunityInstalledPluginDetailView: View {
                         Section("说明") {
                             Text(description)
                                 .textSelection(.enabled)
+                        }
+                    }
+
+                    if let notes = nativeAgentPlugin?.compatibilityNotes,
+                       !notes.isEmpty {
+                        Section("兼容性说明") {
+                            ForEach(notes, id: \.self) { note in
+                                Label(note, systemImage: "info.circle")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                            }
                         }
                     }
 
@@ -838,7 +1011,11 @@ private struct CommunityInstalledPluginDetailView: View {
                 } message: { action in
                     switch action {
                     case .enable:
-                        Text("插件将在本机 iSH Host 内执行，并可以访问 App 私有工作区。")
+                        Text(
+                            nativeAgentPlugin == nil
+                                ? "插件将在本机 iSH Host 内执行，并可以访问 App 私有工作区。"
+                                : "插件将由 App 的签名 Swift 运行时加载，只获得清单中声明并通过校验的手机能力。"
+                        )
                     case .reinstall:
                         Text("新版加载失败时会回滚到当前已安装版本。")
                     case .uninstall:
@@ -859,6 +1036,10 @@ private struct CommunityInstalledPluginDetailView: View {
 
     private var nativeClient: ISHNativeClientPlugin? {
         model.ishNativeClientPlugins.first { $0.pluginId == pluginID }
+    }
+
+    private var nativeAgentPlugin: NativeAgentCompiledPlugin? {
+        model.nativeAgentPlugins.first { $0.id == pluginID }
     }
 
     private var nativeClientFailures: [ISHNativeClientSynchronizationFailure] {

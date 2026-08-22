@@ -5,6 +5,7 @@
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>com.llf.harnessmobile.continued-processing.*</string>
+		<string>com.llf.harnessmobile.schedule-processing</string>
 	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
@@ -45,11 +46,11 @@
 	<key>NSFaceIDUsageDescription</key>
 	<string>用于在执行敏感本机操作前验证设备所有者。</string>
 	<key>NSHealthShareUsageDescription</key>
-	<string>仅在未来接入并由你批准 HealthKit 工具时读取所选健康数据。</string>
+	<string>仅在你调用并批准 Apple 健康工具时读取所选健康数据；工具结果会发送给当前配置的模型服务并保存在本机会话中。</string>
 	<key>NSHealthUpdateUsageDescription</key>
-	<string>仅在未来接入并由你批准 HealthKit 工具时写入所选健康数据。</string>
+	<string>仅在你调用并批准 Apple 健康写入工具时写入所选健康数据。</string>
 	<key>NSHomeKitUsageDescription</key>
-	<string>仅在未来接入并由你批准 HomeKit 工具时访问智能家居。</string>
+	<string>当前构建未获得 HomeKit capability；取得签名能力后，才会在你批准时查询或控制智能家居配件。</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>仅在你批准需要访问同一局域网设备的功能时使用本地网络。</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

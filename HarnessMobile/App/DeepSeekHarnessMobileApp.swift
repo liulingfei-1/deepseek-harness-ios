@@ -17,7 +17,21 @@ struct DeepSeekHarnessMobileApp: App {
                         do {
                             try await model.resetPersistentStateForUITesting()
                         } catch {
-                            fatalError("UI testing reset failed: \(error.localizedDescription)")
+                            // Test-only cleanup must never terminate the app.
+                            // A stale simulator container or an interrupted
+                            // previous reset is recoverable; surface it in the
+                            // diagnostics UI and let normal bootstrap repair
+                            // the remaining state.
+                            model.presentError(
+                                NSError(
+                                    domain: "HarnessMobile.UITesting",
+                                    code: 1,
+                                    userInfo: [
+                                        NSLocalizedDescriptionKey:
+                                            "UI test cleanup failed: \(error.localizedDescription)"
+                                    ]
+                                )
+                            )
                         }
                     }
                     if ProcessInfo.processInfo.arguments.contains("-bootstrap-configuration-for-ui-testing") {
@@ -27,9 +41,21 @@ struct DeepSeekHarnessMobileApp: App {
                                 apiKey: "ui-test-placeholder-key"
                             )
                         } catch {
-                            fatalError("UI testing bootstrap failed: \(error.localizedDescription)")
+                            model.presentError(
+                                NSError(
+                                    domain: "HarnessMobile.UITesting",
+                                    code: 2,
+                                    userInfo: [
+                                        NSLocalizedDescriptionKey:
+                                            "UI test configuration failed: \(error.localizedDescription)"
+                                    ]
+                                )
+                            )
                         }
                     }
+#endif
+#if os(iOS) && canImport(BackgroundTasks)
+                    model.registerBackgroundTasksIfNeeded()
 #endif
                     await model.bootstrap()
 #if DEBUG
@@ -38,6 +64,12 @@ struct DeepSeekHarnessMobileApp: App {
                     }
                     if ProcessInfo.processInfo.arguments.contains("-present-plan-review-for-ui-testing") {
                         model.presentPlanReviewForUITesting()
+                    }
+                    if ProcessInfo.processInfo.arguments.contains("-present-long-conversation-for-ui-testing") {
+                        model.presentLongConversationForUITesting()
+                    }
+                    if ProcessInfo.processInfo.arguments.contains("-present-markdown-table-for-ui-testing") {
+                        model.presentMarkdownTableForUITesting()
                     }
 #endif
                 }

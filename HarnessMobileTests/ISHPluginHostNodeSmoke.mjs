@@ -201,7 +201,7 @@ async function createPluginArchive({
   client = false,
   nativeClient,
   nativeAddon = false,
-  symbolicLink = false,
+  symbolicLinkTarget,
 }) {
   const sourceRoot = await mkdtemp(path.join(os.tmpdir(), 'harness-mobile-plugin-fixture-'))
   const manifest = {
@@ -236,11 +236,11 @@ async function createPluginArchive({
     ]),
     ...(nativeAddon ? [writeFile(path.join(sourceRoot, 'fixture.node'), Buffer.from('not-a-native-binary'))] : []),
   ])
-  if (symbolicLink) {
-    await symlink('index.js', path.join(sourceRoot, 'linked-index.js'))
+  if (symbolicLinkTarget !== undefined) {
+    await symlink(symbolicLinkTarget, path.join(sourceRoot, 'linked-index.js'))
   }
   const archivePath = path.join(importsDirectory, `${archiveName}.zip`)
-  await runCommand('/usr/bin/zip', [symbolicLink ? '-qry' : '-qr', archivePath, '.'], {
+  await runCommand('/usr/bin/zip', [symbolicLinkTarget === undefined ? '-qr' : '-qry', archivePath, '.'], {
     cwd: sourceRoot,
   })
   await rm(sourceRoot, { recursive: true, force: true })
@@ -250,7 +250,8 @@ async function createPluginArchive({
 try {
   const ping = await rpc('ping')
   assert.equal(ping.packages['@deepseek-ai/cordis'], '4.0.1')
-  assert.equal(ping.packages['@deepseek-ai/dsh-tool-cordis'], '0.1.0-rc.6')
+  assert.equal(ping.packages['@deepseek-ai/dsh-commands'], '0.1.1-rc.2')
+  assert.equal(ping.packages['@deepseek-ai/dsh-tool-cordis'], '0.1.1-rc.2')
   assert.ok(ping.capabilities.includes('plugin/prepare-native'))
   assert.ok(ping.capabilities.includes('plugin/discard-prepared-native'))
 
@@ -304,8 +305,12 @@ try {
         host: `
           return {
             name: 'official-self-tool',
-            inject: ['tools'],
+            inject: ['tools', 'agents', 'skills', 'sessionQuery', 'sessions', 'commands'],
             apply(ctx) {
+              let turnEndCount = 0
+              ctx.on('session/event', (_session, event) => {
+                if (event.type === 'turn/end') turnEndCount += 1
+              })
               harness.registerTool(ctx, harness.defineTool({
                 name: 'official_echo',
                 description: 'Return the supplied text.',
@@ -316,6 +321,36 @@ try {
                 },
                 async execute(args) { return args.text },
               }))
+              harness.registerTool(ctx, harness.defineTool({
+                name: 'mobile_context_probe',
+                description: 'Verify the synchronized mobile Agent context.',
+                parameters: {},
+                output: {
+                  schema: { type: 'string' },
+                  render(_args, value) { return [{ type: 'text', text: value }] },
+                },
+                async execute(_args, exec) {
+                  const skills = await ctx.skills.list({ scope: exec.agent })
+                  const surface = await ctx.sessionQuery.readSurface(exec.agent.session.id)
+                  return JSON.stringify({
+                    execSessionId: exec.agent.session.id,
+                    currentInitiatorId: ctx.agents.currentInitiator()?.id ?? null,
+                    skillNames: skills.map(skill => skill.name),
+                    capturedThroughSeq: surface.capturedThroughSeq,
+                    surfaceTypes: surface.events.map(event => event.type),
+                    turnEndCount,
+                  })
+                },
+              }))
+              ctx.commands.register({
+                name: 'official_host_command',
+                description: 'Execute an official Host command through the native registry bridge.',
+                input: { hint: '<text>' },
+                recordInput: false,
+                handler(invocation) {
+                  return { kind: 'success', text: 'host:' + invocation.rawInput }
+                },
+              })
             },
           }
         `,
@@ -345,8 +380,25 @@ try {
       mode: 'run',
     },
   })
-  assert.equal(officialRun.isError, false)
+  assert.equal(officialRun.isError, false, JSON.stringify(officialRun))
   assert.equal(officialRun.value.status, 'running')
+  const commandContributions = await rpc('contributions', { sessionId: 'smoke-session' })
+  const officialHostCommand = commandContributions.commands.find(command => (
+    command.name === 'official_host_command'
+  ))
+  assert.equal(officialHostCommand.description, 'Execute an official Host command through the native registry bridge.')
+  assert.equal(officialHostCommand.input.hint, '<text>')
+  assert.equal(officialHostCommand.recordInput, false)
+  const commandExecution = await rpc('command/execute', {
+    sessionId: 'smoke-session',
+    name: 'official_host_command',
+    commandId: 'cmd-native-smoke-1',
+    rawInput: ' on-device',
+  })
+  assert.deepEqual(commandExecution, {
+    ok: true,
+    value: { kind: 'success', text: 'host: on-device' },
+  })
   const officialEcho = await rpc('invoke', {
     target: 'tool',
     sessionId: 'smoke-session',
@@ -355,6 +407,43 @@ try {
   })
   assert.equal(officialEcho.isError, false)
   assert.equal(officialEcho.value, 'on-device')
+  const synchronized = await rpc('context/sync', {
+    sessionId: 'smoke-session',
+    startingAtSeq: 0,
+    events: [
+      { type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } },
+      {
+        type: 'turn/end',
+        seq: 1,
+        time: 2,
+        data: { turn: 1, reason: { kind: 'completed' } },
+      },
+    ],
+    skills: [{
+      name: 'mobile-smoke',
+      description: 'Synchronized mobile smoke skill.',
+      content: '# Mobile smoke\nUse the synchronized context.',
+      invocation: { modelInvocable: true, userInvocable: true },
+      source: 'custom',
+    }],
+  })
+  assert.equal(synchronized.appendedEvents, 2)
+  assert.equal(synchronized.totalEvents, 2)
+  assert.equal(synchronized.skillCount, 1)
+  const contextProbe = await rpc('invoke', {
+    target: 'tool',
+    sessionId: 'smoke-session',
+    name: 'mobile_context_probe',
+    arguments: {},
+  })
+  assert.equal(contextProbe.isError, false, JSON.stringify(contextProbe))
+  const contextProbeValue = JSON.parse(contextProbe.value)
+  assert.equal(contextProbeValue.execSessionId, 'smoke-session')
+  assert.equal(contextProbeValue.currentInitiatorId, 'smoke-session')
+  assert.deepEqual(contextProbeValue.skillNames, ['mobile-smoke'])
+  assert.equal(contextProbeValue.capturedThroughSeq, 1)
+  assert.deepEqual(contextProbeValue.surfaceTypes, [])
+  assert.equal(contextProbeValue.turnEndCount, 1)
   const officialStop = await rpc('invoke', {
     target: 'tool',
     sessionId: 'smoke-session',
@@ -362,6 +451,8 @@ try {
     arguments: { pluginId: officialDefinition.value.pluginId },
   })
   assert.equal(officialStop.isError, false)
+  const commandsAfterStop = await rpc('contributions', { sessionId: 'smoke-session' })
+  assert.ok(!commandsAfterStop.commands.some(command => command.name === 'official_host_command'))
   const officialRemove = await rpc('invoke', {
     target: 'tool',
     sessionId: 'smoke-session',
@@ -396,6 +487,10 @@ try {
             harness.handle('agent/pre-step', args => ({
               kind: 'enter',
               messages: args.messages,
+            }))
+            harness.handle('agent/inbox/pre-claim', args => ({
+              kind: 'rewrite',
+              text: String(args.message.text).toUpperCase(),
             }))
             ctx.provide('memory', {
               recall(args) {
@@ -437,6 +532,11 @@ try {
       && handler.pluginRunId === run.pluginRunId
       && handler.method === 'agent/pre-step'
   )))
+  assert.ok(contributions.handlers.some(handler => (
+    handler.pluginId === defined.pluginId
+      && handler.pluginRunId === run.pluginRunId
+      && handler.method === 'agent/inbox/pre-claim'
+  )))
   const memory = contributions.services.find(service => (
     service.pluginId === defined.pluginId
       && service.pluginRunId === run.pluginRunId
@@ -473,6 +573,21 @@ try {
   })
   assert.equal(checkpointHandled.ok, true)
   assert.equal(checkpointHandled.value.kind, 'enter')
+
+  const inboxHandled = await rpc('invoke', {
+    target: 'handler',
+    sessionId: 'smoke-session',
+    pluginId: defined.pluginId,
+    pluginRunId: run.pluginRunId,
+    method: 'agent/inbox/pre-claim',
+    arguments: {
+      boundary: 'next-turn',
+      workspaceBoundary: '/workspace/smoke-session',
+      message: { id: 'message-1', source: 'user', text: 'hello' },
+    },
+  })
+  assert.equal(inboxHandled.ok, true)
+  assert.deepEqual(inboxHandled.value, { kind: 'rewrite', text: 'HELLO' })
 
   const memoryRecorded = await rpc('invoke', {
     target: 'service',
@@ -966,13 +1081,27 @@ try {
     error => error?.rpc?.data?.reason === 'unsafe-patch',
   )
 
-  const symlinkArchive = await createPluginArchive({
-    archiveName: 'symlink-probe',
-    packageName: '@harness-mobile/symlink-probe',
-    symbolicLink: true,
+  const safeSymlinkArchive = await createPluginArchive({
+    archiveName: 'safe-symlink-probe',
+    packageName: '@harness-mobile/safe-symlink-probe',
+    symbolicLinkTarget: 'index.js',
+  })
+  const preparedSafeSymlink = await rpc('plugin/prepare-native', {
+    source: { kind: 'localZip', location: safeSymlinkArchive },
+  })
+  assert.match(preparedSafeSymlink.preparedToken, /^[a-f0-9]{32}$/)
+  assert.ok(preparedSafeSymlink.nativeCandidate.files.some(file => file.path === 'linked-index.js'))
+  await rpc('plugin/discard-prepared-native', {
+    preparedToken: preparedSafeSymlink.preparedToken,
+  })
+
+  const escapingSymlinkArchive = await createPluginArchive({
+    archiveName: 'escaping-symlink-probe',
+    packageName: '@harness-mobile/escaping-symlink-probe',
+    symbolicLinkTarget: '../../outside.js',
   })
   await assert.rejects(
-    rpc('plugin/install', { source: { kind: 'localZip', location: symlinkArchive } }),
+    rpc('plugin/prepare-native', { source: { kind: 'localZip', location: escapingSymlinkArchive } }),
     error => error?.rpc?.data?.reason === 'invalid-zip',
   )
 

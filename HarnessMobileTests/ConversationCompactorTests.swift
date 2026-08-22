@@ -7,6 +7,157 @@ import XCTest
 #endif
 
 final class ConversationCompactorTests: XCTestCase {
+    func testTokenPressureBelowThresholdDoesNotCompactAt79Percent() {
+        let request = makeRequest(messages: [
+            .user(String(repeating: "u", count: 65)),
+            .assistant(String(repeating: "a", count: 65)),
+            .user(String(repeating: "n", count: 65))
+        ])
+
+        let measurement = ConversationTokenMeter.measure(request)
+        XCTAssertEqual(measurement.totalTokens, 79)
+        XCTAssertNil(
+            ConversationCompactor.tokenCompactionPlan(
+                for: request,
+                contextWindow: 100
+            )
+        )
+    }
+
+    func testTokenPressureAt80PercentCompacts() {
+        let request = makeRequest(messages: [
+            .user(String(repeating: "u", count: 120)),
+            .assistant(String(repeating: "a", count: 120))
+        ])
+
+        let measurement = ConversationTokenMeter.measure(request)
+        XCTAssertEqual(measurement.totalTokens, 80)
+        let plan = ConversationCompactor.tokenCompactionPlan(
+            for: request,
+            contextWindow: 100
+        )
+        XCTAssertNotNil(plan)
+        XCTAssertEqual(plan?.omittedMessages.map(\.id), [request.messages[0].id])
+        XCTAssertEqual(plan?.retainedMessages.map(\.id), [request.messages[1].id])
+    }
+
+    func testTokenPressureIncludesSystemPromptAndToolDefinitions() {
+        let requestWithoutPromptAndTools = makeRequest(messages: [
+            .user(String(repeating: "u", count: 32)),
+            .assistant(String(repeating: "a", count: 32))
+        ])
+        let request = ModelRequest(
+            configuration: requestWithoutPromptAndTools.configuration,
+            apiKey: requestWithoutPromptAndTools.apiKey,
+            systemPrompt: String(repeating: "system ", count: 40),
+            messages: requestWithoutPromptAndTools.messages,
+            tools: [
+                ModelToolDefinition(
+                    name: "large_tool",
+                    description: String(repeating: "tool ", count: 40),
+                    parameters: .object([:])
+                )
+            ]
+        )
+
+        let messagesOnly = ConversationTokenMeter.estimateMessages(request.messages)
+        let measurement = ConversationTokenMeter.measure(request)
+        XCTAssertLessThan(messagesOnly, 80)
+        XCTAssertGreaterThan(measurement.systemTokens, 0)
+        XCTAssertGreaterThan(measurement.toolsTokens, 0)
+        XCTAssertGreaterThanOrEqual(measurement.totalTokens, 80)
+        XCTAssertNotNil(
+            ConversationCompactor.tokenCompactionPlan(
+                for: request,
+                contextWindow: 100
+            )
+        )
+    }
+
+    func testTokenCompactionRetainsAtLeastRecent16PercentAsCompleteUnits() {
+        let messages = [
+            AgentMessage.user(String(repeating: "1", count: 48)),
+            AgentMessage.assistant(String(repeating: "2", count: 48)),
+            AgentMessage.user(String(repeating: "3", count: 48)),
+            AgentMessage.assistant(String(repeating: "4", count: 48)),
+            AgentMessage.user(String(repeating: "5", count: 48))
+        ]
+        let request = makeRequest(messages: messages)
+        let plan = try! XCTUnwrap(
+            ConversationCompactor.tokenCompactionPlan(
+                for: request,
+                contextWindow: 100
+            )
+        )
+
+        XCTAssertGreaterThanOrEqual(plan.retainedTokens, 16)
+        XCTAssertEqual(plan.retainedMessages.map(\.id), messages.suffix(1).map(\.id))
+        XCTAssertEqual(plan.omittedMessages.map(\.id), messages.dropLast().map(\.id))
+    }
+
+    func testTokenCompactionKeepsMultiCallTransactionTogether() {
+        let call = AgentMessage.assistant(
+            "",
+            toolCalls: [
+                AgentToolCall(id: "first", name: "one", arguments: "{}"),
+                AgentToolCall(id: "second", name: "two", arguments: "{}")
+            ]
+        )
+        let resultOne = AgentMessage.tool(callID: "first", content: "one")
+        let resultTwo = AgentMessage.tool(callID: "second", content: "two")
+        let request = makeRequest(messages: [
+            .user(String(repeating: "old", count: 120)),
+            call,
+            resultTwo,
+            resultOne
+        ])
+
+        let plan = try! XCTUnwrap(
+            ConversationCompactor.tokenCompactionPlan(
+                for: request,
+                contextWindow: 100,
+                force: true
+            )
+        )
+
+        XCTAssertFalse(plan.retainedMessages.isEmpty)
+        XCTAssertEqual(plan.retainedMessages.map(\.id), [call.id, resultTwo.id, resultOne.id])
+        XCTAssertFalse(plan.omittedMessages.contains(where: { $0.id == call.id }))
+        XCTAssertFalse(plan.omittedMessages.contains(where: { $0.id == resultOne.id }))
+        XCTAssertFalse(plan.omittedMessages.contains(where: { $0.id == resultTwo.id }))
+    }
+
+    func testTokenMeterCountsToolCallIdentifiersAndResultIDs() {
+        let shortCall = AgentMessage.assistant(
+            "",
+            toolCalls: [AgentToolCall(id: "a", name: "read", arguments: "{}")]
+        )
+        let longCall = AgentMessage.assistant(
+            "",
+            toolCalls: [
+                AgentToolCall(
+                    id: String(repeating: "call-", count: 20),
+                    name: "read",
+                    arguments: "{}"
+                )
+            ]
+        )
+        let shortResult = AgentMessage.tool(callID: "a", content: "ok")
+        let longResult = AgentMessage.tool(
+            callID: String(repeating: "result-", count: 20),
+            content: "ok"
+        )
+
+        XCTAssertGreaterThan(
+            ConversationTokenMeter.estimateMessage(longCall),
+            ConversationTokenMeter.estimateMessage(shortCall)
+        )
+        XCTAssertGreaterThan(
+            ConversationTokenMeter.estimateMessage(longResult),
+            ConversationTokenMeter.estimateMessage(shortResult)
+        )
+    }
+
     func testProjectionIsDeterministicBoundedAndKeepsNewestCompleteToolTransaction() throws {
         let oldUser = AgentMessage.user(String(repeating: "old-user-", count: 700))
         let oldAssistant = AgentMessage.assistant(String(repeating: "old-assistant-", count: 700))
@@ -126,5 +277,40 @@ final class ConversationCompactorTests: XCTestCase {
             maximumUTF8Bytes: 2_000
         )
         XCTAssertEqual(projection.messages.map(\.id), [valid.id])
+    }
+
+    func testRepairDropsOrphanToolMessageAtHistoryBoundary() {
+        let orphan = AgentMessage.tool(callID: "missing", content: "orphan")
+        let user = AgentMessage.user("continue")
+
+        XCTAssertEqual(
+            ConversationCompactor.repairIncompleteToolTurn([orphan, user]),
+            []
+        )
+    }
+
+    func testProjectionRetainsExtractiveFactsFromOmittedHistory() throws {
+        let oldRequest = AgentMessage.user("Investigate the plugin installer crash. " + String(repeating: "details ", count: 90))
+        let oldAnswer = AgentMessage.assistant("The installer writes a staged archive before host activation. " + String(repeating: "evidence ", count: 90))
+        let recent = AgentMessage.user("Continue with the fix")
+
+        let projection = try ConversationCompactor.project(
+            messages: [oldRequest, oldAnswer, recent],
+            maximumUTF8Bytes: 1_200
+        )
+
+        XCTAssertTrue(projection.omittedMessageCount > 0)
+        XCTAssertTrue(projection.stateSummary?.contains("Earlier transcript facts:") == true)
+        XCTAssertTrue(projection.stateSummary?.contains("plugin installer crash") == true)
+    }
+
+    private func makeRequest(messages: [AgentMessage]) -> ModelRequest {
+        ModelRequest(
+            configuration: AgentConfiguration(),
+            apiKey: "test-only",
+            systemPrompt: "",
+            messages: messages,
+            tools: []
+        )
     }
 }

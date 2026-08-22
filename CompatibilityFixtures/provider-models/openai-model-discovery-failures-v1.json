@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "unauthorized": {
+    "status": 401,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Request-ID": "openai-request-1"
+    },
+    "body": {
+      "error": {
+        "message": "bad key",
+        "type": "invalid_request_error",
+        "code": "invalid_api_key"
+      }
+    }
+  },
+  "malformed": {
+    "body": {
+      "object": "list",
+      "models": []
+    }
+  },
+  "oversized": {
+    "declaredContentLength": 4194305
+  },
+  "manualFallback": {
+    "models": [
+      {
+        "id": "private-manual-model",
+        "name": "Private Manual Model",
+        "inputModalities": ["text"]
+      }
+    ]
+  }
+}

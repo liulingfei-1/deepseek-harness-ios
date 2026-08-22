@@ -7,6 +7,38 @@ import XCTest
 #endif
 
 final class SessionEventTrajectoryTests: XCTestCase {
+    private func makeFileURL() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("trajectory-page-tests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            .appendingPathComponent("events.jsonl")
+    }
+
+    func testPersistedEventPageReadsOlderVisibleRowsWithoutAssistantChunks() async throws {
+        let url = makeFileURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let store = SessionEventJSONLStore(
+            fileURL: url,
+            maximumRetainedEvents: 2
+        )
+
+        for index in 0..<8 {
+            let type = index.isMultiple(of: 2)
+                ? SessionEventVocabulary.assistantChunk
+                : SessionEventVocabulary.userMessage
+            _ = try await store.append(
+                SessionEventDraft(type: type, time: Int64(index), data: .string("event-\(index)"))
+            )
+        }
+
+        let page = try await store.persistedEventPage(
+            before: 7,
+            limit: 2,
+            matching: { $0.type != SessionEventVocabulary.assistantChunk }
+        )
+        XCTAssertEqual(page.map(\.seq), [3, 5])
+    }
+
     func testEnvelopeKeepsStringTypeAndDSHSurfaceFields() throws {
         let event = try SessionEvent(
             type: "plugin/example",
@@ -105,6 +137,121 @@ final class SessionEventTrajectoryTests: XCTestCase {
         try await store.close()
     }
 
+    func testSubagentDescriptorAndLifecycleRecoverAfterReopen() async throws {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("subagent.jsonl")
+        let descriptor: JSONValue = .object([
+            "job_id": .string("job-1"),
+            "task": .string("Inspect plugin compatibility"),
+            "parent_session": .string("session-parent"),
+            "child_session": .string("session-child"),
+            "agent_model": .string("deepseek-chat")
+        ])
+        let lifecycle: JSONValue = .object([
+            "state": .string("completed"),
+            "parent_session": .string("session-parent"),
+            "child_session": .string("session-child")
+        ])
+
+        let writer = SessionEventJSONLStore(fileURL: url, streamID: "subagent")
+        _ = try await writer.append([
+            SessionEventDraft(type: SessionEventVocabulary.subagentDescriptor, time: 10, data: descriptor),
+            SessionEventDraft(type: SessionEventVocabulary.subagentLifecycle, time: 20, data: lifecycle)
+        ])
+        try await writer.close()
+
+        let reader = SessionEventJSONLStore(fileURL: url, streamID: "subagent")
+        let recovered = try await reader.recover()
+        XCTAssertEqual(recovered.events.map(\.type), [
+            SessionEventVocabulary.subagentDescriptor,
+            SessionEventVocabulary.subagentLifecycle
+        ])
+        XCTAssertEqual(recovered.events.map(\.data), [descriptor, lifecycle])
+        XCTAssertEqual(recovered.cursor.nextSequence, 2)
+        try await reader.close()
+    }
+
+    func testQuestionLifecycleEventsExposeBoundedTypedMetadata() async throws {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = SessionEventJSONLStore(
+            fileURL: root.appendingPathComponent("questions.jsonl"),
+            streamID: "questions"
+        )
+        let requestID = UUID()
+        let questions = [
+            AskUserQuestionItem(
+                id: "provider",
+                question: "Which provider?",
+                header: "Model",
+                options: [
+                    AskUserQuestionOption(label: "DeepSeek (Recommended)"),
+                    AskUserQuestionOption(label: "OpenAI")
+                ]
+            ),
+            AskUserQuestionItem(
+                id: "tools",
+                question: "Which tools?",
+                options: [AskUserQuestionOption(label: "Files")],
+                multiSelect: true
+            )
+        ]
+        let answer = AskUserQuestionAnswer(
+            answers: [
+                AskUserQuestionAnswerItem(id: "provider", selected: ["DeepSeek (Recommended)"]),
+                AskUserQuestionAnswerItem(id: "tools")
+            ]
+        )
+
+        let events = try await store.append([
+            .questionRequested(requestID: requestID, questions: questions, time: 10),
+            .questionResolved(
+                requestID: requestID,
+                outcome: "answered",
+                answer: answer,
+                time: 20
+            )
+        ])
+
+        XCTAssertEqual(
+            events[0].questionRequestedData,
+            SessionQuestionRequestedData(
+                requestID: requestID.uuidString,
+                questionCount: 2,
+                questions: [
+                    SessionQuestionItemData(
+                        id: "provider",
+                        question: "Which provider?",
+                        header: "Model",
+                        multiSelect: false,
+                        optionCount: 2,
+                        intent: nil
+                    ),
+                    SessionQuestionItemData(
+                        id: "tools",
+                        question: "Which tools?",
+                        header: nil,
+                        multiSelect: true,
+                        optionCount: 1,
+                        intent: nil
+                    )
+                ]
+            )
+        )
+        XCTAssertEqual(
+            events[1].questionResolvedData,
+            SessionQuestionResolvedData(
+                requestID: requestID.uuidString,
+                outcome: "answered",
+                answerCount: 2,
+                skippedIDs: ["tools"]
+            )
+        )
+        XCTAssertFalse(events[1].data.displayText.contains("DeepSeek (Recommended)"))
+        try await store.close()
+    }
+
     func testRecoveryRejectsUnknownRequiredEventAndAcceptsIgnorableEvent() async throws {
         let requiredRoot = makeRoot()
         defer { try? FileManager.default.removeItem(at: requiredRoot) }
@@ -170,7 +317,9 @@ final class SessionEventTrajectoryTests: XCTestCase {
         let writer = SessionEventJSONLStore(fileURL: url, streamID: "torn", durability: .synchronized)
         _ = try await writer.append([
             .turnStart(turn: 1, time: 1),
-            .stepStart(turn: 1, step: 1, time: 2)
+            .stepStart(turn: 1, step: 1, time: 2),
+            .stepEnd(turn: 1, step: 1, time: 3),
+            .turnEnd(turn: 1, reason: .object(["kind": .string("completed")]), time: 4)
         ])
         try await writer.close()
 
@@ -182,19 +331,103 @@ final class SessionEventTrajectoryTests: XCTestCase {
         let recoveredStore = SessionEventJSONLStore(fileURL: url, streamID: "torn")
         let recovered = try await recoveredStore.recover()
         XCTAssertTrue(recovered.recoveredTornTail)
-        XCTAssertEqual(recovered.events.map(\.seq), [0, 1])
+        XCTAssertEqual(recovered.events.map(\.seq), [0, 1, 2, 3])
 
         let appended = try await recoveredStore.append(
-            .assistantTextDelta(turn: 1, step: 1, text: "continued", time: 3)
+            .assistantTextDelta(turn: 1, step: 1, text: "continued", time: 5)
         )
-        XCTAssertEqual(appended.seq, 2)
+        XCTAssertEqual(appended.seq, 4)
         try await recoveredStore.close()
 
         let reopened = SessionEventJSONLStore(fileURL: url, streamID: "torn")
         let complete = try await reopened.recover()
         XCTAssertFalse(complete.recoveredTornTail)
-        XCTAssertEqual(complete.events.map(\.seq), [0, 1, 2])
+        XCTAssertEqual(complete.events.map(\.seq), [0, 1, 2, 3, 4])
         try await reopened.close()
+    }
+
+    func testColdRecoverySynthesizesToolNotStartedAndInterruptedBoundaries() async throws {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("not-started.jsonl")
+        let writer = SessionEventJSONLStore(fileURL: url, streamID: "not-started", durability: .synchronized)
+        let assistant = JSONValue.object([
+            "id": .string("assistant-1"),
+            "role": .string("assistant"),
+            "content": .array([
+                .object([
+                    "type": .string("tool-call"),
+                    "id": .string("call-1"),
+                    "name": .string("read_file"),
+                    "arguments": .string("{}")
+                ])
+            ])
+        ])
+        _ = try await writer.append([
+            .turnStart(turn: 1, time: 10),
+            .stepStart(turn: 1, step: 1, time: 11),
+            .assistantMessage(turn: 1, step: 1, message: assistant, time: 12)
+        ])
+        try await writer.close()
+
+        let reader = SessionEventJSONLStore(fileURL: url, streamID: "not-started")
+        let recovered = try await reader.recover()
+        XCTAssertEqual(recovered.events.map(\.type), [
+            SessionEventVocabulary.turnStart,
+            SessionEventVocabulary.stepStart,
+            SessionEventVocabulary.assistantMessage,
+            SessionEventVocabulary.toolResult,
+            SessionEventVocabulary.stepEnd,
+            SessionEventVocabulary.turnEnd
+        ])
+        let result = try XCTUnwrap(recovered.events.first(where: { $0.type == SessionEventVocabulary.toolResult }))
+        XCTAssertEqual(result.toolResultData?.error?.objectValue?["code"]?.stringValue, SessionRecoveryErrorCode.toolNotStarted)
+        XCTAssertNil(result.sourceEventSeqs)
+        XCTAssertEqual(recovered.events.last?.turnEndData?.reason.objectValue?["kind"]?.stringValue, "interrupted")
+        try await reader.close()
+
+        let reopened = SessionEventJSONLStore(fileURL: url, streamID: "not-started")
+        let second = try await reopened.recover()
+        XCTAssertEqual(second.events.count, recovered.events.count)
+        try await reopened.close()
+    }
+
+    func testColdRecoverySynthesizesUnknownToolOutcomeWithSourceSequence() async throws {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("unknown-outcome.jsonl")
+        let writer = SessionEventJSONLStore(fileURL: url, streamID: "unknown-outcome", durability: .synchronized)
+        let assistant = JSONValue.object([
+            "id": .string("assistant-1"),
+            "role": .string("assistant"),
+            "content": .array([
+                .object([
+                    "type": .string("tool-call"),
+                    "id": .string("call-1"),
+                    "name": .string("write_file"),
+                    "arguments": .string("{}")
+                ])
+            ])
+        ])
+        _ = try await writer.append([
+            .turnStart(turn: 2, time: 20),
+            .stepStart(turn: 2, step: 3, time: 21),
+            .assistantMessage(turn: 2, step: 3, message: assistant, time: 22),
+            .toolCall(turn: 2, step: 3, callID: "call-1", name: "write_file", arguments: "{}", time: 23)
+        ])
+        try await writer.close()
+
+        let reader = SessionEventJSONLStore(fileURL: url, streamID: "unknown-outcome")
+        let recovered = try await reader.recover()
+        let result = try XCTUnwrap(recovered.events.last(where: { $0.type == SessionEventVocabulary.toolResult }))
+        XCTAssertEqual(result.toolResultData?.error?.objectValue?["code"]?.stringValue, SessionRecoveryErrorCode.toolOutcomeUnknown)
+        XCTAssertEqual(result.sourceEventSeqs, [3])
+        XCTAssertTrue(result.data.displayText.contains("Do not retry blindly."))
+        XCTAssertEqual(recovered.events.suffix(2).map(\.type), [
+            SessionEventVocabulary.stepEnd,
+            SessionEventVocabulary.turnEnd
+        ])
+        try await reader.close()
     }
 
     func testActorSerializesConcurrentSequenceAssignment() async throws {
@@ -225,6 +458,92 @@ final class SessionEventTrajectoryTests: XCTestCase {
         XCTAssertEqual(events.map(\.seq), Array(0..<64))
         XCTAssertEqual(Set(events.compactMap { value(from: $0.data) }), Set(0..<64))
         try await store.close()
+    }
+
+    func testLiveStoreRetainsTailButAllEventsReadsLosslessJSONL() async throws {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("bounded.jsonl")
+        let store = SessionEventJSONLStore(
+            fileURL: url,
+            streamID: "bounded",
+            maximumRetainedEvents: 3
+        )
+
+        for value in 0..<5 {
+            _ = try await store.append(
+                SessionEventDraft(
+                    type: "plugin/bounded",
+                    time: Int64(value),
+                    data: .number(Double(value)),
+                    ignorable: true
+                )
+            )
+        }
+
+        let live = try await store.snapshot()
+        XCTAssertEqual(live.events.map(\.seq), [2, 3, 4])
+        XCTAssertEqual(live.cursor.nextSequence, 5)
+        let complete = try await store.allEvents()
+        XCTAssertEqual(complete.map(\.seq), [0, 1, 2, 3, 4])
+        try await store.close()
+    }
+
+    func testPersistedEventFilterValidatesAllRecordsWithoutRetainingTokenDeltas() async throws {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = SessionEventJSONLStore(
+            fileURL: root.appendingPathComponent("filtered.jsonl"),
+            streamID: "filtered",
+            maximumRetainedEvents: 1
+        )
+
+        _ = try await store.append([
+            .turnStart(turn: 1, time: 1),
+            .assistantTextDelta(turn: 1, step: 1, text: "a", time: 2),
+            .assistantTextDelta(turn: 1, step: 1, text: "b", time: 3),
+            .assistantUsage(
+                turn: 1,
+                step: 1,
+                usage: SessionTokenUsage(inputTokens: 1, outputTokens: 2),
+                time: 4
+            ),
+            .turnEnd(turn: 1, reason: .string("completed"), time: 5)
+        ])
+
+        let compact = try await store.persistedEvents(
+            matching: ISHPluginHostContextProjection.retains
+        )
+
+        XCTAssertEqual(compact.map(\.seq), [0, 3, 4])
+        XCTAssertEqual(compact.map(\.type), [
+            SessionEventVocabulary.turnStart,
+            SessionEventVocabulary.assistantChunk,
+            SessionEventVocabulary.turnEnd
+        ])
+        try await store.close()
+    }
+
+    func testPersistedEventFilterCannotHideUnknownRequiredRecord() async throws {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("filtered-unknown.jsonl")
+        try writeJSONL([
+            try SessionEvent(
+                type: "future/required",
+                seq: 0,
+                time: 1,
+                data: .null
+            )
+        ], to: url)
+        let store = SessionEventJSONLStore(fileURL: url, streamID: "filtered-unknown")
+
+        do {
+            _ = try await store.persistedEvents(matching: { _ in false })
+            XCTFail("Filtering must not bypass event-vocabulary validation")
+        } catch let error as SessionEventLogError {
+            XCTAssertEqual(error, .unsupportedEventType(type: "future/required", sequence: 0))
+        }
     }
 
     func testMetricsFollowUpstreamStepTokenAndCacheRules() async throws {

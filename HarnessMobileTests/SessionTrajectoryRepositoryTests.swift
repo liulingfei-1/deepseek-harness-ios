@@ -65,6 +65,20 @@ final class SessionTrajectoryRepositoryTests: XCTestCase {
         let preparation = try await repository.prepare(sessionID: sessionID)
         XCTAssertEqual(preparation.nextTurn, 8)
         XCTAssertEqual(preparation.requestHeaderReason, .resume)
+
+        // A live store is intentionally not cold-repaired. Reopening through a
+        // fresh repository models the crash/restart boundary and performs the
+        // synthetic interruption repair.
+        let reopenedRepository = SessionTrajectoryRepository(root: root)
+        let repaired = try await reopenedRepository.prepare(sessionID: sessionID)
+        XCTAssertEqual(repaired.nextTurn, 8)
+        XCTAssertEqual(repaired.snapshot.events.map(\.type), [
+            SessionEventVocabulary.turnStart,
+            SessionEventVocabulary.turnEnd
+        ])
+        let repeated = try await repository.prepare(sessionID: sessionID)
+        XCTAssertEqual(repeated.snapshot.events.count, preparation.snapshot.events.count)
+        XCTAssertEqual(repeated.nextTurn, 8)
     }
 
     func testPluginEventRegistrationAppliesToOpenedStreams() async throws {
@@ -108,6 +122,346 @@ final class SessionTrajectoryRepositoryTests: XCTestCase {
         XCTAssertEqual(reset.snapshot.events, [])
         XCTAssertEqual(reset.nextTurn, 1)
         XCTAssertEqual(reset.requestHeaderReason, .initial)
+    }
+
+    func testConversationProjectionAppendsDurableSuffixAfterSessionSnapshot() async throws {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = SessionTrajectoryRepository(root: root)
+        let sessionID = UUID()
+        let user = AgentMessage.user("inspect the workspace")
+        let call = AgentToolCall(id: "call-1", name: "workspace_read", arguments: "{\"path\":\"README.md\"}")
+        let assistant = AgentMessage.assistant(
+            "I will inspect it.",
+            reasoning: "Need the file contents.",
+            toolCalls: [call],
+            source: AgentModelSource(provider: "deepseek", model: "deepseek-chat").jsonValue
+        )
+
+        _ = try await repository.append(
+            .userMessage(sessionUserMessage(user)),
+            sessionID: sessionID
+        )
+        _ = try await repository.append(
+            .assistantMessage(
+                turn: 1,
+                step: 1,
+                message: sessionAssistantMessage(assistant)
+            ),
+            sessionID: sessionID
+        )
+        _ = try await repository.append(
+            .toolResult(
+                turn: 1,
+                step: 1,
+                message: sessionToolResultMessage(
+                    callID: call.id,
+                    output: "contents",
+                    isError: false
+                )
+            ),
+            sessionID: sessionID
+        )
+
+        let snapshot = try await repository.prepare(sessionID: sessionID).snapshot
+        let pendingUser = AgentMessage.user("follow up before checkpoint")
+        let reconciled = SessionTrajectoryConversationProjection.reconcile(
+            sessionMessages: [user, pendingUser],
+            events: snapshot.events
+        )
+
+        XCTAssertEqual(reconciled.map(\.role), [.user, .assistant, .tool, .user])
+        XCTAssertEqual(reconciled[1].id, assistant.id)
+        XCTAssertEqual(reconciled[1].reasoning, "Need the file contents.")
+        XCTAssertEqual(reconciled[1].toolCalls, [call])
+        XCTAssertEqual(reconciled[1].modelSource?.provider, "deepseek")
+        XCTAssertEqual(reconciled[2].toolCallID, call.id)
+        XCTAssertEqual(reconciled[2].toolName, call.name)
+        XCTAssertEqual(reconciled[2].content, "contents")
+        XCTAssertEqual(reconciled[2].isToolError, false)
+        XCTAssertEqual(reconciled[3], pendingUser)
+    }
+
+    func testColdRecoveryProjectsUnknownToolOutcomeIntoNextHistory() async throws {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sessionID = UUID()
+        let writer = SessionTrajectoryRepository(root: root)
+        let user = AgentMessage.user("perform the operation")
+        let call = AgentToolCall(id: "call-interrupted", name: "side_effect", arguments: "{}")
+        let assistant = AgentMessage.assistant("", toolCalls: [call])
+
+        _ = try await writer.append(.turnStart(turn: 1, time: 1), sessionID: sessionID)
+        _ = try await writer.append(
+            .userMessage(sessionUserMessage(user), time: 2),
+            sessionID: sessionID
+        )
+        _ = try await writer.append(.stepStart(turn: 1, step: 1, time: 3), sessionID: sessionID)
+        _ = try await writer.append(
+            .assistantMessage(
+                turn: 1,
+                step: 1,
+                message: sessionAssistantMessage(assistant),
+                time: 4
+            ),
+            sessionID: sessionID
+        )
+        _ = try await writer.append(
+            .toolCall(
+                turn: 1,
+                step: 1,
+                callID: call.id,
+                name: call.name,
+                arguments: call.arguments,
+                time: 5
+            ),
+            sessionID: sessionID
+        )
+        try await writer.flush(sessionID: sessionID)
+
+        let reopened = SessionTrajectoryRepository(root: root)
+        let repaired = try await reopened.prepare(sessionID: sessionID)
+        let history = SessionTrajectoryConversationProjection.reconcile(
+            sessionMessages: [user, assistant],
+            events: repaired.snapshot.events
+        )
+
+        XCTAssertEqual(history.map(\.role), [.user, .assistant, .tool])
+        let result = try XCTUnwrap(history.last)
+        XCTAssertEqual(result.toolCallID, call.id)
+        XCTAssertEqual(result.isToolError, true)
+        XCTAssertTrue(result.content.contains("outcome is unknown"))
+        XCTAssertEqual(ConversationCompactor.repairIncompleteToolTurn(history), history)
+    }
+
+    func testConversationProjectionDoesNotRestoreAbandonedEditedBranch() async throws {
+        let original = AgentMessage.user("original request")
+        let oldReply = AgentMessage.assistant("old reply")
+        let edited = AgentMessage(
+            id: original.id,
+            role: .user,
+            content: "edited request"
+        )
+        let events = try [
+            SessionEvent(
+                type: SessionEventVocabulary.userMessage,
+                seq: 0,
+                time: 1,
+                data: sessionUserMessage(original),
+                surfaceOp: .append
+            ),
+            SessionEvent(
+                type: SessionEventVocabulary.assistantMessage,
+                seq: 1,
+                time: 2,
+                data: .object([
+                    "turn": .number(1),
+                    "step": .number(1),
+                    "message": sessionAssistantMessage(oldReply)
+                ]),
+                surfaceOp: .append
+            )
+        ]
+
+        let reconciled = SessionTrajectoryConversationProjection.reconcile(
+            sessionMessages: [edited],
+            events: events
+        )
+        XCTAssertEqual(reconciled, [edited])
+    }
+
+    func testConversationProjectionAppliesDurableCompactionReplacement() throws {
+        let oldUser = AgentMessage.user("old request")
+        let oldReply = AgentMessage.assistant("old reply")
+        let checkpoint = AgentMessage.user("<compacted-summary>state</compacted-summary>")
+        let current = AgentMessage.user("continue")
+        let events = try [
+            SessionEvent(
+                type: SessionEventVocabulary.userMessage,
+                seq: 0,
+                time: 1,
+                data: sessionUserMessage(oldUser),
+                surfaceOp: .append
+            ),
+            SessionEvent(
+                type: SessionEventVocabulary.assistantMessage,
+                seq: 1,
+                time: 2,
+                data: .object([
+                    "turn": .number(1),
+                    "step": .number(1),
+                    "message": sessionAssistantMessage(oldReply)
+                ]),
+                surfaceOp: .append
+            ),
+            SessionEvent(
+                type: SessionEventVocabulary.userMessage,
+                seq: 2,
+                time: 3,
+                data: sessionUserMessage(checkpoint),
+                sourceEventSeqs: [0, 1],
+                surfaceOp: .replace(start: 0, end: 1)
+            ),
+            SessionEvent(
+                type: SessionEventVocabulary.userMessage,
+                seq: 3,
+                time: 4,
+                data: sessionUserMessage(current),
+                surfaceOp: .append
+            )
+        ]
+
+        let projected = SessionTrajectoryConversationProjection.messages(from: events)
+        XCTAssertEqual(projected.map(\.id), [checkpoint.id, current.id])
+        XCTAssertEqual(projected.map(\.content), [checkpoint.content, current.content])
+        XCTAssertEqual(projected.map(\.role), [.user, .user])
+        XCTAssertEqual(
+            SessionTrajectoryConversationProjection.replacementRangeForPrefix(
+                count: 1,
+                events: events
+            ),
+            2...2
+        )
+    }
+
+    func testForkProjectionStopsAtLastCompletedTurn() throws {
+        let completedUser = AgentMessage.user("completed request")
+        let completedReply = AgentMessage.assistant("completed reply")
+        let openUser = AgentMessage.user("currently running request")
+        let openCall = AgentToolCall(
+            id: "open-call",
+            name: "read",
+            arguments: #"{"path":"README.md"}"#
+        )
+        let openReply = AgentMessage.assistant("", toolCalls: [openCall])
+        let events = try [
+            SessionEvent(
+                type: SessionEventVocabulary.turnStart,
+                seq: 0,
+                time: 1,
+                data: .object(["turn": .number(1)])
+            ),
+            SessionEvent(
+                type: SessionEventVocabulary.userMessage,
+                seq: 1,
+                time: 2,
+                data: sessionUserMessage(completedUser),
+                surfaceOp: .append
+            ),
+            SessionEvent(
+                type: SessionEventVocabulary.assistantMessage,
+                seq: 2,
+                time: 3,
+                data: .object([
+                    "turn": .number(1),
+                    "step": .number(1),
+                    "message": sessionAssistantMessage(completedReply)
+                ]),
+                surfaceOp: .append
+            ),
+            SessionEvent(
+                type: SessionEventVocabulary.turnEnd,
+                seq: 3,
+                time: 4,
+                data: .object([
+                    "turn": .number(1),
+                    "reason": .object(["kind": .string("completed")])
+                ])
+            ),
+            SessionEvent(
+                type: SessionEventVocabulary.turnStart,
+                seq: 4,
+                time: 5,
+                data: .object(["turn": .number(2)])
+            ),
+            SessionEvent(
+                type: SessionEventVocabulary.userMessage,
+                seq: 5,
+                time: 6,
+                data: sessionUserMessage(openUser),
+                surfaceOp: .append
+            ),
+            SessionEvent(
+                type: SessionEventVocabulary.assistantMessage,
+                seq: 6,
+                time: 7,
+                data: .object([
+                    "turn": .number(2),
+                    "step": .number(1),
+                    "message": sessionAssistantMessage(openReply)
+                ]),
+                surfaceOp: .append
+            )
+        ]
+
+        let seed = SessionTrajectoryConversationProjection
+            .messagesThroughLastCompletedTurn(from: events)
+        XCTAssertEqual(seed.map(\.id), [completedUser.id, completedReply.id])
+        XCTAssertFalse(seed.contains(where: { $0.id == openUser.id || $0.id == openReply.id }))
+        XCTAssertEqual(
+            SessionTrajectoryConversationProjection
+                .messagesThroughLastCompletedTurn(from: Array(events.prefix(3))),
+            []
+        )
+    }
+
+    private func sessionUserMessage(_ message: AgentMessage) -> JSONValue {
+        .object([
+            "id": .string(message.id.uuidString),
+            "role": .string("user"),
+            "content": .array([textBlock(message.content)]),
+            "source": message.source ?? .object(["kind": .string("user")])
+        ])
+    }
+
+    private func sessionAssistantMessage(_ message: AgentMessage) -> JSONValue {
+        var content: [JSONValue] = []
+        if let reasoning = message.reasoning {
+            content.append(.object(["type": .string("reasoning"), "text": .string(reasoning)]))
+        }
+        if !message.content.isEmpty { content.append(textBlock(message.content)) }
+        content.append(contentsOf: message.toolCalls.map { call in
+            .object([
+                "type": .string("tool-call"),
+                "id": .string(call.id),
+                "name": .string(call.name),
+                "arguments": .string(call.arguments)
+            ])
+        })
+        return .object([
+            "id": .string(message.id.uuidString),
+            "role": .string("assistant"),
+            "content": .array(content),
+            "source": message.source ?? .object([
+                "kind": .string("model"),
+                "provider": .string("deepseek"),
+                "model": .string("deepseek-chat")
+            ])
+        ])
+    }
+
+    private func sessionToolResultMessage(
+        callID: String,
+        output: String,
+        isError: Bool
+    ) -> JSONValue {
+        .object([
+            "id": .string(UUID().uuidString),
+            "role": .string("user"),
+            "content": .array([
+                .object([
+                    "type": .string("tool-result"),
+                    "toolCallId": .string(callID),
+                    "content": .array([textBlock(output)]),
+                    "isError": .bool(isError)
+                ])
+            ]),
+            "source": .object(["kind": .string("tool"), "callId": .string(callID)])
+        ])
+    }
+
+    private func textBlock(_ text: String) -> JSONValue {
+        .object(["type": .string("text"), "text": .string(text)])
     }
 
     private func makeRoot() -> URL {

@@ -9,7 +9,7 @@ import {
   MarketplaceManager,
 } from './marketplace.mjs'
 
-const HOST_VERSION = '1.6.0'
+const HOST_VERSION = '1.8.0'
 const PROTOCOL_VERSION = 1
 const MAXIMUM_FRAME_BYTES = 512 * 1024
 const protocolOutput = process.stdout
@@ -39,9 +39,19 @@ for (const key of Object.keys(process.env)) {
   }
 }
 
+const workspaceRoot = resolve(process.env.HARNESS_MOBILE_WORKSPACE ?? '/workspace')
+process.env.HARNESS_MOBILE_WORKSPACE = workspaceRoot
+process.env.DSH_HOME = resolve(workspaceRoot, '.dsh')
+
 const [
   { Context },
   { default: Timer },
+  { default: AgentRegistry, Inbox },
+  { default: SessionStore },
+  { default: CommandRuntime },
+  { default: SkillRegistry },
+  { SessionQueryEngine },
+  { createScope },
   systemPromptModule,
   { default: ToolRuntime },
   { default: DynamicCordisRunnerService },
@@ -53,6 +63,12 @@ const [
 ] = await Promise.all([
   import('@deepseek-ai/cordis'),
   import('@deepseek-ai/cordis-plugin-timer'),
+  import('@deepseek-ai/dsh-agent'),
+  import('@deepseek-ai/dsh-session'),
+  import('@deepseek-ai/dsh-commands'),
+  import('@deepseek-ai/dsh-skill'),
+  import('@deepseek-ai/dsh-session-query'),
+  import('@deepseek-ai/dsh-scope'),
   import('@deepseek-ai/dsh-system-prompt'),
   import('@deepseek-ai/dsh-tools'),
   import('@deepseek-ai/dsh-cordis-host-runner'),
@@ -67,8 +83,24 @@ const { default: SystemPrompt } = systemPromptModule
 const { SettingsConflictError, settingsNamespace } = settingsModule
 const require = createRequire(import.meta.url)
 const hostDirectory = dirname(fileURLToPath(import.meta.url))
-const workspaceRoot = resolve(process.env.HARNESS_MOBILE_WORKSPACE ?? '/workspace')
 const settingsDocumentPath = resolve(workspaceRoot, '.harness-mobile', 'settings.yaml')
+
+class MobileSessionQuery extends SessionQueryEngine {
+  async searchSessions() {
+    return { items: [] }
+  }
+
+  async searchEvents(request) {
+    const session = this.ctx.sessions.get(request.sessionId)
+    if (session === undefined) {
+      throw new Error(`session "${request.sessionId}" not found`)
+    }
+    return {
+      session: structuredClone(session.header),
+      items: [],
+    }
+  }
+}
 
 function packageVersion(name) {
   const path = require.resolve(`${name}/package.json`)
@@ -81,8 +113,13 @@ const runtimePackages = Object.freeze({
   '@deepseek-ai/dsh-app-boot': packageVersion('@deepseek-ai/dsh-app-boot'),
   '@deepseek-ai/dsh-atomic-write': packageVersion('@deepseek-ai/dsh-atomic-write'),
   '@deepseek-ai/dsh-cordis-host-runner': packageVersion('@deepseek-ai/dsh-cordis-host-runner'),
+  '@deepseek-ai/dsh-agent': packageVersion('@deepseek-ai/dsh-agent'),
+  '@deepseek-ai/dsh-commands': packageVersion('@deepseek-ai/dsh-commands'),
+  '@deepseek-ai/dsh-session': packageVersion('@deepseek-ai/dsh-session'),
+  '@deepseek-ai/dsh-session-query': packageVersion('@deepseek-ai/dsh-session-query'),
   '@deepseek-ai/dsh-settings': packageVersion('@deepseek-ai/dsh-settings'),
   '@deepseek-ai/dsh-settings-file': packageVersion('@deepseek-ai/dsh-settings-file'),
+  '@deepseek-ai/dsh-skill': packageVersion('@deepseek-ai/dsh-skill'),
   '@deepseek-ai/dsh-system-prompt': packageVersion('@deepseek-ai/dsh-system-prompt'),
   '@deepseek-ai/dsh-tool-cordis': packageVersion('@deepseek-ai/dsh-tool-cordis'),
   '@deepseek-ai/dsh-tools': packageVersion('@deepseek-ai/dsh-tools'),
@@ -90,6 +127,11 @@ const runtimePackages = Object.freeze({
 
 const ctx = new Context()
 await ctx.plugin(Timer)
+await ctx.plugin(SessionStore)
+await ctx.plugin(AgentRegistry)
+await ctx.plugin(CommandRuntime)
+await ctx.plugin(SkillRegistry)
+await ctx.plugin(MobileSessionQuery)
 await ctx.plugin(FileSettingsProvider, {
   path: settingsDocumentPath,
   watch: true,
@@ -122,6 +164,7 @@ This runtime is the on-device iSH Host for an iPhone app. Dynamic Host-half plug
 - The desktop cordis-plugin-development Skill is not mounted in this minimal Host. Do not call an absent Skill tool; use Inspect results as the exact capability contract.
 - Dynamic definitions and active runs exist only in this Host process memory and disappear when the Host stops or restarts.
 - Provider API keys and authorization data are forbidden in this Host. Do not request, embed, log, or forward them.
+- A Host llm/stream handler receives credential-free start and per-event envelopes. Return kind "next" or "observe" to release an event, kind "drop" to consume it, or kind "replace" with an event to rewrite it. Terminal finish, error, and cancel envelopes are notifications.
 - After a Host-half lifecycle change, its Tool and Prompt contributions become available to the native Agent on the next synchronized model step.`,
 })
 ctx.tools.guard(execution => {
@@ -149,6 +192,7 @@ ctx.tools.guard(execution => {
 })
 
 const agents = new Map()
+const skillRegistrations = new Map()
 let revision = 0
 let nextCallId = 1
 const directoryFingerprints = new Map()
@@ -160,6 +204,7 @@ const contributionMutationTools = new Set([
 ])
 
 ctx.on('tools/change', () => { revision += 1 })
+ctx.on('commands/change', () => { revision += 1 })
 ctx.on('system-prompt/change', () => { revision += 1 })
 ctx.on('settings/document-updated', () => { revision += 1 })
 
@@ -224,13 +269,160 @@ async function marketplaceCall(operation) {
 function agentFor(sessionId) {
   let agent = agents.get(sessionId)
   if (agent !== undefined) return agent
+
+  const session = ctx.sessions.create(sessionId, {
+    meta: { cwd: workspaceRoot },
+  })
   agent = {
     id: sessionId,
+    options: {},
+    session,
+    inbox: new Inbox(session, {
+      inserted() {},
+      discarded() {},
+      claimed() {},
+    }),
+    status: 'idle',
+    ctx: undefined,
+    cancel() {},
+    async whenIdle() {},
+    async runMaintenance(task) {
+      return await task(new AbortController().signal)
+    },
+    send() {},
+    followup() {},
     steer() {},
     inject() {},
   }
+  const scope = createScope(ctx, agent)
+  agent.ctx = scope.ctx.extend({ agent })
+  ctx.agents.register(agent)
   agents.set(sessionId, agent)
   return agent
+}
+
+function appendSyncedEvents(session, startingAtSeq, sourceEvents) {
+  if (!Number.isSafeInteger(startingAtSeq) || startingAtSeq < 0) {
+    throw new RPCFailure(-32602, 'startingAtSeq must be a non-negative safe integer')
+  }
+  if (!Array.isArray(sourceEvents)) {
+    throw new RPCFailure(-32602, 'events must be an array')
+  }
+  if (sourceEvents.length > 512) {
+    throw new RPCFailure(-32602, 'events exceeds the 512-event synchronization batch limit')
+  }
+
+  if (startingAtSeq !== session.events.length) {
+    throw new RPCFailure(
+      -32020,
+      `session "${session.id}" expected synchronization at seq ${session.events.length}, received ${startingAtSeq}`,
+      { expectedStartingAtSeq: session.events.length },
+    )
+  }
+
+  let appended = 0
+  for (let offset = 0; offset < sourceEvents.length; offset += 1) {
+    const index = startingAtSeq + offset
+    const event = sourceEvents[offset]
+    if (!isPlainJSONObject(event)
+      || event.seq !== index
+      || typeof event.type !== 'string'
+      || !isPlainJSONObject(event.data)) {
+      throw new RPCFailure(-32602, `events[${index}] is not a valid session event`)
+    }
+    const metadata = {
+      ...(event.sourceEventSeqs === undefined ? {} : { sourceEventSeqs: event.sourceEventSeqs }),
+      ...(event.surfaceOp === undefined ? {} : { surfaceOp: event.surfaceOp }),
+    }
+    if (event.surfaceOp === undefined) session.append(event.type, event.data)
+    else session.append(event.type, event.data, metadata)
+    appended += 1
+  }
+  return appended
+}
+
+function normalizedSkill(raw, index) {
+  if (!isPlainJSONObject(raw)) {
+    throw new RPCFailure(-32602, `skills[${index}] must be an object`)
+  }
+  const name = raw.name
+  const description = raw.description
+  const content = raw.content
+  if (typeof name !== 'string' || typeof description !== 'string' || typeof content !== 'string') {
+    throw new RPCFailure(-32602, `skills[${index}] requires string name, description, and content`)
+  }
+  const invocation = isPlainJSONObject(raw.invocation)
+    ? raw.invocation
+    : { modelInvocable: true, userInvocable: true }
+  if (typeof invocation.modelInvocable !== 'boolean' || typeof invocation.userInvocable !== 'boolean') {
+    throw new RPCFailure(-32602, `skills[${index}].invocation is invalid`)
+  }
+  const resourceBase = typeof raw.resourceBase === 'string' && raw.resourceBase.length > 0
+    ? { kind: 'directory', path: raw.resourceBase }
+    : undefined
+  return {
+    name,
+    description,
+    ...(typeof raw.whenToUse === 'string' ? { whenToUse: raw.whenToUse } : {}),
+    invocation: {
+      modelInvocable: invocation.modelInvocable,
+      userInvocable: invocation.userInvocable,
+    },
+    source: typeof raw.source === 'string' ? raw.source : 'custom',
+    provider: 'harness-mobile',
+    ...(resourceBase === undefined ? {} : { resourceBase }),
+    content,
+    ...(typeof raw.path === 'string' ? { path: raw.path } : {}),
+  }
+}
+
+function synchronizeSkills(sourceSkills) {
+  if (!Array.isArray(sourceSkills)) {
+    throw new RPCFailure(-32602, 'skills must be an array')
+  }
+  if (sourceSkills.length > 256) {
+    throw new RPCFailure(-32602, 'skills exceeds the 256-skill mobile synchronization limit')
+  }
+  const next = new Map()
+  for (const [index, raw] of sourceSkills.entries()) {
+    const skill = normalizedSkill(raw, index)
+    if (next.has(skill.name)) {
+      throw new RPCFailure(-32602, `duplicate synchronized skill "${skill.name}"`)
+    }
+    next.set(skill.name, skill)
+  }
+
+  for (const [name, registration] of skillRegistrations) {
+    const skill = next.get(name)
+    const fingerprint = skill === undefined ? undefined : JSON.stringify(skill)
+    if (fingerprint === registration.fingerprint) {
+      next.delete(name)
+      continue
+    }
+    registration.dispose()
+    skillRegistrations.delete(name)
+  }
+  for (const [name, skill] of next) {
+    const fingerprint = JSON.stringify(skill)
+    const dispose = ctx.skills.register(skill)
+    skillRegistrations.set(name, { fingerprint, dispose })
+  }
+  return skillRegistrations.size
+}
+
+function synchronizeMobileContext(params) {
+  const sessionId = requiredString(params, 'sessionId', 128)
+  const agent = agentFor(sessionId)
+  const appendedEvents = appendSyncedEvents(agent.session, params.startingAtSeq, params.events)
+  const skillCount = params.skills === undefined
+    ? skillRegistrations.size
+    : synchronizeSkills(params.skills)
+  return {
+    sessionId,
+    appendedEvents,
+    totalEvents: agent.session.events.length,
+    skillCount,
+  }
 }
 
 function normalizeKey(key) {
@@ -926,17 +1118,28 @@ async function invokeService(sessionId, pluginId, pluginRunId, name, method, arg
 }
 
 async function contributions(sessionId) {
-  const assembly = await ctx.systemPrompt.assemble()
+  const agent = sessionId === undefined ? undefined : agentFor(sessionId)
+  const assembly = await ctx.systemPrompt.assemble(
+    agent === undefined ? {} : { agent, scope: agent },
+  )
   const variables = {}
   for (const [name, value] of Object.entries(assembly.variables)) {
     variables[name] = value === undefined ? null : value
   }
   const directory = activeExtensionDirectory(sessionId)
   trackExtensionDirectory(sessionId, directory)
+  const commands = agent === undefined ? [] : ctx.commands.list(agent).map(descriptor => {
+    const definition = ctx.commands.find(agent, descriptor.name)
+    return {
+      ...descriptor,
+      recordInput: definition?.recordInput !== false,
+    }
+  })
   return {
     revision,
     scope: sessionId === undefined ? 'process' : 'session',
     tools: assembly.tools.filter(tool => !baselineTools.has(tool.name)),
+    commands,
     prompt: {
       sections: assembly.sections.filter(section => !baselineSections.has(section.name)),
       contexts: assembly.contexts.filter(context => !baselineContexts.has(context.name)),
@@ -948,6 +1151,62 @@ async function contributions(sessionId) {
       revision,
       ...marketplace.nativeClientDirectory(),
     },
+  }
+}
+
+function normalizedCommandResult(name, value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new RPCFailure(-32004, `command "${name}" returned a non-object result`)
+  }
+  if (value.kind !== 'success' && value.kind !== 'error') {
+    throw new RPCFailure(-32004, `command "${name}" returned unknown result kind`)
+  }
+  if (value.text !== undefined && typeof value.text !== 'string') {
+    throw new RPCFailure(-32004, `command "${name}" returned a non-string text`)
+  }
+  if (value.sourceEventSeq !== undefined
+      && (!Number.isSafeInteger(value.sourceEventSeq) || value.sourceEventSeq < 0)) {
+    throw new RPCFailure(-32004, `command "${name}" returned an invalid sourceEventSeq`)
+  }
+  return {
+    kind: value.kind,
+    ...(value.text === undefined ? {} : { text: value.text }),
+    ...(value.kind === 'success' && value.sourceEventSeq !== undefined
+      ? { sourceEventSeq: value.sourceEventSeq }
+      : {}),
+  }
+}
+
+async function executeCommand(params) {
+  const sessionId = requiredString(params, 'sessionId', 128)
+  const name = requiredString(params, 'name', 128)
+  const commandId = requiredString(params, 'commandId', 128)
+  const rawInput = optionalString(params, 'rawInput', 32 * 1024) ?? ''
+  const agent = agentFor(sessionId)
+  const definition = ctx.commands.find(agent, name)
+  if (definition === undefined) {
+    return { ok: false, code: 'command-not-found', message: `command "/${name}" is no longer active` }
+  }
+
+  try {
+    // Native owns the durable command/run + command/done pair. Calling the
+    // official handler directly avoids appending a second, Host-only pair to
+    // the mirrored SessionStore while preserving the official definition and
+    // scoped command resolution semantics.
+    const value = await definition.handler(Object.freeze({
+      commandId,
+      agent,
+      rawInput,
+      attachments: Object.freeze([]),
+      signal: new AbortController().signal,
+    }))
+    return { ok: true, value: normalizedCommandResult(name, value) }
+  } catch (error) {
+    return {
+      ok: false,
+      code: error instanceof RPCFailure ? 'invalid-command-result' : 'command-error',
+      message: error instanceof Error ? error.message : String(error),
+    }
   }
 }
 
@@ -969,7 +1228,9 @@ async function dispatch(method, rawParams) {
           'run',
           'stop',
           'undefine',
+          'context/sync',
           'contributions',
+          'command/execute',
           'invoke',
           'settings/describe',
           'settings/mutate',
@@ -1034,10 +1295,14 @@ async function dispatch(method, rawParams) {
       if (result.ok) revision += 1
       return result
     }
+    case 'context/sync':
+      return synchronizeMobileContext(params)
     case 'contributions': {
       const sessionId = optionalString(params, 'sessionId', 128)
       return await contributions(sessionId)
     }
+    case 'command/execute':
+      return await executeCommand(params)
     case 'settings/describe': {
       const snapshot = settingsSnapshot()
       return {
@@ -1084,13 +1349,13 @@ async function dispatch(method, rawParams) {
         const agent = agentFor(requiredString(params, 'sessionId', 128))
         const name = requiredString(params, 'name', 128)
         const callId = optionalString(params, 'callId', 128) ?? `mobile-${nextCallId++}`
-        const result = await ctx.tools.execute({
+        const result = await ctx.agents.withInitiator(agent, () => ctx.tools.execute({
           signal: new AbortController().signal,
           callId,
           name,
           arguments: args,
           agent,
-        })
+        }))
         if (contributionMutationTools.has(name) && result?.isError !== true) revision += 1
         return result
       }
@@ -1249,6 +1514,9 @@ process.on('unhandledRejection', error => {
   const active = [...activeRequests.entries()]
     .map(([id, method]) => `${method}#${id}`)
     .join(', ')
-  stderrLog(`[plugin-host] unhandled rejection; terminating the isolated Host process${active === '' ? '' : `; active=${active}`}: ${safeUnhandledDiagnostic(error)}`)
-  process.exitCode = 70
+  // Request-scoped marketplace failures are already converted to JSON-RPC
+  // errors. A late transport rejection must not terminate the shared Host
+  // and make an unrelated ping or diagnostic request time out. Keep the
+  // redacted detail in stderr/diagnostics and let the next request proceed.
+  stderrLog(`[plugin-host] unhandled rejection; keeping the isolated Host alive${active === '' ? '' : `; active=${active}`}: ${safeUnhandledDiagnostic(error)}`)
 })

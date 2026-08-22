@@ -84,6 +84,30 @@ final class IOSNativeOffloadToolTests: XCTestCase {
         XCTAssertNotEqual(calendar, contactsAdjacent)
     }
 
+    func testHealthKitApprovalScopeSeparatesReadWriteAndDelete() throws {
+        let tool = IOSNativeOffloadTool(
+            store: WorkspaceStore(),
+            sessionID: "test"
+        )
+
+        let read = try tool.approvalResources(arguments: [
+            "command": .string("apple-healthkit"),
+            "arguments": .array([.string("steps")]),
+        ])
+        let write = try tool.approvalResources(arguments: [
+            "command": .string("apple-healthkit"),
+            "arguments": .array([.string("log"), .string("--type"), .string("weight")]),
+        ])
+        let delete = try tool.approvalResources(arguments: [
+            "command": .string("apple-healthkit"),
+            "arguments": .array([.string("delete"), .string("--type"), .string("weight")]),
+        ])
+
+        XCTAssertEqual(read, ["ios-native:apple-healthkit:read"])
+        XCTAssertEqual(write, ["ios-native:apple-healthkit:write"])
+        XCTAssertEqual(delete, ["ios-native:apple-healthkit:delete"])
+    }
+
     func testOpenBridgeLeavesEveryURLSchemeToUIApplication() throws {
         let tool = IOSNativeOffloadTool(store: WorkspaceStore(), sessionID: "test")
         for target in [

@@ -12,7 +12,7 @@ final class UpstreamCompatibilityFixtureTests: XCTestCase {
         XCTAssertEqual(fixture.schemaVersion, 1)
         XCTAssertEqual(
             fixture.source.commit,
-            "47f943859bef60e4160492346772ded9b24f765a"
+            "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e"
         )
 
         let client = OpenAICompatibleClient()

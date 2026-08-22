@@ -42,6 +42,25 @@ struct ISHGuestNetworkLease: Sendable, Hashable {
     fileprivate let id: UUID
 }
 
+/// File-effect policy carried by one iSH invocation.  The policy deliberately
+/// lives on the call rather than on the long-lived coordinator so that two
+/// consumers cannot accidentally inherit one another's access mode.
+enum ISHSandboxFileMode: String, Sendable, Codable, Equatable {
+    case readOnly = "read-only"
+    case workspaceWrite = "workspace-write"
+    case dangerFullAccess = "danger-full-access"
+}
+
+struct ISHSandboxExecutionPolicy: Sendable, Equatable {
+    let mode: ISHSandboxFileMode
+    let workspaceRoot: String
+
+    init(mode: ISHSandboxFileMode, workspaceRoot: URL) {
+        self.mode = mode
+        self.workspaceRoot = workspaceRoot.standardizedFileURL.path
+    }
+}
+
 enum ISHSandboxError: LocalizedError, Sendable, Equatable {
     case unavailable
     case bootFailed(Int32)
@@ -53,6 +72,7 @@ enum ISHSandboxError: LocalizedError, Sendable, Equatable {
     case sessionBusy
     case capacityReached
     case invalidCommand
+    case policyUnavailable(ISHSandboxFileMode)
 
     var errorDescription: String? {
         switch self {
@@ -76,6 +96,8 @@ enum ISHSandboxError: LocalizedError, Sendable, Equatable {
             return "iSH 已达到同时执行两条命令的上限。"
         case .invalidCommand:
             return "命令为空或超过 64 KiB。"
+        case let .policyUnavailable(mode):
+            return "iSH 当前无法按 \(mode.rawValue) 文件策略隔离本次调用，已拒绝执行（不会降级为未隔离执行）。"
         }
     }
 }
@@ -94,6 +116,7 @@ actor ISHSandboxCoordinator {
     private var isBackgrounded = false
     private var activeSessionIDs: Set<String> = []
     private var activeExecutions: [UUID: ISHCommandExecutionBox] = [:]
+    private var activeExecutionsBySessionID: [String: ISHCommandExecutionBox] = [:]
 
     init(installer: ISHRootfsInstaller = .shared) {
         self.installer = installer
@@ -179,11 +202,29 @@ actor ISHSandboxCoordinator {
         workspaceURL: URL,
         timeout: TimeInterval = 300,
         maximumOutputBytes: Int? = nil,
+        policy: ISHSandboxExecutionPolicy,
         onOutput: @escaping @Sendable (ISHCommandOutputChunk) async -> Void = { _ in }
     ) async throws -> ISHCommandResult {
         let normalized = command.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty, command.utf8.count <= 64 * 1_024 else {
             throw ISHSandboxError.invalidCommand
+        }
+        let canonicalWorkspace = workspaceURL.standardizedFileURL.path
+        guard policy.workspaceRoot == canonicalWorkspace else {
+            // A caller must not claim a different root than the mounted root.
+            // Treat this as an unavailable policy instead of silently widening
+            // the call to the coordinator's existing mount.
+            throw ISHSandboxError.policyUnavailable(policy.mode)
+        }
+        guard policy.mode == .dangerFullAccess else {
+            // The pinned HarnessISH bridge currently exposes one process-wide
+            // writable guest root and does not expose a per-process file-policy
+            // backend. It therefore cannot truthfully promise read-only or
+            // workspace-only writes. Fail closed until that backend is present.
+            throw ISHSandboxError.policyUnavailable(policy.mode)
+        }
+        guard isAvailable else {
+            throw ISHSandboxError.unavailable
         }
         try await prepare(workspaceURL: workspaceURL)
         let limits = currentLimits()
@@ -200,8 +241,10 @@ actor ISHSandboxCoordinator {
         let box = ISHCommandExecutionBox()
         activeSessionIDs.insert(sessionID)
         activeExecutions[executionID] = box
+        activeExecutionsBySessionID[sessionID] = box
         defer {
             activeExecutions.removeValue(forKey: executionID)
+            activeExecutionsBySessionID.removeValue(forKey: sessionID)
             activeSessionIDs.remove(sessionID)
         }
 
@@ -231,6 +274,12 @@ actor ISHSandboxCoordinator {
         for execution in activeExecutions.values {
             execution.cancel()
         }
+    }
+
+    /// Cancel one fixed subsystem session without terminating unrelated Agent,
+    /// terminal, plugin-host, or background commands in the same guest.
+    func cancel(sessionID: String) {
+        activeExecutionsBySessionID[sessionID]?.cancel()
     }
 
     func setGuestNetworkEnabled(_ enabled: Bool) {
@@ -307,8 +356,9 @@ actor ISHSandboxCoordinator {
     private func reconcileWorkspaceMounts() {
         guard ISHKernel.shared.isBooted, mountedWorkspacePath != nil else { return }
 
-        for (guestPath, mounted) in mountedWorkspaceMounts {
-            guard configuredWorkspaceMounts[guestPath] != mounted else { continue }
+        for guestPath in Array(mountedWorkspaceMounts.keys) {
+            guard let mounted = mountedWorkspaceMounts[guestPath],
+                  configuredWorkspaceMounts[guestPath] != mounted else { continue }
             _ = ISHKernel.shared.bindUnmountPath(guestPath)
             mountedWorkspaceMounts.removeValue(forKey: guestPath)
         }
@@ -347,7 +397,7 @@ actor ISHSandboxCoordinator {
     }
 
     private func unmountAllWorkspaceMounts() {
-        for guestPath in mountedWorkspaceMounts.keys {
+        for guestPath in Array(mountedWorkspaceMounts.keys) {
             _ = ISHKernel.shared.bindUnmountPath(guestPath)
         }
         mountedWorkspaceMounts.removeAll()
@@ -466,6 +516,116 @@ final class ISHOutputLimiter: @unchecked Sendable {
 }
 
 #if os(iOS) && canImport(HarnessISH)
+/// Serializes native stdout callbacks with the async parser that consumes them.
+/// The shell bridge invokes completion independently from line callbacks, so a
+/// command is not considered settled until the callbacks already accepted by
+/// this drain have finished. The wait is bounded to avoid making cancellation
+/// depend on a broken consumer.
+private final class ISHOutputDrain: @unchecked Sendable {
+    private let lock = NSLock()
+    private var accepting = true
+    private var queue: [@Sendable () async -> Void] = []
+    private var workerRunning = false
+    private var pending = 0
+    private var waiter: CheckedContinuation<Bool, Never>?
+    private var waiterID: UUID?
+    private var timeoutTask: Task<Void, Never>?
+
+    func enqueue(_ operation: @escaping @Sendable () async -> Void) {
+        lock.lock()
+        guard accepting else {
+            lock.unlock()
+            return
+        }
+        queue.append(operation)
+        pending += 1
+        let startWorker = !workerRunning
+        workerRunning = true
+        lock.unlock()
+        if startWorker {
+            Task { await drainLoop() }
+        }
+    }
+
+    func closeAndWait(timeout: TimeInterval) async -> Bool {
+        let id = UUID()
+        return await withCheckedContinuation { continuation in
+            lock.lock()
+            accepting = false
+            guard pending > 0 else {
+                lock.unlock()
+                continuation.resume(returning: true)
+                return
+            }
+            waiter = continuation
+            waiterID = id
+            let nanoseconds = UInt64(max(timeout, 0) * 1_000_000_000)
+            timeoutTask = Task.detached { [weak self] in
+                do {
+                    try await Task.sleep(nanoseconds: nanoseconds)
+                } catch {
+                    return
+                }
+                self?.timeoutWaiter(id: id)
+            }
+            lock.unlock()
+        }
+    }
+
+    private func drainLoop() async {
+        while true {
+            guard let operation = takeNext() else { return }
+            await operation()
+            completeOne()
+        }
+    }
+
+    private func takeNext() -> (@Sendable () async -> Void)? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !queue.isEmpty else {
+            workerRunning = false
+            return nil
+        }
+        return queue.removeFirst()
+    }
+
+    private func completeOne() {
+        let continuation: CheckedContinuation<Bool, Never>?
+        let timeoutTask: Task<Void, Never>?
+        lock.lock()
+        pending -= 1
+        if pending == 0, !accepting {
+            continuation = waiter
+            waiter = nil
+            waiterID = nil
+            timeoutTask = self.timeoutTask
+            self.timeoutTask = nil
+        } else {
+            continuation = nil
+            timeoutTask = nil
+        }
+        lock.unlock()
+        timeoutTask?.cancel()
+        continuation?.resume(returning: true)
+    }
+
+    private func timeoutWaiter(id: UUID) {
+        let continuation: CheckedContinuation<Bool, Never>?
+        lock.lock()
+        guard waiterID == id else {
+            lock.unlock()
+            return
+        }
+        continuation = waiter
+        waiter = nil
+        waiterID = nil
+        timeoutTask = nil
+        lock.unlock()
+        continuation?.resume(returning: false)
+    }
+}
+
 private final class ISHCommandExecutionBox: @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<ISHCommandResult, Error>?
@@ -473,6 +633,11 @@ private final class ISHCommandExecutionBox: @unchecked Sendable {
     private var pid: Int32 = 0
     private var completed = false
     private var cancelRequested = false
+    private let outputDrain: ISHOutputDrain
+
+    init() {
+        outputDrain = ISHOutputDrain()
+    }
 
     func start(
         script: String,
@@ -496,12 +661,14 @@ private final class ISHCommandExecutionBox: @unchecked Sendable {
                     environment: environment,
                     stdinData: input,
                     fsContext: 0,
-                    lineCallback: { line, isStandardError in
+                    lineCallback: { [self] line, isStandardError in
                         guard let chunk = outputLimiter.consume(
                             channel: isStandardError ? .stderr : .stdout,
                             text: line + "\n"
                         ) else { return }
-                        Task { await onOutput(chunk) }
+                        self.outputDrain.enqueue {
+                            await onOutput(chunk)
+                        }
                     },
                     completion: { result in
                         let boundedOutput = ISHOutputLimiter.boundedOutputs(
@@ -625,7 +792,15 @@ private final class ISHCommandExecutionBox: @unchecked Sendable {
         lock.unlock()
 
         task?.cancel()
-        continuation?.resume(with: result)
+        guard let continuation else { return }
+
+        Task {
+            // The process completion callback can race the last stdout line.
+            // Keep the result/temporary run directory alive until all lines
+            // already accepted above have reached their parser/tracker.
+            _ = await outputDrain.closeAndWait(timeout: 5)
+            continuation.resume(with: result)
+        }
     }
 }
 #else

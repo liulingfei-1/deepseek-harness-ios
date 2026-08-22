@@ -7,6 +7,44 @@ import XCTest
 #endif
 
 final class ISHPluginHostTests: XCTestCase {
+    func testContextProjectionDropsTokenDeltasButKeepsUsageAndFinalEvents() throws {
+        func event(_ draft: SessionEventDraft, sequence: UInt64) throws -> SessionEvent {
+            try SessionEvent(
+                type: draft.type,
+                seq: sequence,
+                time: draft.time,
+                data: draft.data,
+                ignorable: draft.ignorable,
+                sourceEventSeqs: draft.sourceEventSeqs,
+                surfaceOp: draft.surfaceOp
+            )
+        }
+
+        let delta = try event(
+            .assistantTextDelta(turn: 1, step: 1, text: "token"),
+            sequence: 0
+        )
+        let usage = try event(
+            .assistantUsage(
+                turn: 1,
+                step: 1,
+                usage: SessionTokenUsage(inputTokens: 10, outputTokens: 2)
+            ),
+            sequence: 1
+        )
+        let end = try event(
+            .turnEnd(turn: 1, reason: .string("completed")),
+            sequence: 2
+        )
+
+        let projected = ISHPluginHostContextProjection.events(from: [delta, usage, end])
+        XCTAssertEqual(projected.map(\.seq), [0, 1])
+        XCTAssertEqual(projected.map(\.type), [
+            SessionEventVocabulary.assistantChunk,
+            SessionEventVocabulary.turnEnd
+        ])
+    }
+
     func testNDJSONFramerHandlesFragmentedAndCRLFLines() throws {
         var framer = ISHPluginHostNDJSONFramer(maximumLineBytes: 64)
 
@@ -193,6 +231,8 @@ final class ISHPluginHostTests: XCTestCase {
         XCTAssertEqual(ping.capabilities, ISHPluginHostRPCMethod.allCases)
         XCTAssertEqual(diagnostics.state, .running(pid: 42))
         XCTAssertEqual(diagnostics.pendingRequestCount, 0)
+        XCTAssertEqual(diagnostics.outboundQueuedBytes, 0)
+        XCTAssertFalse(diagnostics.outboundWriteInFlight)
         await client.stop()
     }
 
@@ -223,6 +263,94 @@ final class ISHPluginHostTests: XCTestCase {
 
         XCTAssertEqual(ping.hostVersion, "1.1.0")
         XCTAssertEqual(ping.capabilities, ISHPluginHostRPCMethod.allCases)
+        await client.stop()
+    }
+
+    func testClientRetriesRejectedStdinWritesWithBackoff() async throws {
+        let transport = RejectingWritePluginHostTransport(rejectionsBeforeSuccess: 2)
+        let client = ISHPluginHostClient(transport: transport, requestTimeout: .seconds(3))
+
+        try await client.start()
+        let ping = try await client.ping()
+        let diagnostics = await client.diagnostics()
+
+        XCTAssertEqual(ping.hostVersion, "retry-host")
+        XCTAssertEqual(diagnostics.rejectedWriteCount, 2)
+        XCTAssertEqual(diagnostics.automaticRestartCount, 0)
+        XCTAssertTrue(diagnostics.lastTransportFailure?.contains("attempt 2") == true)
+        let writeCount = await transport.writeCount
+        XCTAssertEqual(writeCount, 3)
+        await client.stop()
+    }
+
+    func testClientRecyclesHostAfterPersistentRejectedWrites() async throws {
+        let transport = RejectingWritePluginHostTransport(rejectionsBeforeSuccess: .max)
+        let client = ISHPluginHostClient(
+            transport: transport,
+            requestTimeout: .seconds(2),
+            rejectedWriteBackoff: []
+        )
+
+        try await client.start()
+        do {
+            _ = try await client.ping()
+            XCTFail("Expected rejected stdin write")
+        } catch {
+            XCTAssertEqual(error as? ISHPluginHostError, .transportRejectedWrite)
+        }
+        let diagnostics = await client.diagnostics()
+        XCTAssertEqual(diagnostics.state, .stopped)
+        XCTAssertEqual(diagnostics.pendingRequestCount, 0)
+        XCTAssertEqual(diagnostics.outboundQueuedBytes, 0)
+        XCTAssertFalse(diagnostics.outboundWriteInFlight)
+        XCTAssertEqual(diagnostics.rejectedWriteCount, 2)
+        XCTAssertEqual(diagnostics.automaticRestartCount, 1)
+        let startCount = await transport.startCount
+        XCTAssertEqual(startCount, 2)
+        let transportEvents = await transport.events
+        XCTAssertEqual(transportEvents, ["start", "write", "stop", "start", "write", "stop"])
+        let wasStopped = await transport.wasStopped
+        XCTAssertTrue(wasStopped)
+        await client.stop()
+    }
+
+    func testClientRestartsHostAndReplaysFrameRejectedBeforeDelivery() async throws {
+        let transport = RejectingWritePluginHostTransport(rejectionsBeforeSuccess: 1)
+        let client = ISHPluginHostClient(
+            transport: transport,
+            requestTimeout: .seconds(2),
+            rejectedWriteBackoff: []
+        )
+
+        try await client.start()
+        let ping = try await client.ping()
+        let diagnostics = await client.diagnostics()
+
+        XCTAssertEqual(ping.hostVersion, "retry-host")
+        XCTAssertEqual(diagnostics.rejectedWriteCount, 1)
+        XCTAssertEqual(diagnostics.automaticRestartCount, 1)
+        XCTAssertEqual(diagnostics.state, .running(pid: 73))
+        let startCount = await transport.startCount
+        XCTAssertEqual(startCount, 2)
+        let writeCount = await transport.writeCount
+        XCTAssertEqual(writeCount, 2)
+        await client.stop()
+    }
+
+    func testClientSerializesConcurrentWrites() async throws {
+        let transport = SerializingProbePluginHostTransport()
+        let client = ISHPluginHostClient(transport: transport, requestTimeout: .seconds(3))
+        try await client.start()
+
+        async let first = client.request(method: .ping)
+        async let second = client.request(method: .ping)
+        async let third = client.request(method: .ping)
+        _ = try await (first, second, third)
+
+        let maxConcurrentWrites = await transport.maxConcurrentWrites
+        let requestIDs = await transport.requestIDs
+        XCTAssertEqual(maxConcurrentWrites, 1)
+        XCTAssertEqual(requestIDs, ["1", "2", "3"])
         await client.stop()
     }
 
@@ -700,6 +828,93 @@ final class ISHPluginHostTests: XCTestCase {
         await client.stop()
     }
 
+    func testHostCommandsMergeExecuteAndWithdrawThroughNativeRegistry() async throws {
+        let transport = FakePluginHostTransport { request in
+            XCTAssertEqual(request.method, .commandExecute)
+            let rawInput = request.params.objectValue?["rawInput"]?.stringValue ?? ""
+            return ISHPluginHostRPCResponse(
+                jsonrpc: "2.0",
+                id: request.id,
+                result: .object([
+                    "ok": .bool(true),
+                    "value": .object([
+                        "kind": .string("success"),
+                        "text": .string("host:\(rawInput)")
+                    ])
+                ]),
+                error: nil
+            )
+        }
+        let client = ISHPluginHostClient(transport: transport, requestTimeout: .seconds(2))
+        try await client.start()
+
+        let commands = SlashCommandRegistry(includeBuiltIns: false)
+        let native = try SlashCommandDefinition(
+            name: "phone_echo",
+            description: "Native fallback"
+        ) { _ in
+            .success(text: "native")
+        }
+        _ = try await commands.register(native, origin: .native)
+
+        let runtime = CordisPluginRuntime()
+        let services = CordisAgentServices()
+        _ = try await runtime.install(services.pluginDefinition())
+        let contributions = ISHPluginHostContributions(
+            revision: 7,
+            scope: "session",
+            tools: [],
+            commands: [
+                ISHPluginHostCommandContribution(
+                    name: "phone_echo",
+                    description: "Host-scoped echo",
+                    input: .init(hint: "<text>", images: false),
+                    recordInput: false
+                )
+            ],
+            prompt: ISHPluginHostPromptContributions(
+                sections: [],
+                contexts: [],
+                variables: [:]
+            )
+        )
+        _ = try await runtime.install(
+            ISHPluginHostCordisBridge.definition(
+                contributions: contributions,
+                sessionID: "session-1",
+                client: client,
+                commandRegistry: commands
+            )
+        )
+
+        let hostedDescriptor = await commands.descriptor(
+            named: "phone_echo",
+            scope: "session-1"
+        )
+        XCTAssertEqual(hostedDescriptor?.description, "Host-scoped echo")
+        guard case let .prepared(prepared) = await commands.prepare(
+            "/phone_echo hello",
+            scope: "session-1"
+        ) else {
+            return XCTFail("Expected Host command to resolve")
+        }
+        let hosted = await commands.execute(prepared)
+        XCTAssertEqual(hosted.result.kind, .success)
+        XCTAssertEqual(hosted.result.text, "host: hello")
+        XCTAssertFalse(hosted.recordInput)
+
+        _ = try await runtime.uninstall(ISHPluginHostCordisBridge.pluginID)
+        guard case let .prepared(fallback) = await commands.prepare(
+            "/phone_echo",
+            scope: "session-1"
+        ) else {
+            return XCTFail("Expected native command to be revealed after Host withdrawal")
+        }
+        let nativeExecution = await commands.execute(fallback)
+        XCTAssertEqual(nativeExecution.result.text, "native")
+        await client.stop()
+    }
+
     func testDynamicBridgeRegistersHandlerAndMemoryServiceCheckpoints() async throws {
         let recorder = ISHInvocationRecorder()
         let transport = FakePluginHostTransport { request in
@@ -714,6 +929,11 @@ final class ISHPluginHostTests: XCTestCase {
                 value = .object([
                     "kind": .string("enter"),
                     "messages": .array([])
+                ])
+            case "agent/inbox/pre-claim":
+                value = .object([
+                    "kind": .string("rewrite"),
+                    "text": .string("host rewritten")
                 ])
             default:
                 value = .object(["kind": .string("next")])
@@ -753,6 +973,11 @@ final class ISHPluginHostTests: XCTestCase {
                     pluginId: "dynamic-plugin",
                     pluginRunId: "run-1",
                     method: "agent/turn-stopping"
+                ),
+                ISHPluginHostHandlerContribution(
+                    pluginId: "dynamic-plugin",
+                    pluginRunId: "run-1",
+                    method: "agent/inbox/pre-claim"
                 )
             ],
             services: [
@@ -789,6 +1014,30 @@ final class ISHPluginHostTests: XCTestCase {
         }
         XCTAssertEqual(preStep, .enter([]))
 
+        let pending = try QueuedAgentInput(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000711")!,
+            text: "original",
+            disposition: .queued,
+            createdAt: Date(timeIntervalSince1970: 123)
+        )
+        let inboxDecision = try await runtime.run(
+            CordisAgentLoopCheckpoints.inboxPreClaim,
+            input: CordisAgentInboxPreClaimContext(
+                agentID: agentID,
+                runID: runID,
+                turn: 2,
+                step: 0,
+                boundary: .turnStopping,
+                message: pending,
+                source: "user",
+                workspaceBoundary: "/workspace/session-1"
+            ),
+            target: .agent(agentID)
+        ) {
+            .claim(text: pending.text)
+        }
+        XCTAssertEqual(inboxDecision, .claim(text: "host rewritten"))
+
         let memoryRecall = try await runtime.run(
             CordisAgentLoopCheckpoints.memoryRecall,
             input: CordisAgentPreStepContext(
@@ -821,6 +1070,7 @@ final class ISHPluginHostTests: XCTestCase {
             target: .agent(agentID)
         )
         XCTAssertTrue(recorder.contains("agent/pre-step"))
+        XCTAssertTrue(recorder.contains("agent/inbox/pre-claim"))
         XCTAssertTrue(recorder.contains("agent/turn-stopping"))
         XCTAssertTrue(recorder.contains("memory/recall"))
         XCTAssertTrue(recorder.contains("memory/record"))
@@ -832,6 +1082,105 @@ final class ISHPluginHostTests: XCTestCase {
         )
         XCTAssertEqual(turnStopping["agentId"]?.stringValue, agentID.uuidString.lowercased())
         XCTAssertEqual(turnStopping["turn"], .number(2))
+        let inbox = try XCTUnwrap(
+            recorder.arguments(for: "agent/inbox/pre-claim")?.objectValue
+        )
+        XCTAssertEqual(inbox["boundary"], .string("next-turn"))
+        XCTAssertEqual(inbox["workspaceBoundary"], .string("/workspace/session-1"))
+        XCTAssertEqual(
+            inbox["message"]?.objectValue?["id"],
+            .string(pending.id.uuidString.lowercased())
+        )
+        XCTAssertEqual(inbox["message"]?.objectValue?["source"], .string("user"))
+        await client.stop()
+    }
+
+    func testDynamicInboxPreClaimFailsOpenOnHostFailureAndUnsafeMutations() async throws {
+        let invocation = ISHInvocationRecorder()
+        let transport = FakePluginHostTransport { request in
+            let arguments = request.params.objectValue?["arguments"] ?? .null
+            invocation.record("attempt", arguments: arguments)
+            let attempt = invocation.count(for: "attempt")
+            if attempt == 3 {
+                return ISHPluginHostRPCResponse(
+                    jsonrpc: "2.0",
+                    id: request.id,
+                    result: .object([
+                        "ok": .bool(false),
+                        "message": .string("host unavailable")
+                    ]),
+                    error: nil
+                )
+            }
+            let value: JSONValue
+            if attempt == 2 {
+                value = .object([
+                    "kind": .string("rewrite"),
+                    "text": .string("must not apply"),
+                    "messageId": .string(UUID().uuidString.lowercased())
+                ])
+            } else {
+                value = .object([
+                    "kind": .string("rewrite"),
+                    "text": .string("must not apply"),
+                    "workspaceBoundary": .string("/other-workspace")
+                ])
+            }
+            return ISHPluginHostRPCResponse(
+                jsonrpc: "2.0",
+                id: request.id,
+                result: .object([
+                    "ok": .bool(true),
+                    "value": value
+                ]),
+                error: nil
+            )
+        }
+        let client = ISHPluginHostClient(transport: transport, requestTimeout: .seconds(2))
+        try await client.start()
+        let runtime = CordisPluginRuntime()
+        let contributions = ISHPluginHostContributions(
+            revision: 1,
+            scope: "session",
+            tools: [],
+            prompt: ISHPluginHostPromptContributions(sections: [], contexts: [], variables: [:]),
+            handlers: [ISHPluginHostHandlerContribution(
+                pluginId: "inbox-guard",
+                pluginRunId: "run-1",
+                method: "agent/inbox/pre-claim"
+            )],
+            services: []
+        )
+        _ = try await runtime.install(
+            ISHPluginHostCordisBridge.definition(
+                contributions: contributions,
+                sessionID: "session-1",
+                client: client
+            )
+        )
+        let agentID = UUID()
+        let pending = try QueuedAgentInput(text: "unchanged")
+        let input = CordisAgentInboxPreClaimContext(
+            agentID: agentID,
+            runID: UUID(),
+            turn: 2,
+            step: 0,
+            boundary: .turnStopping,
+            message: pending,
+            source: "user",
+            workspaceBoundary: "/workspace/session-1"
+        )
+
+        for _ in 0..<3 {
+            let decision = try await runtime.run(
+                CordisAgentLoopCheckpoints.inboxPreClaim,
+                input: input,
+                target: .agent(agentID)
+            ) {
+                .claim(text: pending.text)
+            }
+            XCTAssertEqual(decision, .claim(text: "unchanged"))
+        }
         await client.stop()
     }
 
@@ -1001,10 +1350,12 @@ private final class ISHInvocationRecorder: @unchecked Sendable {
     private let lock = NSLock()
     private var checkpoints: Set<String> = []
     private var payloads: [String: JSONValue] = [:]
+    private var counts: [String: Int] = [:]
 
     func record(_ checkpoint: String, arguments: JSONValue? = nil) {
         lock.lock()
         checkpoints.insert(checkpoint)
+        counts[checkpoint, default: 0] += 1
         if let arguments {
             payloads[checkpoint] = arguments
         }
@@ -1021,6 +1372,12 @@ private final class ISHInvocationRecorder: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return payloads[checkpoint]
+    }
+
+    func count(for checkpoint: String) -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return counts[checkpoint, default: 0]
     }
 }
 
@@ -1085,5 +1442,114 @@ private actor FakePluginHostTransport: ISHPluginHostTransport {
         exit?(ISHPluginHostTransportExit(exitCode: 0, errorCode: 0))
         stdout = nil
         exit = nil
+    }
+}
+
+private actor RejectingWritePluginHostTransport: ISHPluginHostTransport {
+    private let rejectionsBeforeSuccess: Int
+    private var stdout: (@Sendable (Data) -> Void)?
+    private(set) var writeCount = 0
+    private(set) var startCount = 0
+    private(set) var wasStopped = false
+    private(set) var events: [String] = []
+
+    init(rejectionsBeforeSuccess: Int) {
+        self.rejectionsBeforeSuccess = rejectionsBeforeSuccess
+    }
+
+    func start(
+        onStdout: @escaping @Sendable (Data) -> Void,
+        onStderr: @escaping @Sendable (Data) -> Void,
+        onExit: @escaping @Sendable (ISHPluginHostTransportExit) -> Void
+    ) async throws -> Int32 {
+        startCount += 1
+        events.append("start")
+        stdout = onStdout
+        _ = onStderr
+        _ = onExit
+        wasStopped = false
+        return 73
+    }
+
+    func write(_ data: Data) async throws {
+        writeCount += 1
+        events.append("write")
+        guard writeCount > rejectionsBeforeSuccess else {
+            throw ISHPluginHostError.transportRejectedWrite
+        }
+        var line = data
+        if line.last == 0x0A {
+            line.removeLast()
+        }
+        let request = try JSONDecoder().decode(ISHPluginHostRPCRequest.self, from: line)
+        var response = try JSONEncoder().encode(
+            ISHPluginHostRPCResponse(
+                jsonrpc: "2.0",
+                id: request.id,
+                result: .object([
+                    "protocolVersion": .number(1),
+                    "hostVersion": .string("retry-host"),
+                    "runtime": .string("test"),
+                    "dynamicDefinitionLifetime": .string("process-memory-only"),
+                    "credentialBoundary": .string("test"),
+                    "packages": .object([:]),
+                    "capabilities": .array(ISHPluginHostRPCMethod.allCases.map { .string($0.rawValue) })
+                ]),
+                error: nil
+            )
+        )
+        response.append(0x0A)
+        stdout?(response)
+    }
+
+    func stop() async {
+        wasStopped = true
+        events.append("stop")
+        stdout = nil
+    }
+}
+
+private actor SerializingProbePluginHostTransport: ISHPluginHostTransport {
+    private var stdout: (@Sendable (Data) -> Void)?
+    private(set) var maxConcurrentWrites = 0
+    private(set) var requestIDs: [String] = []
+    private var activeWrites = 0
+
+    func start(
+        onStdout: @escaping @Sendable (Data) -> Void,
+        onStderr: @escaping @Sendable (Data) -> Void,
+        onExit: @escaping @Sendable (ISHPluginHostTransportExit) -> Void
+    ) async throws -> Int32 {
+        stdout = onStdout
+        _ = onStderr
+        _ = onExit
+        return 91
+    }
+
+    func write(_ data: Data) async throws {
+        var line = data
+        if line.last == 0x0A {
+            line.removeLast()
+        }
+        let request = try JSONDecoder().decode(ISHPluginHostRPCRequest.self, from: line)
+        activeWrites += 1
+        maxConcurrentWrites = max(maxConcurrentWrites, activeWrites)
+        requestIDs.append(request.id)
+        try? await Task.sleep(for: .milliseconds(20))
+        var response = try JSONEncoder().encode(
+            ISHPluginHostRPCResponse(
+                jsonrpc: "2.0",
+                id: request.id,
+                result: .object(["id": .string(request.id)]),
+                error: nil
+            )
+        )
+        response.append(0x0A)
+        stdout?(response)
+        activeWrites -= 1
+    }
+
+    func stop() async {
+        stdout = nil
     }
 }

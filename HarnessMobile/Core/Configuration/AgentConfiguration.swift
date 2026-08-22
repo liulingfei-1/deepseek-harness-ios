@@ -9,9 +9,13 @@ struct AgentConfiguration: Codable, Sendable, Equatable {
     var credentialReference: CredentialReference?
     var baseURL: String = defaultBaseURL
     var model: String = defaultModel
+    var inputModalities: [ModelInputModality]?
     var reasoningMode: ReasoningMode = .high
+    var openAIWireProfile: OpenAICompatibleWireProfile?
+    var openAICompatibility: OpenAICompletionsCompatibility?
+    var retryPolicy: ProviderRetryPolicyConfiguration?
     var maxSteps: Int = 8
-    var maxOutputTokens: Int = 4_096
+    var maxOutputTokens: Int = 8_192
 
     init(
         providerID: ModelProviderID = .deepSeekOfficial,
@@ -19,16 +23,24 @@ struct AgentConfiguration: Codable, Sendable, Equatable {
         credentialReference: CredentialReference? = nil,
         baseURL: String = defaultBaseURL,
         model: String = defaultModel,
+        inputModalities: [ModelInputModality]? = nil,
         reasoningMode: ReasoningMode = .high,
+        openAIWireProfile: OpenAICompatibleWireProfile? = nil,
+        openAICompatibility: OpenAICompletionsCompatibility? = nil,
+        retryPolicy: ProviderRetryPolicyConfiguration? = nil,
         maxSteps: Int = 8,
-        maxOutputTokens: Int = 4_096
+        maxOutputTokens: Int = 8_192
     ) {
         self.providerID = providerID
         self.profileID = profileID
         self.credentialReference = credentialReference
         self.baseURL = baseURL
         self.model = model
+        self.inputModalities = inputModalities
         self.reasoningMode = reasoningMode
+        self.openAIWireProfile = openAIWireProfile
+        self.openAICompatibility = openAICompatibility
+        self.retryPolicy = retryPolicy
         self.maxSteps = maxSteps
         self.maxOutputTokens = maxOutputTokens
     }
@@ -39,7 +51,11 @@ struct AgentConfiguration: Codable, Sendable, Equatable {
         case credentialReference
         case baseURL
         case model
+        case inputModalities
         case reasoningMode
+        case openAIWireProfile
+        case openAICompatibility
+        case retryPolicy
         case maxSteps
         case maxOutputTokens
     }
@@ -50,11 +66,27 @@ struct AgentConfiguration: Codable, Sendable, Equatable {
             ?? Self.defaultBaseURL
         model = try container.decodeIfPresent(String.self, forKey: .model)
             ?? Self.defaultModel
+        inputModalities = try container.decodeIfPresent(
+            [ModelInputModality].self,
+            forKey: .inputModalities
+        )
         reasoningMode = try container.decodeIfPresent(ReasoningMode.self, forKey: .reasoningMode)
             ?? .high
+        openAIWireProfile = try container.decodeIfPresent(
+            OpenAICompatibleWireProfile.self,
+            forKey: .openAIWireProfile
+        )
+        openAICompatibility = try container.decodeIfPresent(
+            OpenAICompletionsCompatibility.self,
+            forKey: .openAICompatibility
+        )
+        retryPolicy = try container.decodeIfPresent(
+            ProviderRetryPolicyConfiguration.self,
+            forKey: .retryPolicy
+        )
         maxSteps = try container.decodeIfPresent(Int.self, forKey: .maxSteps) ?? 8
         maxOutputTokens = try container.decodeIfPresent(Int.self, forKey: .maxOutputTokens)
-            ?? 4_096
+            ?? 8_192
         profileID = try container.decodeIfPresent(String.self, forKey: .profileID)
         credentialReference = try container.decodeIfPresent(
             CredentialReference.self,
@@ -134,11 +166,25 @@ struct AgentConfiguration: Codable, Sendable, Equatable {
         guard !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw AgentConfigurationError.emptyModel
         }
+        if let inputModalities {
+            guard !inputModalities.isEmpty,
+                  inputModalities.contains(.text),
+                  Set(inputModalities).count == inputModalities.count else {
+                throw AgentConfigurationError.invalidInputModalities
+            }
+        }
         guard (128...65_536).contains(maxOutputTokens) else {
             throw AgentConfigurationError.invalidMaxOutputTokens
         }
         guard ReasoningMode.supportedModes(for: providerID).contains(reasoningMode) else {
             throw AgentConfigurationError.unsupportedReasoningMode(providerID, reasoningMode)
+        }
+        if ModelProviderCatalog.descriptor(for: providerID).wireProtocol != .openAIChatCompletions,
+           (openAIWireProfile != nil || openAICompatibility != nil) {
+            throw AgentConfigurationError.unsupportedWireCompatibility(providerID)
+        }
+        if let retryPolicy {
+            _ = try ModelRetryPolicy.resolved(retryPolicy)
         }
         return self
     }
@@ -159,7 +205,7 @@ struct AgentConfiguration: Codable, Sendable, Equatable {
     }
 
     var requiresDeepSeekReasoningReplay: Bool {
-        guard reasoningMode == .high || reasoningMode == .max,
+        guard reasoningMode == .low || reasoningMode == .high || reasoningMode == .max,
               let host = try? chatCompletionsURL().host?.lowercased() else {
             return false
         }
@@ -170,6 +216,7 @@ struct AgentConfiguration: Codable, Sendable, Equatable {
 enum ReasoningMode: String, Codable, CaseIterable, Sendable, Identifiable {
     case providerDefault
     case off
+    case low
     case high
     case max
 
@@ -181,6 +228,8 @@ enum ReasoningMode: String, Codable, CaseIterable, Sendable, Identifiable {
             return "服务默认"
         case .off:
             return "关闭"
+        case .low:
+            return "Low"
         case .high:
             return "High"
         case .max:
@@ -203,10 +252,12 @@ enum ReasoningMode: String, Codable, CaseIterable, Sendable, Identifiable {
 enum AgentConfigurationError: LocalizedError, Sendable {
     case invalidHTTPSURL
     case emptyModel
+    case invalidInputModalities
     case invalidMaxOutputTokens
     case unsupportedProviderWire(ModelProviderID)
     case unsupportedModelDiscovery(ModelProviderID)
     case unsupportedReasoningMode(ModelProviderID, ReasoningMode)
+    case unsupportedWireCompatibility(ModelProviderID)
 
     var errorDescription: String? {
         switch self {
@@ -214,6 +265,8 @@ enum AgentConfigurationError: LocalizedError, Sendable {
             return "API 地址必须是有效的 HTTPS URL。"
         case .emptyModel:
             return "模型名称不能为空。"
+        case .invalidInputModalities:
+            return "模型输入类型必须包含 text，且不能包含重复项。"
         case .invalidMaxOutputTokens:
             return "最大输出 Token 必须在 128 到 65536 之间。"
         case let .unsupportedProviderWire(providerID):
@@ -226,6 +279,9 @@ enum AgentConfigurationError: LocalizedError, Sendable {
         case let .unsupportedReasoningMode(providerID, mode):
             let provider = ModelProviderCatalog.descriptor(for: providerID)
             return "\(provider.displayName) 当前不能使用 \(mode.title) 思考模式；请选“服务默认”或“关闭”。"
+        case let .unsupportedWireCompatibility(providerID):
+            let provider = ModelProviderCatalog.descriptor(for: providerID)
+            return "\(provider.displayName) 不使用 OpenAI Chat Completions 兼容配置。"
         }
     }
 }

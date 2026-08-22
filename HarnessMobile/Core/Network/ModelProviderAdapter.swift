@@ -1,12 +1,42 @@
 import Foundation
 
+enum ModelProviderStreamingDialect: String, Sendable, Equatable {
+    case deepSeekChatCompletions
+    case openAIChatCompletions
+    case anthropicMessages
+}
+
 protocol ModelProviderAdapter: Sendable {
     var wireProtocol: ModelProviderWireProtocol { get }
+    var streamingDialect: ModelProviderStreamingDialect { get }
     var modelListSchemaVersion: Int { get }
 
     func chatCompletionsURL(for configuration: AgentConfiguration) throws -> URL
     func modelListURL(for configuration: AgentConfiguration) throws -> URL
     func decodeModelList(_ data: Data) throws -> [ProviderModel]
+    func makeStreamingRequest(_ request: ModelRequest) throws -> URLRequest
+    func httpFailureCode(
+        status: Int,
+        errorCode: String?,
+        errorType: String?,
+        message: String
+    ) -> String?
+    func requestID(from response: HTTPURLResponse) -> String?
+}
+
+extension ModelProviderAdapter {
+    func httpFailureCode(
+        status: Int,
+        errorCode: String?,
+        errorType: String?,
+        message: String
+    ) -> String? {
+        errorCode ?? errorType
+    }
+
+    func requestID(from response: HTTPURLResponse) -> String? {
+        response.value(forHTTPHeaderField: "X-Request-ID")
+    }
 }
 
 enum ModelProviderAdapterRegistry {
@@ -15,17 +45,24 @@ enum ModelProviderAdapterRegistry {
         guard descriptor.supportsCurrentInferenceWire else {
             throw AgentConfigurationError.unsupportedProviderWire(providerID)
         }
-        switch descriptor.wireProtocol {
-        case .openAIChatCompletions:
+        switch providerID {
+        case .deepSeekOfficial:
+            return DeepSeekChatCompletionsAdapter()
+        case .openAI, .openRouter, .customOpenAICompatible:
             return OpenAIChatCompletionsAdapter()
-        case .anthropicMessages:
+        case .anthropic:
             return AnthropicMessagesAdapter()
         }
     }
 }
 
-struct OpenAIChatCompletionsAdapter: ModelProviderAdapter {
+/// The official DeepSeek route owns its Files API and reasoning dialect even
+/// though its transport envelope is chat/completions. Keeping a distinct
+/// adapter prevents provider-only behavior from leaking into generic OpenAI
+/// gateways.
+struct DeepSeekChatCompletionsAdapter: ModelProviderAdapter {
     let wireProtocol = ModelProviderWireProtocol.openAIChatCompletions
+    let streamingDialect = ModelProviderStreamingDialect.deepSeekChatCompletions
     let modelListSchemaVersion = 1
 
     func chatCompletionsURL(for configuration: AgentConfiguration) throws -> URL {
@@ -40,6 +77,74 @@ struct OpenAIChatCompletionsAdapter: ModelProviderAdapter {
     }
 
     func decodeModelList(_ data: Data) throws -> [ProviderModel] {
+        try OpenAIChatCompletionsAdapter.decodeOpenAIModelList(data)
+    }
+
+    func makeStreamingRequest(_ request: ModelRequest) throws -> URLRequest {
+        try OpenAIChatCompletionsRequestBuilder.make(request)
+    }
+
+    func httpFailureCode(
+        status: Int,
+        errorCode: String?,
+        errorType: String?,
+        message: String
+    ) -> String? {
+        if status == 401 || status == 403 { return "AUTH" }
+        if status == 413 { return "INVALID_REQUEST" }
+        let detail = [errorCode, errorType, message]
+            .compactMap { $0?.lowercased() }
+            .joined(separator: " ")
+        if status == 429 { return "RATE_LIMIT" }
+        if status == 400 {
+            if Self.isContextWindowFailure(detail) {
+                return ModelRetryPolicy.contextWindowExceededCode
+            }
+            return "INVALID_REQUEST"
+        }
+        if status >= 500 { return "SERVER" }
+        return "HTTP_\(status)"
+    }
+
+    func requestID(from response: HTTPURLResponse) -> String? {
+        response.value(forHTTPHeaderField: "X-Request-ID")
+            ?? response.value(forHTTPHeaderField: "X-DeepSeek-Request-ID")
+    }
+
+    private static func isContextWindowFailure(_ value: String) -> Bool {
+        value.contains("context_length_exceeded")
+            || value.contains("context window")
+            || value.contains("maximum context")
+            || value.contains("too many tokens")
+            || value.contains("request too large for model context")
+    }
+}
+
+struct OpenAIChatCompletionsAdapter: ModelProviderAdapter {
+    let wireProtocol = ModelProviderWireProtocol.openAIChatCompletions
+    let streamingDialect = ModelProviderStreamingDialect.openAIChatCompletions
+    let modelListSchemaVersion = 1
+
+    func chatCompletionsURL(for configuration: AgentConfiguration) throws -> URL {
+        try configuration.apiEndpointURL(appending: "chat/completions")
+    }
+
+    func modelListURL(for configuration: AgentConfiguration) throws -> URL {
+        try configuration.apiEndpointURL(
+            appending: "models",
+            replacingTrailingPath: "chat/completions"
+        )
+    }
+
+    func decodeModelList(_ data: Data) throws -> [ProviderModel] {
+        try Self.decodeOpenAIModelList(data)
+    }
+
+    func makeStreamingRequest(_ request: ModelRequest) throws -> URLRequest {
+        try OpenAIChatCompletionsRequestBuilder.make(request)
+    }
+
+    fileprivate static func decodeOpenAIModelList(_ data: Data) throws -> [ProviderModel] {
         let envelope: OpenAIModelListEnvelope
         do {
             envelope = try JSONDecoder().decode(OpenAIModelListEnvelope.self, from: data)
@@ -71,6 +176,9 @@ struct OpenAIChatCompletionsAdapter: ModelProviderAdapter {
                     maxOutputTokens: Self.positiveCapacity(
                         item.maxOutputTokens,
                         item.maxTokens
+                    ),
+                    inputModalities: Self.validatedInputModalities(
+                        item.inputModalities ?? item.input
                     )
                 )
             )
@@ -93,10 +201,39 @@ struct OpenAIChatCompletionsAdapter: ModelProviderAdapter {
     private static func positiveCapacity(_ candidates: Int?...) -> Int? {
         candidates.compactMap { $0 }.first(where: { $0 > 0 })
     }
+
+    /// A model name is not a capability declaration. Unknown or incomplete
+    /// modality lists stay text-only so the Agent cannot accidentally send
+    /// private images to a route that never advertised image input.
+    static func validatedInputModalities(_ rawValues: [String]?) -> [ModelInputModality] {
+        guard let rawValues, !rawValues.isEmpty else { return [.text] }
+        let normalized = rawValues.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        guard normalized.allSatisfy({ ModelInputModality(rawValue: $0) != nil }) else {
+            return [.text]
+        }
+        let values = normalized.compactMap(ModelInputModality.init(rawValue:))
+        guard values.contains(.text), Set(values).count == values.count else {
+            return [.text]
+        }
+        return values
+    }
+}
+
+private enum OpenAIChatCompletionsRequestBuilder {
+    static func make(_ request: ModelRequest) throws -> URLRequest {
+        var urlRequest = URLRequest(url: try request.configuration.chatCompletionsURL())
+        urlRequest.httpMethod = "POST"
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        urlRequest.setValue("Bearer \(request.apiKey)", forHTTPHeaderField: "Authorization")
+        urlRequest.httpBody = try OpenAICompatibleWireSerializer.encode(request)
+        return urlRequest
+    }
 }
 
 struct AnthropicMessagesAdapter: ModelProviderAdapter {
     let wireProtocol = ModelProviderWireProtocol.anthropicMessages
+    let streamingDialect = ModelProviderStreamingDialect.anthropicMessages
     let modelListSchemaVersion = 1
 
     func chatCompletionsURL(for configuration: AgentConfiguration) throws -> URL {
@@ -109,6 +246,36 @@ struct AnthropicMessagesAdapter: ModelProviderAdapter {
 
     func decodeModelList(_ data: Data) throws -> [ProviderModel] {
         throw ModelDiscoveryError.unsupportedProvider(.anthropic)
+    }
+
+    func makeStreamingRequest(_ request: ModelRequest) throws -> URLRequest {
+        var urlRequest = URLRequest(url: try request.configuration.chatCompletionsURL())
+        urlRequest.httpMethod = "POST"
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        urlRequest.setValue(request.apiKey, forHTTPHeaderField: "x-api-key")
+        urlRequest.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        urlRequest.httpBody = try AnthropicWireSerializer.encodeRequest(request)
+        return urlRequest
+    }
+
+    func httpFailureCode(
+        status: Int,
+        errorCode: String?,
+        errorType: String?,
+        message: String
+    ) -> String? {
+        if let errorType, !errorType.isEmpty { return errorType }
+        if let errorCode, !errorCode.isEmpty { return errorCode }
+        if status == 401 || status == 403 { return "AUTH" }
+        if status == 429 { return "RATE_LIMIT" }
+        if status >= 500 { return "SERVER" }
+        return "HTTP_\(status)"
+    }
+
+    func requestID(from response: HTTPURLResponse) -> String? {
+        response.value(forHTTPHeaderField: "request-id")
+            ?? response.value(forHTTPHeaderField: "X-Request-ID")
     }
 }
 
@@ -132,6 +299,8 @@ private struct OpenAIModelListItem: Decodable {
     let contextLength: Int?
     let maxTokens: Int?
     let maxOutputTokens: Int?
+    let inputModalities: [String]?
+    let input: [String]?
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -141,6 +310,8 @@ private struct OpenAIModelListItem: Decodable {
         case contextLength = "context_length"
         case maxTokens = "max_tokens"
         case maxOutputTokens = "max_output_tokens"
+        case inputModalities = "input_modalities"
+        case input
     }
 
     init(from decoder: Decoder) throws {
@@ -152,5 +323,7 @@ private struct OpenAIModelListItem: Decodable {
         contextLength = try? container.decode(Int.self, forKey: .contextLength)
         maxTokens = try? container.decode(Int.self, forKey: .maxTokens)
         maxOutputTokens = try? container.decode(Int.self, forKey: .maxOutputTokens)
+        inputModalities = try? container.decode([String].self, forKey: .inputModalities)
+        input = try? container.decode([String].self, forKey: .input)
     }
 }

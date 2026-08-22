@@ -81,6 +81,7 @@ struct HarnessTraceTokenUsage: Codable, Sendable, Equatable {
     let completionTokens: Int
     let totalTokens: Int
     let cachedPromptTokens: Int?
+    let uncachedPromptTokens: Int?
     let reasoningTokens: Int?
 
     init(_ usage: ModelTokenUsage) {
@@ -88,6 +89,7 @@ struct HarnessTraceTokenUsage: Codable, Sendable, Equatable {
         completionTokens = usage.completionTokens
         totalTokens = usage.totalTokens
         cachedPromptTokens = usage.cachedPromptTokens
+        uncachedPromptTokens = usage.uncachedPromptTokens
         reasoningTokens = usage.reasoningTokens
     }
 }
@@ -388,13 +390,13 @@ struct HarnessDiagnosticReportInput: Sendable {
 }
 
 enum HarnessDiagnosticReportBuilder {
-    private static let maximumTraceRows = 1_200
-    private static let maximumTraceUTF8Bytes = 1_500 * 1_024
-    private static let maximumSessionRows = 4_000
-    private static let maximumSessionUTF8Bytes = 2_500 * 1_024
+    private static let maximumTraceRows = 800
+    private static let maximumTraceUTF8Bytes = 384 * 1_024
+    private static let maximumSessionRows = 1_600
+    private static let maximumSessionUTF8Bytes = 512 * 1_024
 
     static func build(_ input: HarnessDiagnosticReportInput) throws -> Data {
-        var report = "Harness Mobile Diagnostic Log\n"
+        var report = "DeepSeek Harness Mobile Diagnostic Log\n"
         report += "Format: harness-mobile-diagnostics-v2\n"
         report += "Credentials: redacted; model API keys are never recorded\n\n"
 
@@ -446,7 +448,7 @@ enum HarnessDiagnosticReportBuilder {
                 maximumRows: maximumTraceRows,
                 maximumUTF8Bytes: maximumTraceUTF8Bytes,
                 filteredCount: 0,
-                transform: { $0 }
+                transform: DiagnosticHarnessTraceEvent.init
             )
         }
 
@@ -571,10 +573,95 @@ private struct DiagnosticSessionEvent: Encodable {
         type = event.type
         seq = event.seq
         time = event.time
-        data = HarnessTraceRedactor.json(event.data, maximumDepth: 20)
+        data = DiagnosticJSONProjection.compact(event.data)
         ignorable = event.ignorable
         sourceEventSeqs = event.sourceEventSeqs
         surfaceOp = event.surfaceOp
+    }
+}
+
+/// Diagnostics need causal metadata and error detail, not repeated copies of
+/// complete prompts, fetched web pages, or plugin source snapshots. The live
+/// trajectory remains lossless; only the exported projection is compacted.
+private struct DiagnosticHarnessTraceEvent: Encodable {
+    let id: UUID
+    let sequence: UInt64
+    let kind: HarnessTraceEventKind
+    let timestamp: Date
+    let runID: UUID?
+    let turn: Int?
+    let step: Int?
+    let callID: String?
+    let pluginID: String?
+    let name: String?
+    let durationMilliseconds: Double?
+    let attributes: JSONValue
+    let payload: JSONValue?
+    let error: String?
+
+    init(_ event: HarnessTraceEvent) {
+        id = event.id
+        sequence = event.sequence
+        kind = event.kind
+        timestamp = event.timestamp
+        runID = event.runID
+        turn = event.turn
+        step = event.step
+        callID = event.callID
+        pluginID = event.pluginID
+        name = event.name
+        durationMilliseconds = event.durationMilliseconds
+        attributes = DiagnosticJSONProjection.compact(.object(event.attributes))
+        payload = event.payload.flatMap(DiagnosticJSONProjection.encodeAndCompact)
+        error = event.error.map {
+            HarnessTraceRedactor.string($0, maximumUTF8Bytes: 8 * 1_024)
+        }
+    }
+}
+
+private enum DiagnosticJSONProjection {
+    static func encodeAndCompact<T: Encodable>(_ value: T) -> JSONValue? {
+        guard let data = try? JSONEncoder().encode(value),
+              let json = try? JSONDecoder().decode(JSONValue.self, from: data) else {
+            return nil
+        }
+        return compact(json)
+    }
+
+    static func compact(
+        _ value: JSONValue,
+        depth: Int = 0,
+        maximumDepth: Int = 12
+    ) -> JSONValue {
+        guard depth < maximumDepth else { return .string("<depth-limit>") }
+        switch value {
+        case let .string(text):
+            return .string(HarnessTraceRedactor.string(text, maximumUTF8Bytes: 1_024))
+        case let .array(values):
+            var projected = values.prefix(12).map {
+                compact($0, depth: depth + 1, maximumDepth: maximumDepth)
+            }
+            if values.count > projected.count {
+                projected.append(.string("<\(values.count - projected.count) more items>"))
+            }
+            return .array(projected)
+        case let .object(object):
+            var projected: [String: JSONValue] = [:]
+            for key in object.keys.sorted().prefix(32) {
+                guard let child = object[key] else { continue }
+                projected[key] = compact(
+                    child,
+                    depth: depth + 1,
+                    maximumDepth: maximumDepth
+                )
+            }
+            if object.count > projected.count {
+                projected["<truncated>"] = .number(Double(object.count - projected.count))
+            }
+            return HarnessTraceRedactor.json(.object(projected), maximumDepth: maximumDepth)
+        case .number, .bool, .null:
+            return value
+        }
     }
 }
 
@@ -586,5 +673,106 @@ private struct TraceStepKey: Hashable {
         guard let turn = event.turn, let step = event.step else { return nil }
         self.turn = turn
         self.step = step
+    }
+}
+
+enum AgentDiagnosticsScope: String, Sendable, CaseIterable {
+    case summary
+    case errors
+    case pluginHost = "plugin_host"
+    case compilation
+    case trace
+    case session
+    case full
+}
+
+struct AgentDiagnosticsQuery: Sendable, Equatable {
+    let scope: AgentDiagnosticsScope
+    let limit: Int
+}
+
+typealias AgentDiagnosticsProvider = @Sendable (AgentDiagnosticsQuery) async throws -> JSONValue
+
+struct AgentDiagnosticsTool: LocalAgentTool {
+    let provider: AgentDiagnosticsProvider
+
+    init(
+        provider: @escaping AgentDiagnosticsProvider = { query in
+            .object([
+                "available": .bool(false),
+                "scope": .string(query.scope.rawValue),
+                "message": .string("The AppModel diagnostics provider is not mounted.")
+            ])
+        }
+    ) {
+        self.provider = provider
+    }
+
+    let definition = ModelToolDefinition(
+        name: "diagnostics_read",
+        description: "Read a bounded, credential-redacted diagnostic snapshot from this iPhone. Use it after an unexplained model, tool, plugin, native compilation, background, or Plugin Host failure before attempting a repair.",
+        parameters: .object([
+            "type": .string("object"),
+            "properties": .object([
+                "scope": .object([
+                    "type": .string("string"),
+                    "enum": .array(AgentDiagnosticsScope.allCases.map {
+                        .string($0.rawValue)
+                    }),
+                    "description": .string("Diagnostic area. Use errors first for an unexplained failure, then inspect the matching subsystem.")
+                ]),
+                "limit": .object([
+                    "type": .string("integer"),
+                    "minimum": .number(1),
+                    "maximum": .number(32),
+                    "description": .string("Maximum recent rows returned for trace and session sections. Defaults to 32.")
+                ])
+            ]),
+            "additionalProperties": .bool(false)
+        ])
+    )
+    let risk: ToolRisk = .localState
+
+    func validate(arguments: [String: JSONValue]) throws {
+        try arguments.requireOnlyKeys(["scope", "limit"])
+        if let rawScope = arguments["scope"]?.stringValue,
+           AgentDiagnosticsScope(rawValue: rawScope) == nil {
+            throw LocalToolError.invalidArguments
+        }
+        if let value = arguments["limit"] {
+            guard case let .number(number) = value,
+                  number.isFinite,
+                  number.rounded(.towardZero) == number,
+                  number >= 1,
+                  number <= 32 else {
+                throw LocalToolError.invalidArguments
+            }
+        }
+    }
+
+    func summary(arguments: [String: JSONValue]) -> String {
+        let scope = arguments["scope"]?.stringValue ?? AgentDiagnosticsScope.summary.rawValue
+        return "读取本机脱敏诊断：\(scope)"
+    }
+
+    func isConcurrencySafe(arguments: [String: JSONValue]) throws -> Bool {
+        try validate(arguments: arguments)
+        return true
+    }
+
+    func execute(arguments: [String: JSONValue]) async throws -> String {
+        try validate(arguments: arguments)
+        let scope = arguments["scope"]?.stringValue
+            .flatMap(AgentDiagnosticsScope.init(rawValue:)) ?? .summary
+        let limit: Int
+        if case let .number(number)? = arguments["limit"] {
+            limit = Int(number)
+        } else {
+            limit = 32
+        }
+        let snapshot = try await provider(
+            AgentDiagnosticsQuery(scope: scope, limit: limit)
+        )
+        return HarnessTraceRedactor.json(snapshot, maximumDepth: 20).displayText
     }
 }

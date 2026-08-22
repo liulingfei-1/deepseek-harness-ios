@@ -4,14 +4,35 @@ struct ToolEventTreeView: View {
     let events: [AgentToolEvent]
     let isLive: Bool
 
+    @State private var showsAllEvents = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ForEach(events) { event in
+            if hiddenEventCount > 0 {
+                Button {
+                    showsAllEvents = true
+                } label: {
+                    Label("显示前面的 \(hiddenEventCount) 个工具调用", systemImage: "ellipsis")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+
+            ForEach(visibleEvents) { event in
                 ToolEventNodeView(event: event, isLive: isLive)
             }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(isLive ? "正在执行的工具" : "工具调用")
+    }
+
+    private var visibleEvents: ArraySlice<AgentToolEvent> {
+        showsAllEvents ? events[...] : events.suffix(isLive ? 5 : 4)
+    }
+
+    private var hiddenEventCount: Int {
+        showsAllEvents ? 0 : max(0, events.count - visibleEvents.count)
     }
 }
 
@@ -20,6 +41,7 @@ private struct ToolEventNodeView: View {
     let isLive: Bool
 
     @State private var selectedEvent: AgentToolEvent?
+    @State private var showsAllChildren = false
 
     var body: some View {
         let displayEvent = presentedEvent
@@ -30,7 +52,17 @@ private struct ToolEventNodeView: View {
 
             if !displayEvent.children.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    ForEach(displayEvent.children) { child in
+                    if hiddenChildCount > 0 {
+                        Button {
+                            showsAllChildren = true
+                        } label: {
+                            Text("显示前面的 \(hiddenChildCount) 个子工具")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    ForEach(visibleChildren) { child in
                         ToolEventNodeView(event: child, isLive: isLive)
                     }
                 }
@@ -58,9 +90,20 @@ private struct ToolEventNodeView: View {
         )
         return presented
     }
+
+    private var visibleChildren: ArraySlice<AgentToolEvent> {
+        showsAllChildren
+            ? presentedEvent.children[...]
+            : presentedEvent.children.suffix(3)
+    }
+
+    private var hiddenChildCount: Int {
+        showsAllChildren ? 0 : max(0, presentedEvent.children.count - visibleChildren.count)
+    }
 }
 
-private struct ToolEventCard: View {
+/// Shared compact tool row for durable events and legacy orphaned results.
+struct ToolEventCard: View {
     let event: AgentToolEvent
     let isLive: Bool
     let onInspect: () -> Void
@@ -337,6 +380,17 @@ enum ToolEventPresentation {
     static func title(for name: String) -> String {
         switch name {
         case "shell_execute": "iSH 终端"
+        case "run_code": "Code Mode"
+        case "code_execute": "本机代码"
+        case "read": "读取文件"
+        case "write": "写入文件"
+        case "edit": "编辑文件"
+        case "job_output": "后台任务输出"
+        case "job_list": "后台任务列表"
+        case "job_kill": "停止后台任务"
+        case "schedule_create": "创建定时任务"
+        case "schedule_list": "定时任务列表"
+        case "schedule_delete": "取消定时任务"
         case "workspace_list_files": "文件列表"
         case "workspace_read_text": "读取文件"
         case "workspace_write_text": "写入文件"
@@ -357,9 +411,8 @@ enum ToolEventPresentation {
         case "web_fetch": "网页读取"
         case "plugin_marketplace": "插件市场"
         case "cordis_inspect_list": "检查 Cordis 插件"
-        case "cordis_inspect_tools": "检查 Cordis 工具"
-        case "cordis_inspect_prompt": "检查 Cordis 提示词"
-        case "cordis_inspect_checkpoints": "检查 Cordis 检查点"
+        case "cordis_inspect_query": "查询 Cordis 能力"
+        case "cordis_inspect_self": "检查当前 Cordis 插件"
         case "cordis_define": "定义 Cordis 插件"
         case "cordis_run": "运行 Cordis 插件"
         case "cordis_stop": "停止 Cordis 插件"
@@ -371,6 +424,17 @@ enum ToolEventPresentation {
     static func icon(for name: String) -> String {
         switch name {
         case "shell_execute": "terminal"
+        case "run_code": "curlybraces.square"
+        case "code_execute": "chevron.left.forwardslash.chevron.right"
+        case "read": "doc.text.magnifyingglass"
+        case "write": "doc.badge.plus"
+        case "edit": "square.and.pencil"
+        case "job_output": "text.append"
+        case "job_list": "list.bullet.rectangle"
+        case "job_kill": "stop.circle"
+        case "schedule_create": "calendar.badge.plus"
+        case "schedule_list": "calendar"
+        case "schedule_delete": "calendar.badge.minus"
         case "workspace_list_files": "folder"
         case "workspace_read_text": "doc.text.magnifyingglass"
         case "workspace_write_text": "square.and.pencil"
@@ -390,7 +454,7 @@ enum ToolEventPresentation {
         case "ios_native": "apps.iphone"
         case "web_fetch": "network"
         case "plugin_marketplace": "puzzlepiece.extension"
-        case "cordis_inspect_list", "cordis_inspect_tools", "cordis_inspect_prompt", "cordis_inspect_checkpoints":
+        case "cordis_inspect_list", "cordis_inspect_query", "cordis_inspect_self":
             "point.3.connected.trianglepath.dotted"
         case "cordis_define": "plus.square.dashed"
         case "cordis_run": "play.circle"

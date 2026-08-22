@@ -58,7 +58,11 @@ extension ToolPermissionMode {
                 .ask
             }
         case .dangerFullAccess:
-            .allow
+            // Full access removes the routine write prompt, but an operation
+            // explicitly classified as destructive still needs a scoped user
+            // decision.  This prevents enabling a broad mode from silently
+            // authorizing arbitrary shell/destructive actions.
+            risk == .destructive ? .ask : .allow
         }
     }
 }
@@ -79,6 +83,14 @@ protocol LocalAgentTool: Sendable {
     /// the user is trusting, such as one workspace path or one sandbox.
     func approvalResources(arguments: [String: JSONValue]) throws -> Set<String>
     func execute(arguments: [String: JSONValue]) async throws -> String
+    /// Definition-owned final content projection. This is deliberately
+    /// content-only: the canonical `CordisToolExecutionResult.value` remains
+    /// unchanged for programmatic consumers. It is synchronous and total;
+    /// return nil to retain the default presentation content.
+    func finalizeContent(
+        execution: CordisToolExecution?,
+        result: CordisToolExecutionResult
+    ) throws -> String?
     func execute(
         arguments: [String: JSONValue],
         onOutput: @escaping @Sendable (AgentToolOutputChunk) async -> Void
@@ -86,6 +98,12 @@ protocol LocalAgentTool: Sendable {
 }
 
 extension LocalAgentTool {
+    func finalizeContent(
+        execution _: CordisToolExecution?,
+        result _: CordisToolExecutionResult
+    ) throws -> String? {
+        nil
+    }
     func isConcurrencySafe(arguments: [String: JSONValue]) throws -> Bool {
         false
     }
@@ -104,6 +122,31 @@ extension LocalAgentTool {
         onOutput: @escaping @Sendable (AgentToolOutputChunk) async -> Void
     ) async throws -> String {
         try await execute(arguments: arguments)
+    }
+}
+
+/// Applies a snapshotted definition-owned content finalizer. The callback is
+/// invoked at most once for this result. A throwing callback is fail-open:
+/// the original canonical value and presentation content remain intact, so a
+/// presentation bug cannot break the tool pipeline.
+enum LocalToolFinalizer {
+    static func apply(
+        tool: (any LocalAgentTool)?,
+        execution: CordisToolExecution?,
+        result: CordisToolExecutionResult
+    ) -> CordisToolExecutionResult {
+        guard let tool else { return result }
+        do {
+            guard let content = try tool.finalizeContent(
+                execution: execution,
+                result: result
+            ) else {
+                return result
+            }
+            return result.replacingContent(content)
+        } catch {
+            return result
+        }
     }
 }
 
@@ -224,11 +267,11 @@ struct ToolApprovalGrant: Identifiable, Codable, Sendable, Equatable {
         if scope.toolName == ToolApprovalScope.allLocalToolsMarker,
            scope.modelDestination == request.scope.modelDestination,
            scope.resources == [ToolApprovalScope.allLocalToolsResource] {
-            // This is an explicit personal-device choice. It covers every
-            // local risk level, including destructive calls; the iOS system
-            // still owns privacy prompts and the Cordis plugin chain may
-            // independently reject a call.
-            return true
+            // A device-wide grant covers routine local capabilities only.
+            // Destructive tools require their own exact tool/risk/resource
+            // grant so a broad convenience choice cannot authorize a shell
+            // or deletion boundary the user never explicitly reviewed.
+            return request.risk != .destructive
         }
         return scope == request.scope
     }
@@ -236,6 +279,7 @@ struct ToolApprovalGrant: Identifiable, Codable, Sendable, Equatable {
 
 enum ToolApprovalResolution: Sendable, Equatable {
     case deny
+    case allowOnce
     case trustScope
     case trustDevice
 }
@@ -276,12 +320,16 @@ struct ToolApprovalRequest: Identifiable, Sendable, Equatable {
 enum LocalToolError: LocalizedError, Sendable {
     case unknownTool(String)
     case invalidArguments
+    case invalidField(field: String, reason: String)
+    case invalidEnumValue(field: String, value: String?, allowed: [String])
     case missingArgument(String)
     case argumentsTooLarge
     case resultTooLarge
     case userDenied
     case permissionModeDenied(ToolPermissionMode)
     case pluginDenied(String)
+    case pluginFailed(String)
+    case providerBundleFailed(AgentProviderBundleFailureFacts)
 
     var errorDescription: String? {
         switch self {
@@ -289,6 +337,11 @@ enum LocalToolError: LocalizedError, Sendable {
             return "未注册的本地工具：\(name)。"
         case .invalidArguments:
             return "工具参数不是有效的 JSON 对象。"
+        case let .invalidField(field, reason):
+            return "工具参数 \(field) 无效：\(reason)。"
+        case let .invalidEnumValue(field, value, allowed):
+            let renderedValue = value.map { "“\($0)”" } ?? "（非字符串）"
+            return "工具参数 \(field) 取值 \(renderedValue) 无效；允许：\(allowed.joined(separator: "、"))。"
         case let .missingArgument(name):
             return "缺少工具参数：\(name)。"
         case .argumentsTooLarge:
@@ -301,6 +354,10 @@ enum LocalToolError: LocalizedError, Sendable {
             return "当前“\(mode.title)”权限模式不允许这次工具调用。"
         case let .pluginDenied(reason):
             return "Cordis 插件拒绝了这次工具调用：\(reason)"
+        case let .pluginFailed(reason):
+            return "本机插件操作失败：\(reason)"
+        case let .providerBundleFailed(facts):
+            return facts.userMessage
         }
     }
 }

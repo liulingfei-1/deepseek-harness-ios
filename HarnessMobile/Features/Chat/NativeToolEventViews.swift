@@ -12,7 +12,7 @@ struct NativeToolEventRowSummary: Equatable {
         if event.status == .failed || event.status == .denied || event.status == .interrupted,
            let error = firstLine(event.errorMessage),
            !error.isEmpty {
-            return NativeToolEventRowSummary(text: error, suffix: nil, isError: true)
+            return NativeToolEventRowSummary(text: compact(error), suffix: nil, isError: true)
         }
 
         switch presentation {
@@ -34,6 +34,47 @@ struct NativeToolEventRowSummary: Equatable {
                 suffix: nil,
                 isError: false
             )
+        case let .diff(diff):
+            return NativeToolEventRowSummary(
+                text: diff.path,
+                suffix: diff.changed ? "+\(diff.added) / -\(diff.removed)" : "无变化",
+                isError: false
+            )
+        case let .deliverable(deliverable):
+            return NativeToolEventRowSummary(
+                text: deliverable.title ?? deliverable.path,
+                suffix: ByteCountFormatter.string(fromByteCount: Int64(deliverable.bytes), countStyle: .file),
+                isError: false
+            )
+        case let .search(search):
+            return NativeToolEventRowSummary(
+                text: search.query,
+                suffix: "\(search.totalCount) 项",
+                isError: false
+            )
+        case let .web(web):
+            switch web.kind {
+            case .search:
+                return NativeToolEventRowSummary(
+                    text: web.queries.joined(separator: " · "),
+                    suffix: "\(web.resultCount) 个来源",
+                    isError: false
+                )
+            case .fetch:
+                return NativeToolEventRowSummary(
+                    text: web.url ?? "网页内容",
+                    suffix: web.statusCode.map { "HTTP \($0)" },
+                    isError: (web.statusCode ?? 200) >= 400
+                )
+            }
+        case let .job(job):
+            let text = job.jobID ?? (job.kind == .list ? "后台任务" : "任务控制")
+            let suffix = job.kind == .list ? "\(job.entries.count) 项" : job.status
+            return NativeToolEventRowSummary(
+                text: text,
+                suffix: suffix,
+                isError: job.status == "failed"
+            )
         case let .workItems(workItems):
             let head = "\(workItems.completedCount)/\(workItems.items.count) 已完成"
             guard let active = workItems.activeItems.first else {
@@ -51,14 +92,36 @@ struct NativeToolEventRowSummary: Equatable {
                 suffix: nil,
                 isError: terminal.failedExit
             )
+        case let .workflow(workflow):
+            let head = workflow.members.isEmpty
+                ? "准备运行"
+                : "\(workflow.completedMembers)/\(workflow.members.count) 个子 Agent"
+            let suffix = workflow.durationMilliseconds.map { duration in
+                duration < 1_000 ? "\(duration)ms" : String(format: "%.1fs", Double(duration) / 1_000)
+            }
+            return NativeToolEventRowSummary(
+                text: workflow.name + " · " + head,
+                suffix: suffix,
+                isError: workflow.status == .failed || workflow.status == .interrupted || workflow.status == .denied
+            )
         case .generic:
             let summary = event.summary.isEmpty ? firstLine(event.arguments) ?? event.name : event.summary
-            return NativeToolEventRowSummary(text: summary, suffix: nil, isError: false)
+            return NativeToolEventRowSummary(text: compact(summary), suffix: nil, isError: false)
         }
     }
 
     private static func firstLine(_ text: String?) -> String? {
         text?.split(whereSeparator: \Character.isNewline).first.map(String.init)
+    }
+
+    private static func compact(_ text: String, maximumCharacters: Int = 220) -> String {
+        let normalized = text.replacingOccurrences(
+            of: #"\s+"#,
+            with: " ",
+            options: .regularExpression
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalized.count > maximumCharacters else { return normalized }
+        return String(normalized.prefix(maximumCharacters)) + "…"
     }
 }
 
@@ -74,13 +137,478 @@ struct NativeToolEventBody: View {
             WorkspaceWriteToolCard(model: write)
         case let .workspaceFiles(files):
             WorkspaceFilesToolCard(model: files)
+        case let .diff(diff):
+            DiffToolCard(model: diff)
+        case let .deliverable(deliverable):
+            DeliverableToolCard(model: deliverable)
+        case let .search(search):
+            SearchToolCard(model: search)
+        case let .web(web):
+            WebToolCard(model: web)
+        case let .job(job):
+            JobToolCard(model: job)
         case let .workItems(workItems):
             WorkItemsToolCard(model: workItems)
         case let .terminal(terminal):
             TerminalToolCard(model: terminal)
+        case let .workflow(workflow):
+            WorkflowToolCard(model: workflow)
         case .generic:
             GenericToolEventBody(event: event)
         }
+    }
+}
+
+private struct SearchToolCard: View {
+    let model: NativeSearchPresentation
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: model.kind == .glob ? "doc.text.magnifyingglass" : "magnifyingglass")
+                    .foregroundStyle(.blue)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(model.query)
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                    if let root = model.root {
+                        Text(root)
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 8)
+                Text("\(model.totalCount) 项")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+
+            Divider()
+            if model.matches.isEmpty {
+                Text("没有找到匹配项")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(10)
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(slice.head) { match in row(match) }
+                    if slice.hidden > 0 {
+                        Button(expanded ? "收起" : "展开其余 \(slice.hidden) 项") {
+                            expanded.toggle()
+                        }
+                        .buttonStyle(.plain)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                    }
+                    ForEach(slice.tail) { match in row(match) }
+                }
+            }
+
+            if model.truncated || model.filesVisited != nil || model.spillLocator != nil {
+                Divider()
+                HStack(spacing: 6) {
+                    if model.truncated {
+                        Image(systemName: "ellipsis.circle")
+                        Text("结果已截断")
+                    }
+                    if let filesVisited = model.filesVisited {
+                        Text("扫描 \(filesVisited) 项")
+                    }
+                    if let locator = model.spillLocator {
+                        Text("完整结果：\(locator)")
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                }
+                .font(.caption2)
+                .foregroundStyle(model.truncated ? .orange : .secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+            }
+        }
+        .toolSurface()
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("搜索 \(model.query)，\(model.totalCount) 项结果")
+    }
+
+    private var slice: ToolHeadTailSlice<NativeSearchMatchPresentation> {
+        ToolHeadTailSlice(items: model.matches, maximumVisible: 6, expanded: expanded)
+    }
+
+    private func row(_ match: NativeSearchMatchPresentation) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 5) {
+                Text(match.path)
+                    .font(.caption.monospaced())
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if let line = match.line {
+                    Text(":\(line)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if let excerpt = match.excerpt, !excerpt.isEmpty {
+                Text(excerpt)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct WebToolCard: View {
+    let model: NativeWebPresentation
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            Divider()
+            if model.kind == .search {
+                if model.sources.isEmpty {
+                    Text("没有搜索结果")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(10)
+                } else {
+                    ForEach(sourceSlice.head) { source in sourceRow(source) }
+                    if sourceSlice.hidden > 0 {
+                        Button(expanded ? "收起" : "展开其余 \(sourceSlice.hidden) 个来源") {
+                            expanded.toggle()
+                        }
+                        .buttonStyle(.plain)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                    }
+                    ForEach(sourceSlice.tail) { source in sourceRow(source) }
+                }
+            } else if let preview = model.contentPreview {
+                Text(preview.isEmpty ? "网页正文为空" : preview)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(preview.isEmpty ? .secondary : .primary)
+                    .lineLimit(expanded ? nil : 12)
+                    .textSelection(.enabled)
+                    .padding(10)
+                if preview.count > 500 || model.truncated {
+                    Button(expanded ? "收起正文" : "展开正文") { expanded.toggle() }
+                        .buttonStyle(.plain)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.bottom, 7)
+                }
+            }
+
+            if model.truncated {
+                Divider()
+                Label("内容已按手机显示上限截断", systemImage: "ellipsis.circle")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+            }
+        }
+        .toolSurface()
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(model.kind == .search ? "网页搜索，\(model.resultCount) 个来源" : "网页读取")
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Image(systemName: model.kind == .search ? "globe.badge.chevron.backward" : "doc.text.magnifyingglass")
+                .foregroundStyle(.cyan)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(model.kind == .search ? model.queries.joined(separator: " · ") : (model.url ?? "网页内容"))
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if model.kind == .fetch, let bodyKind = model.bodyKind {
+                    Text(bodyKind.uppercased())
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 8)
+            if let status = model.statusCode {
+                Text("HTTP \(status)")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(status >= 400 ? .red : .secondary)
+            } else {
+                Text("\(model.resultCount) 个来源")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+    }
+
+    private var sourceSlice: ToolHeadTailSlice<NativeWebSourcePresentation> {
+        ToolHeadTailSlice(items: model.sources, maximumVisible: 5, expanded: expanded)
+    }
+
+    private func sourceRow(_ source: NativeWebSourcePresentation) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("\(source.rank)")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Text(source.title)
+                    .font(.caption.weight(.medium))
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Text(URL(string: source.url)?.host ?? source.provider)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            if !source.snippet.isEmpty {
+                Text(source.snippet)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+    }
+}
+
+private struct JobToolCard: View {
+    let model: NativeJobPresentation
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: model.kind == .list ? "list.bullet.rectangle" : "gearshape.2")
+                    .foregroundStyle(statusTint)
+                    .accessibilityHidden(true)
+                Text(model.jobID ?? "后台任务")
+                    .font(.caption.weight(.semibold).monospaced())
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 8)
+                Text(statusLabel)
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(statusTint)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+
+            Divider()
+            if model.kind == .list {
+                if model.entries.isEmpty {
+                    Text("没有后台任务")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(10)
+                } else {
+                    ForEach(entrySlice.head) { entry in entryRow(entry) }
+                    if entrySlice.hidden > 0 {
+                        Button(expanded ? "收起" : "展开其余 \(entrySlice.hidden) 项") {
+                            expanded.toggle()
+                        }
+                        .buttonStyle(.plain)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                    }
+                    ForEach(entrySlice.tail) { entry in entryRow(entry) }
+                }
+            } else if model.outputPreview.isEmpty {
+                Text("暂无新输出")
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .padding(10)
+            } else {
+                Text(model.outputPreview)
+                    .font(.caption2.monospaced())
+                    .lineLimit(expanded ? nil : 10)
+                    .textSelection(.enabled)
+                    .padding(10)
+                if model.totalLines > 10 || model.truncated {
+                    Button(expanded ? "收起输出" : "展开输出") { expanded.toggle() }
+                        .buttonStyle(.plain)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.bottom, 7)
+                }
+            }
+
+            if let detail = model.detail, !detail.isEmpty {
+                Divider()
+                Text(detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+            }
+        }
+        .toolSurface()
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("后台任务 \(model.jobID ?? "列表")，\(statusLabel)")
+    }
+
+    private var entrySlice: ToolHeadTailSlice<NativeJobEntryPresentation> {
+        ToolHeadTailSlice(items: model.entries, maximumVisible: 6, expanded: expanded)
+    }
+
+    private var statusLabel: String {
+        if model.kind == .list { return "\(model.entries.count) 项" }
+        switch model.status {
+        case "running": return "运行中"
+        case "stopping": return "停止中"
+        case "completed": return "已完成"
+        case "killed": return "已停止"
+        case "failed": return "失败"
+        default: return model.status ?? "未知状态"
+        }
+    }
+
+    private var statusTint: Color {
+        switch model.status {
+        case "running": .blue
+        case "stopping": .orange
+        case "completed": .green
+        case "failed": .red
+        default: .secondary
+        }
+    }
+
+    private func entryRow(_ entry: NativeJobEntryPresentation) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 7) {
+            Circle()
+                .fill(entry.status == "completed" ? Color.green : (entry.status == "failed" ? Color.red : Color.blue))
+                .frame(width: 6, height: 6)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(entry.label)
+                    .font(.caption)
+                    .lineLimit(1)
+                Text("\(entry.id) · \(entry.kind)")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 6)
+            Text(entry.status)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+    }
+}
+
+private struct DiffToolCard: View {
+    let model: NativeDiffPresentation
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.left.arrow.right")
+                    .foregroundStyle(.orange)
+                    .accessibilityHidden(true)
+                Text(model.path)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Text("+\(model.added) / -\(model.removed)")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            Divider()
+            if model.changed {
+                Text(model.diff)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+                    .lineLimit(expanded ? nil : 12)
+                    .padding(10)
+                Button(expanded ? "收起差异" : "展开完整差异") { expanded.toggle() }
+                    .buttonStyle(.plain)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.bottom, 7)
+            } else {
+                Text("没有文件变化")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(10)
+            }
+        }
+        .toolSurface()
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("文件差异 \(model.path)")
+    }
+}
+
+private struct DeliverableToolCard: View {
+    let model: NativeDeliverablePresentation
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "doc.badge.plus")
+                    .foregroundStyle(.green)
+                    .accessibilityHidden(true)
+                Text(model.title ?? model.path)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Text(ByteCountFormatter.string(fromByteCount: Int64(model.bytes), countStyle: .file))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            Divider()
+            Text(model.preview)
+                .font(.caption2.monospaced())
+                .textSelection(.enabled)
+                .lineLimit(expanded ? nil : 10)
+                .padding(10)
+            HStack {
+                Text("\(model.lines) 行 · \(model.path)")
+                Spacer()
+                if model.truncated {
+                    Button(expanded ? "收起" : "展开预览") { expanded.toggle() }
+                        .buttonStyle(.plain)
+                }
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.bottom, 7)
+        }
+        .toolSurface()
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("交付物 \(model.path)")
     }
 }
 
@@ -488,6 +1016,166 @@ private struct WorkItemsToolCard: View {
         case .paused: "已暂停"
         case .completed: "已完成"
         case .blocked: "受阻"
+        }
+    }
+}
+
+private struct WorkflowToolCard: View {
+    let model: NativeWorkflowPresentation
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.triangle.branch")
+                    .foregroundStyle(model.status == .failed ? .red : .blue)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(model.name)
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                    if let description = model.description, !description.isEmpty {
+                        Text(description)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+                Spacer(minLength: 8)
+                if let duration = model.durationMilliseconds {
+                    Text(durationLabel(duration))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+
+            if !model.phases.isEmpty {
+                Divider()
+                VStack(alignment: .leading, spacing: 5) {
+                    ForEach(model.phases) { phase in
+                        HStack(alignment: .firstTextBaseline, spacing: 7) {
+                            Image(systemName: phase.isCompleted ? "checkmark.circle.fill" : (phase.isCurrent ? "circle.inset.filled" : "circle"))
+                                .font(.caption2)
+                                .foregroundStyle(phase.isCompleted ? Color.green : (phase.isCurrent ? Color.blue : Color.secondary))
+                            Text(phase.title)
+                                .font(.caption)
+                                .fontWeight(phase.isCurrent ? .semibold : .regular)
+                            if let detail = phase.detail, !detail.isEmpty {
+                                Text(detail)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+            }
+
+            if !model.members.isEmpty {
+                Divider()
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack {
+                        Text("子 Agent")
+                            .font(.caption.weight(.semibold))
+                        Spacer()
+                        Text("\(model.completedMembers)/\(model.members.count) 完成")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(model.members) { member in
+                        HStack(alignment: .firstTextBaseline, spacing: 7) {
+                            Image(systemName: memberIcon(member.status))
+                                .font(.caption2)
+                                .foregroundStyle(memberTint(member.status))
+                            Text("\(member.sequence). \(member.label)")
+                                .font(.caption)
+                                .lineLimit(1)
+                            Spacer(minLength: 5)
+                            if let duration = member.durationMilliseconds {
+                                Text(durationLabel(duration))
+                                    .font(.caption2.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text(memberStatus(member.status))
+                                .font(.caption2)
+                                .foregroundStyle(memberTint(member.status))
+                        }
+                        if let error = member.error, !error.isEmpty {
+                            Text(error)
+                                .font(.caption2)
+                                .foregroundStyle(.red)
+                                .lineLimit(2)
+                                .padding(.leading, 22)
+                        }
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+            }
+
+            if !model.logs.isEmpty || model.resultSummary != nil || model.errorMessage != nil {
+                Divider()
+                VStack(alignment: .leading, spacing: 5) {
+                    if let error = model.errorMessage, !error.isEmpty {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.red)
+                            .lineLimit(3)
+                    }
+                    ForEach(Array(model.logs.enumerated()), id: \.offset) { _, log in
+                        Text(log)
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                    if let result = model.resultSummary, !result.isEmpty {
+                        Text(result)
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.primary)
+                            .lineLimit(6)
+                            .textSelection(.enabled)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+            }
+        }
+        .toolSurface()
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("工作流 \(model.name)，\(model.completedMembers) 个子 Agent 已完成")
+    }
+
+    private func durationLabel(_ milliseconds: Int) -> String {
+        milliseconds < 1_000 ? "(milliseconds)ms" : String(format: "%.1fs", Double(milliseconds) / 1_000)
+    }
+
+    private func memberIcon(_ status: NativeWorkflowMemberStatus) -> String {
+        switch status {
+        case .running: "arrow.trianglehead.2.clockwise.rotate.90"
+        case .completed: "checkmark.circle.fill"
+        case .failed: "xmark.circle.fill"
+        case .cancelled: "stop.circle.fill"
+        }
+    }
+
+    private func memberTint(_ status: NativeWorkflowMemberStatus) -> Color {
+        switch status {
+        case .running: .blue
+        case .completed: .green
+        case .failed: .red
+        case .cancelled: .secondary
+        }
+    }
+
+    private func memberStatus(_ status: NativeWorkflowMemberStatus) -> String {
+        switch status {
+        case .running: "运行中"
+        case .completed: "完成"
+        case .failed: "失败"
+        case .cancelled: "已取消"
         }
     }
 }

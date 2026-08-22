@@ -20,10 +20,21 @@ targets:
   HarnessMobile:
     type: application
     platform: iOS
+    entitlements:
+      path: HarnessMobile/HarnessMobile.entitlements
+      properties:
+        com.apple.developer.healthkit: true
     sources:
       - path: HarnessMobile
         excludes:
           - Resources/PluginHost/node_modules
+      # Keep the marketplace transaction coordinator explicit while the
+      # project is regenerated from this spec. This file is intentionally
+      # outside the generated group layout used by older checkouts.
+      - path: HarnessMobile/Core/Plugins/PluginInstallCoordinator.swift
+      # Ralph is part of the production tool catalog and must remain in the
+      # application target when the project is regenerated.
+      - path: HarnessMobile/Core/Tools/RalphTool.swift
       - path: Vendor/OpenMinisISH/Artifacts/alpine-rootfs.zip
         buildPhase: resources
       - path: Vendor/OpenMinisISH/Artifacts/RootfsPatch.bundle
@@ -42,6 +53,7 @@ targets:
         embed: true
       - framework: Vendor/OpenMinisISH/Artifacts/HarnessISH.xcframework
         embed: false
+      - sdk: HealthKit.framework
       - sdk: SystemConfiguration.framework
       - sdk: libsqlite3.tbd
       - sdk: libresolv.tbd
@@ -67,13 +79,14 @@ targets:
         NSBluetoothAlwaysUsageDescription: 仅在你批准蓝牙工具时扫描或连接附近的 BLE 设备。
         NSBluetoothPeripheralUsageDescription: 仅在你批准蓝牙工具时与附近的 BLE 设备通信。
         NSLocalNetworkUsageDescription: 仅在你批准需要访问同一局域网设备的功能时使用本地网络。
-        NSHealthShareUsageDescription: 仅在未来接入并由你批准 HealthKit 工具时读取所选健康数据。
-        NSHealthUpdateUsageDescription: 仅在未来接入并由你批准 HealthKit 工具时写入所选健康数据。
-        NSHomeKitUsageDescription: 仅在未来接入并由你批准 HomeKit 工具时访问智能家居。
+        NSHealthShareUsageDescription: 仅在你调用并批准 Apple 健康工具时读取所选健康数据；工具结果会发送给当前配置的模型服务并保存在本机会话中。
+        NSHealthUpdateUsageDescription: 仅在你调用并批准 Apple 健康写入工具时写入所选健康数据。
+        NSHomeKitUsageDescription: 当前构建未获得 HomeKit capability；取得签名能力后，才会在你批准时查询或控制智能家居配件。
         NFCReaderUsageDescription: 仅在你主动批准 NFC 工具时开启一次系统扫描会话。
         NSFaceIDUsageDescription: 用于在执行敏感本机操作前验证设备所有者。
         BGTaskSchedulerPermittedIdentifiers:
           - com.llf.harnessmobile.continued-processing.*
+          - com.llf.harnessmobile.schedule-processing
         UIBackgroundModes:
           - processing
         UILaunchScreen: {}

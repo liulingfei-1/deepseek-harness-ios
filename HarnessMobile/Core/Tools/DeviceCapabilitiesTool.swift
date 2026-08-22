@@ -129,7 +129,7 @@ enum DeviceCapabilityCatalog {
             interaction: true, notes: "可打开电话、短信、邮件、网页、设置和已注册的 App scheme；iOS 决定目标 App 是否存在。"
         ),
         staticRecord(
-            "file_picker", "文件和照片选择器", status: "available", tools: ["workspace_read_text", "camera_ocr"],
+            "file_picker", "文件和照片选择器", status: "available", tools: ["read", "camera_ocr"],
             interaction: true, notes: "文件/照片选择器的安全范围由用户在系统界面授予。"
         ),
         staticRecord(

@@ -62,6 +62,17 @@ final class DeviceCapabilitiesToolTests: XCTestCase {
         })
     }
 
+    func testSystemManagedLocalNetworkDoesNotAppearUnintegrated() {
+        let inventory = DeviceCapabilityInventoryBuilder.build(permissionSnapshots: [
+            DevicePermissionSnapshot(capability: .localNetwork, status: .systemManaged)
+        ])
+
+        XCTAssertEqual(
+            inventory.records.first(where: { $0.id == "local_network" })?.status,
+            "system_managed"
+        )
+    }
+
     private func decodeObject(_ text: String) throws -> [String: JSONValue] {
         let data = try XCTUnwrap(text.data(using: .utf8))
         guard case let .object(object) = try JSONDecoder().decode(JSONValue.self, from: data) else {

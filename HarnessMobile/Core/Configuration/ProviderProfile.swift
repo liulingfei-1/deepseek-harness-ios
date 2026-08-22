@@ -39,6 +39,9 @@ struct ProviderProfile: Codable, Sendable, Equatable, Identifiable {
     var models: [ProviderModel]
     var defaultModel: String
     var reasoningMode: ReasoningMode
+    var openAIWireProfile: OpenAICompatibleWireProfile?
+    var openAICompatibility: OpenAICompletionsCompatibility?
+    var retryPolicy: ProviderRetryPolicyConfiguration?
     var maxSteps: Int
     var maxOutputTokens: Int
     var isCustom: Bool
@@ -53,8 +56,11 @@ struct ProviderProfile: Codable, Sendable, Equatable, Identifiable {
         models: [ProviderModel],
         defaultModel: String,
         reasoningMode: ReasoningMode,
+        openAIWireProfile: OpenAICompatibleWireProfile? = nil,
+        openAICompatibility: OpenAICompletionsCompatibility? = nil,
+        retryPolicy: ProviderRetryPolicyConfiguration? = nil,
         maxSteps: Int = 8,
-        maxOutputTokens: Int = 4_096,
+        maxOutputTokens: Int = 8_192,
         isCustom: Bool
     ) {
         self.id = id
@@ -66,6 +72,9 @@ struct ProviderProfile: Codable, Sendable, Equatable, Identifiable {
         self.models = models
         self.defaultModel = defaultModel
         self.reasoningMode = reasoningMode
+        self.openAIWireProfile = openAIWireProfile
+        self.openAICompatibility = openAICompatibility
+        self.retryPolicy = retryPolicy
         self.maxSteps = maxSteps
         self.maxOutputTokens = maxOutputTokens
         self.isCustom = isCustom
@@ -74,7 +83,7 @@ struct ProviderProfile: Codable, Sendable, Equatable, Identifiable {
     static func catalogDefault(
         for providerID: ModelProviderID,
         maxSteps: Int = 8,
-        maxOutputTokens: Int = 4_096
+        maxOutputTokens: Int = 8_192
     ) -> ProviderProfile {
         let descriptor = ModelProviderCatalog.descriptor(for: providerID)
         return ProviderProfile(
@@ -86,6 +95,12 @@ struct ProviderProfile: Codable, Sendable, Equatable, Identifiable {
             models: descriptor.builtInModels,
             defaultModel: descriptor.defaultModel,
             reasoningMode: descriptor.defaultReasoningMode,
+            openAIWireProfile: Self.defaultWireProfile(
+                providerID: providerID,
+                wireProtocol: descriptor.wireProtocol
+            ),
+            openAICompatibility: nil,
+            retryPolicy: .upstreamDefault,
             maxSteps: maxSteps,
             maxOutputTokens: maxOutputTokens,
             isCustom: providerID == .customOpenAICompatible
@@ -96,7 +111,7 @@ struct ProviderProfile: Codable, Sendable, Equatable, Identifiable {
         id: String = "",
         displayName: String = "",
         maxSteps: Int = 8,
-        maxOutputTokens: Int = 4_096
+        maxOutputTokens: Int = 8_192
     ) -> ProviderProfile {
         ProviderProfile(
             id: id,
@@ -107,6 +122,9 @@ struct ProviderProfile: Codable, Sendable, Equatable, Identifiable {
             models: [],
             defaultModel: "",
             reasoningMode: .providerDefault,
+            openAIWireProfile: .legacyGateway,
+            openAICompatibility: nil,
+            retryPolicy: .upstreamDefault,
             maxSteps: maxSteps,
             maxOutputTokens: maxOutputTokens,
             isCustom: true
@@ -118,10 +136,22 @@ struct ProviderProfile: Codable, Sendable, Equatable, Identifiable {
         let routeID = normalizedMigratedID(
             configuration.profileID ?? configuration.providerID.rawValue
         )
-        let declaredModels = mergedModels(
+        var declaredModels = mergedModels(
             descriptor.builtInModels,
             ensuring: configuration.model
         )
+        if let inputModalities = configuration.inputModalities,
+           let index = declaredModels.firstIndex(where: { $0.id == configuration.model }) {
+            let current = declaredModels[index]
+            declaredModels[index] = ProviderModel(
+                id: current.id,
+                name: current.name,
+                contextWindow: current.contextWindow,
+                maxOutputTokens: current.maxOutputTokens,
+                inputModalities: inputModalities,
+                openAICompatibility: current.openAICompatibility
+            )
+        }
         return ProviderProfile(
             id: routeID,
             displayName: descriptor.displayName,
@@ -133,6 +163,9 @@ struct ProviderProfile: Codable, Sendable, Equatable, Identifiable {
             models: declaredModels,
             defaultModel: configuration.model,
             reasoningMode: configuration.reasoningMode,
+            openAIWireProfile: configuration.openAIWireProfile,
+            openAICompatibility: configuration.openAICompatibility,
+            retryPolicy: configuration.retryPolicy,
             maxSteps: configuration.maxSteps,
             maxOutputTokens: configuration.maxOutputTokens,
             isCustom: configuration.providerID == .customOpenAICompatible
@@ -147,13 +180,27 @@ struct ProviderProfile: Codable, Sendable, Equatable, Identifiable {
         model: String? = nil,
         reasoningMode: ReasoningMode? = nil
     ) -> AgentConfiguration {
-        AgentConfiguration(
+        let selectedModelID = model ?? defaultModel
+        let selectedModel = models.first(where: { $0.id == selectedModelID })
+        let modelCompatibility = selectedModel?.openAICompatibility
+        let mergedCompatibility: OpenAICompletionsCompatibility?
+        if openAICompatibility == nil, modelCompatibility == nil {
+            mergedCompatibility = nil
+        } else {
+            mergedCompatibility = (openAICompatibility ?? .init())
+                .overlaying(modelCompatibility)
+        }
+        return AgentConfiguration(
             providerID: providerID,
             profileID: id,
             credentialReference: credentialReference,
             baseURL: baseURL,
-            model: model ?? defaultModel,
+            model: selectedModelID,
+            inputModalities: selectedModel?.inputModalities,
             reasoningMode: reasoningMode ?? self.reasoningMode,
+            openAIWireProfile: openAIWireProfile,
+            openAICompatibility: mergedCompatibility,
+            retryPolicy: retryPolicy,
             maxSteps: maxSteps,
             maxOutputTokens: maxOutputTokens
         )
@@ -186,6 +233,14 @@ struct ProviderProfile: Codable, Sendable, Equatable, Identifiable {
         if isCustom, wireProtocol != .openAIChatCompletions {
             throw ProviderProfileError.unsupportedWireProtocol
         }
+        if wireProtocol != .openAIChatCompletions,
+           (openAIWireProfile != nil || openAICompatibility != nil
+            || models.contains(where: { $0.openAICompatibility != nil })) {
+            throw ProviderProfileError.unsupportedWireCompatibility
+        }
+        if let retryPolicy {
+            _ = try ModelRetryPolicy.resolved(retryPolicy)
+        }
 
         let normalizedModels = try Self.validatedModels(
             models,
@@ -198,6 +253,19 @@ struct ProviderProfile: Codable, Sendable, Equatable, Identifiable {
         result.defaultModel = normalizedDefaultModel
         result.models = normalizedModels
         return result
+    }
+
+    private static func defaultWireProfile(
+        providerID: ModelProviderID,
+        wireProtocol: ModelProviderWireProtocol
+    ) -> OpenAICompatibleWireProfile? {
+        guard wireProtocol == .openAIChatCompletions else { return nil }
+        switch providerID {
+        case .deepSeekOfficial: return .deepSeek
+        case .openAI, .openRouter: return .openAI
+        case .customOpenAICompatible: return .legacyGateway
+        case .anthropic: return nil
+        }
     }
 
     static func validateID(_ id: String) throws {
@@ -254,13 +322,20 @@ struct ProviderProfile: Codable, Sendable, Equatable, Identifiable {
             guard seen.insert(id).inserted else {
                 throw ProviderProfileError.duplicateModelID(id)
             }
+            guard !model.inputModalities.isEmpty,
+                  model.inputModalities.contains(.text),
+                  Set(model.inputModalities).count == model.inputModalities.count else {
+                throw ProviderProfileError.invalidModelInputModalities(id)
+            }
             let name = model.name?.trimmingCharacters(in: .whitespacesAndNewlines)
             result.append(
                 ProviderModel(
                     id: id,
                     name: name?.isEmpty == true ? nil : name,
                     contextWindow: model.contextWindow,
-                    maxOutputTokens: model.maxOutputTokens
+                    maxOutputTokens: model.maxOutputTokens,
+                    inputModalities: model.inputModalities,
+                    openAICompatibility: model.openAICompatibility
                 )
             )
         }
@@ -398,11 +473,13 @@ enum ProviderProfileError: LocalizedError, Sendable, Equatable {
     case invalidDisplayName
     case invalidCredentialReference
     case invalidModelID
+    case invalidModelInputModalities(String)
     case duplicateModelID(String)
     case emptyDefaultModel
     case customProviderRequiresModel
     case catalogProtocolMismatch
     case unsupportedWireProtocol
+    case unsupportedWireCompatibility
     case missingActiveProfile
     case missingProfile(String)
     case profileIdentityChanged
@@ -424,6 +501,8 @@ enum ProviderProfileError: LocalizedError, Sendable, Equatable {
             return "服务商凭据引用无效。"
         case .invalidModelID:
             return "模型 ID 不能为空，且不能超过 256 字节。"
+        case let .invalidModelInputModalities(id):
+            return "模型 ID“\(id)”的输入类型必须包含 text，且不能重复。"
         case let .duplicateModelID(id):
             return "模型 ID“\(id)”重复。"
         case .emptyDefaultModel:
@@ -434,6 +513,8 @@ enum ProviderProfileError: LocalizedError, Sendable, Equatable {
             return "目录服务商不能改成与其内建适配器不同的 API 协议。"
         case .unsupportedWireProtocol:
             return "当前原生客户端只支持 OpenAI-compatible Chat Completions 协议。"
+        case .unsupportedWireCompatibility:
+            return "只有 OpenAI Chat Completions Profile 可以设置兼容协议。"
         case .missingActiveProfile:
             return "默认服务商指向了不存在的 Provider Profile。"
         case let .missingProfile(id):

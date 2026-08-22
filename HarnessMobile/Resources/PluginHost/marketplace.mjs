@@ -5,6 +5,7 @@ import {
   existsSync,
 } from 'node:fs'
 import {
+  cp,
   lstat,
   mkdir,
   open,
@@ -56,12 +57,14 @@ const MAXIMUM_DEPENDENCIES = 128
 const MAXIMUM_PROCESS_OUTPUT_BYTES = 1024 * 1024
 const NPM_TIMEOUT_MS = 25 * 60 * 1000
 const DOWNLOAD_TIMEOUT_MS = 60_000
-const NATIVE_CLIENT_RUNTIME_VERSION = 1
+const NATIVE_CLIENT_RUNTIME_VERSION = 2
 const MAXIMUM_NATIVE_CLIENT_MANIFEST_BYTES = 256 * 1024
 const MAXIMUM_NATIVE_CLIENT_CONTRIBUTIONS = 64
 const MAXIMUM_NATIVE_CLIENT_ENDPOINTS = 64
 const MAXIMUM_NATIVE_CLIENT_PERMISSIONS = 128
 const MAXIMUM_NATIVE_CLIENT_ARGUMENT_BYTES = 16 * 1024
+const MAXIMUM_NATIVE_CLIENT_CONTRIBUTION_BYTES = 32 * 1024
+const MAXIMUM_NATIVE_CLIENT_ENDPOINT_RESULT_BYTES = 64 * 1024
 const MAXIMUM_NATIVE_COMPILATION_SOURCE_BYTES = 180 * 1024
 const MAXIMUM_NATIVE_COMPILATION_FILE_BYTES = 32 * 1024
 const MAXIMUM_NATIVE_COMPILATION_FILES = 48
@@ -162,6 +165,14 @@ function nativeClientText(value, at, maximumLength, { optional = false } = {}) {
     fail('invalid-native-client', `${at} must contain 1-${maximumLength} characters.`)
   }
   return normalized
+}
+
+function nativeClientContent(value, at) {
+  if (typeof value !== 'string' || value.trim().length === 0
+    || Buffer.byteLength(value, 'utf8') > MAXIMUM_NATIVE_CLIENT_CONTRIBUTION_BYTES) {
+    fail('invalid-native-client', `${at} must contain 1-${MAXIMUM_NATIVE_CLIENT_CONTRIBUTION_BYTES} UTF-8 bytes.`)
+  }
+  return value
 }
 
 function nativeClientID(value, at) {
@@ -577,8 +588,11 @@ async function inspectArchive(zipPath) {
         const isDirectory = entry.fileName.endsWith('/')
         const unixMode = (entry.externalFileAttributes >>> 16) & 0xffff
         const fileType = unixMode & 0o170000
-        if (fileType === 0o120000) fail('invalid-zip', 'Symbolic links are not allowed in plugin ZIP files.')
-        if (fileType !== 0 && fileType !== 0o100000 && fileType !== 0o040000) {
+        const isSymbolicLink = fileType === 0o120000
+        if (isSymbolicLink && isDirectory) {
+          fail('invalid-zip', 'A ZIP symbolic link cannot also be a directory entry.')
+        }
+        if (fileType !== 0 && fileType !== 0o100000 && fileType !== 0o040000 && !isSymbolicLink) {
           fail('invalid-zip', 'The ZIP contains a non-regular filesystem entry.')
         }
         if (!isDirectory) {
@@ -588,6 +602,9 @@ async function inspectArchive(zipPath) {
           if (entry.uncompressedSize > MAXIMUM_SINGLE_FILE_BYTES) {
             fail('zip-limit', `ZIP entry ${JSON.stringify(entry.fileName)} is too large.`)
           }
+          if (isSymbolicLink && entry.uncompressedSize > 2_048) {
+            fail('invalid-zip', `ZIP symbolic link ${JSON.stringify(entry.fileName)} has an invalid target.`)
+          }
           if (totalBytes > MAXIMUM_UNCOMPRESSED_BYTES) {
             fail('zip-limit', 'The ZIP expands beyond the on-device size limit.')
           }
@@ -595,6 +612,7 @@ async function inspectArchive(zipPath) {
         entries.push({
           fileName: entry.fileName,
           isDirectory,
+          isSymbolicLink,
           compressedSize: entry.compressedSize,
           uncompressedSize: entry.uncompressedSize,
         })
@@ -640,7 +658,11 @@ function archiveExtractionPlan(entries, requestedSubpath) {
     const folded = relativePath.toLowerCase()
     if (selectedNames.has(folded)) fail('invalid-zip', `Duplicate or case-colliding ZIP path ${relativePath}.`)
     selectedNames.add(folded)
-    plan.set(entry.fileName, relativePath)
+    plan.set(entry.fileName, {
+      relativePath,
+      isDirectory: entry.isDirectory,
+      isSymbolicLink: entry.isSymbolicLink === true,
+    })
     if (!entry.isDirectory) selectedFileCount += 1
   }
   if (selectedFileCount === 0) {
@@ -654,6 +676,7 @@ async function extractArchive(zipPath, destination, plan) {
   const zipFile = await openZip(zipPath)
   return await new Promise((resolve, reject) => {
     let settled = false
+    const symbolicLinks = []
     const finish = (error) => {
       if (settled) return
       settled = true
@@ -662,33 +685,115 @@ async function extractArchive(zipPath, destination, plan) {
       else reject(error)
     }
     zipFile.on('error', finish)
-    zipFile.on('end', () => finish())
+    zipFile.on('end', () => {
+      materializeArchiveSymbolicLinks(destination, plan, symbolicLinks)
+        .then(() => finish(), finish)
+    })
     zipFile.on('entry', (entry) => {
-      const relativePath = plan.get(entry.fileName)
-      if (relativePath === undefined) {
+      const planned = plan.get(entry.fileName)
+      if (planned === undefined) {
         zipFile.readEntry()
         return
       }
       const operation = async () => {
+        const { relativePath } = planned
         const target = path.join(destination, ...relativePath.split('/'))
         if (!isContained(target, destination)) fail('invalid-zip', 'The ZIP path escaped the staging directory.')
-        if (entry.fileName.endsWith('/')) {
+        if (planned.isDirectory) {
           await mkdir(target, { recursive: true, mode: 0o700 })
           return
         }
-        await mkdir(path.dirname(target), { recursive: true, mode: 0o700 })
         const readStream = await new Promise((resolveStream, rejectStream) => {
           zipFile.openReadStream(entry, (error, stream) => {
             if (error !== null) rejectStream(error)
             else resolveStream(stream)
           })
         })
+        if (planned.isSymbolicLink) {
+          const chunks = []
+          let byteCount = 0
+          for await (const chunk of readStream) {
+            byteCount += chunk.length
+            if (byteCount > 2_048) {
+              fail('invalid-zip', `ZIP symbolic link ${JSON.stringify(entry.fileName)} has an invalid target.`)
+            }
+            chunks.push(chunk)
+          }
+          symbolicLinks.push({
+            relativePath,
+            target: Buffer.concat(chunks).toString('utf8'),
+          })
+          return
+        }
+        await mkdir(path.dirname(target), { recursive: true, mode: 0o700 })
         await pipeline(readStream, createWriteStream(target, { flags: 'wx', mode: 0o600 }))
       }
       operation().then(() => zipFile.readEntry(), finish)
     })
     zipFile.readEntry()
   })
+}
+
+/// GitHub source archives sometimes contain repository-internal symbolic links
+/// (for example AGENTS.md -> CLAUDE.md). Preserve the content contract without
+/// creating a filesystem link in the mobile workspace: resolve only targets
+/// selected from the same archive, then copy them as ordinary files/directories.
+/// Absolute paths, archive escapes, missing targets, and cycles remain rejected.
+async function materializeArchiveSymbolicLinks(destination, plan, symbolicLinks) {
+  if (symbolicLinks.length === 0) return
+  const selectedPaths = new Set([...plan.values()].map(value => value.relativePath))
+  const linksByPath = new Map(symbolicLinks.map(link => [link.relativePath, link]))
+  const resolving = new Set()
+  const resolved = new Set()
+
+  const targetIsSelected = target => selectedPaths.has(target)
+    || [...selectedPaths].some(candidate => candidate.startsWith(`${target}/`))
+
+  const resolveLink = async (relativePath) => {
+    if (resolved.has(relativePath)) return
+    if (resolving.has(relativePath)) {
+      fail('invalid-zip', `ZIP symbolic link cycle detected at ${JSON.stringify(relativePath)}.`)
+    }
+    const link = linksByPath.get(relativePath)
+    if (link === undefined) return
+    resolving.add(relativePath)
+    try {
+      const rawTarget = link.target
+      if (rawTarget.length === 0 || rawTarget.includes('\0') || rawTarget.includes('\\')
+        || path.posix.isAbsolute(rawTarget) || /^[A-Za-z]:/.test(rawTarget)) {
+        fail('invalid-zip', `ZIP symbolic link ${JSON.stringify(relativePath)} has an unsafe target.`)
+      }
+      const targetPath = path.posix.normalize(
+        path.posix.join(path.posix.dirname(relativePath), rawTarget),
+      )
+      if (targetPath === '.' || targetPath === '..' || targetPath.startsWith('../')
+        || !targetIsSelected(targetPath)) {
+        fail('invalid-zip', `ZIP symbolic link ${JSON.stringify(relativePath)} escapes the selected source.`)
+      }
+      if (linksByPath.has(targetPath)) await resolveLink(targetPath)
+
+      const source = path.join(destination, ...targetPath.split('/'))
+      const target = path.join(destination, ...relativePath.split('/'))
+      if (!isContained(source, destination) || !isContained(target, destination)) {
+        fail('invalid-zip', 'A ZIP symbolic link escaped the staging directory.')
+      }
+      const sourceInfo = await lstat(source).catch(() => undefined)
+      if (sourceInfo === undefined || (!sourceInfo.isFile() && !sourceInfo.isDirectory())
+        || sourceInfo.isSymbolicLink()) {
+        fail('invalid-zip', `ZIP symbolic link ${JSON.stringify(relativePath)} does not target a regular archive entry.`)
+      }
+      if (await lstat(target).then(() => true, () => false)) {
+        fail('invalid-zip', `ZIP symbolic link destination ${JSON.stringify(relativePath)} already exists.`)
+      }
+      await mkdir(path.dirname(target), { recursive: true, mode: 0o700 })
+      await cp(source, target, { recursive: sourceInfo.isDirectory(), force: false, errorOnExist: true })
+      resolved.add(relativePath)
+    } finally {
+      resolving.delete(relativePath)
+    }
+  }
+
+  for (const { relativePath } of symbolicLinks) await resolveLink(relativePath)
 }
 
 async function readJSONFile(file, maximumBytes = 1024 * 1024) {
@@ -932,6 +1037,8 @@ function validateNativeClientCommand(raw, index) {
     'name',
     'description',
     'inputHint',
+    'inputImages',
+    'images',
     'order',
     'action',
   ]), at)
@@ -950,6 +1057,13 @@ function validateNativeClientCommand(raw, index) {
   const inputHint = raw.inputHint === undefined
     ? undefined
     : nativeClientText(raw.inputHint, `${at}.inputHint`, 120)
+  const inputImagesRaw = raw.inputImages === undefined ? raw.images : raw.inputImages
+  const inputImages = inputImagesRaw === undefined
+    ? false
+    : inputImagesRaw
+  if (typeof inputImages !== 'boolean') {
+    fail('invalid-native-client', `${at}.inputImages must be a boolean.`)
+  }
   const inputKey = raw.action.inputKey === undefined
     ? undefined
     : nativeClientText(raw.action.inputKey, `${at}.action.inputKey`, 64)
@@ -973,6 +1087,7 @@ function validateNativeClientCommand(raw, index) {
     name,
     description: nativeClientText(raw.description, `${at}.description`, 600),
     ...(inputHint === undefined ? {} : { inputHint }),
+    ...(inputImages ? { inputImages: true } : {}),
     order: nativeClientOrder(raw.order, `${at}.order`),
     action: {
       kind: 'hostTool',
@@ -980,6 +1095,53 @@ function validateNativeClientCommand(raw, index) {
       arguments: structuredClone(args),
       ...(inputKey === undefined ? {} : { inputKey }),
     },
+  }
+}
+
+function validateNativeClientCard(raw, index) {
+  const at = `native-client.json.contributions.cards[${index}]`
+  assertAllowedKeys(raw, new Set([
+    'id',
+    'title',
+    'description',
+    'order',
+    'renderer',
+    'value',
+  ]), at)
+  const renderer = raw.renderer ?? 'keyValue'
+  if (renderer !== 'keyValue' && renderer !== 'markdown') {
+    fail('invalid-native-client', `${at}.renderer must be "keyValue" or "markdown".`)
+  }
+  assertJSONValue(raw.value, `${at}.value`)
+  assertNativeClientCredentialFree(raw.value, `${at}.value`)
+  if (Buffer.byteLength(JSON.stringify(raw.value), 'utf8') > MAXIMUM_NATIVE_CLIENT_CONTRIBUTION_BYTES) {
+    fail('invalid-native-client', `${at}.value is too large.`)
+  }
+  return {
+    id: nativeClientID(raw.id, `${at}.id`),
+    title: nativeClientText(raw.title, `${at}.title`, 120),
+    ...(raw.description === undefined ? {} : {
+      description: nativeClientText(raw.description, `${at}.description`, 600),
+    }),
+    order: nativeClientOrder(raw.order, `${at}.order`),
+    renderer,
+    value: structuredClone(raw.value),
+  }
+}
+
+function validateNativeClientReference(raw, index) {
+  const at = `native-client.json.contributions.references[${index}]`
+  assertAllowedKeys(raw, new Set(['id', 'label', 'description', 'order', 'content']), at)
+  const content = nativeClientContent(raw.content, `${at}.content`)
+  assertNativeClientCredentialFree(content, `${at}.content`)
+  return {
+    id: nativeClientID(raw.id, `${at}.id`),
+    label: nativeClientText(raw.label, `${at}.label`, 120),
+    ...(raw.description === undefined ? {} : {
+      description: nativeClientText(raw.description, `${at}.description`, 600),
+    }),
+    order: nativeClientOrder(raw.order, `${at}.order`),
+    content,
   }
 }
 
@@ -1001,6 +1163,8 @@ function validateNativeClientPermissions(rawPermissions, requiredPermissions) {
     permission === 'ui.inspector'
       || permission === 'ui.settings-link'
       || permission === 'ui.command'
+      || permission === 'ui.card'
+      || permission === 'ui.reference'
       || /^host\.tool:[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/.test(permission)
       || /^host\.service:[A-Za-z0-9][A-Za-z0-9._/-]{0,127}\.[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/.test(permission)
       || /^settings\.read:[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/.test(permission)
@@ -1024,17 +1188,20 @@ function validateNativeClientDocument(document, entries) {
     'endpoints',
     'permissions',
   ]), 'native-client.json')
-  if (document.schemaVersion !== 1) {
-    fail('invalid-native-client', 'native-client.json.schemaVersion must be 1.')
+  if (document.schemaVersion !== 1 && document.schemaVersion !== 2) {
+    fail('invalid-native-client', 'native-client.json.schemaVersion must be 1 or 2.')
   }
   if (!Number.isSafeInteger(document.minimumRuntime)
     || document.minimumRuntime < 1
-    || document.minimumRuntime > NATIVE_CLIENT_RUNTIME_VERSION) {
+    || document.minimumRuntime > NATIVE_CLIENT_RUNTIME_VERSION
+    || document.minimumRuntime !== document.schemaVersion) {
     fail('native-client-runtime', `native-client.json requires unsupported runtime ${JSON.stringify(document.minimumRuntime)}.`)
   }
   assertAllowedKeys(
     document.contributions,
-    new Set(['inspectors', 'settings', 'commands']),
+    document.schemaVersion === 1
+      ? new Set(['inspectors', 'settings', 'commands'])
+      : new Set(['inspectors', 'settings', 'commands', 'cards', 'references']),
     'native-client.json.contributions',
   )
 
@@ -1059,8 +1226,22 @@ function validateNativeClientDocument(document, entries) {
     'native-client.json.contributions.commands',
     MAXIMUM_NATIVE_CLIENT_CONTRIBUTIONS,
   ).map(validateNativeClientCommand)
-  if (inspectors.length + settings.length + commands.length === 0) {
+  const cards = nativeClientArray(
+    document.contributions.cards,
+    'native-client.json.contributions.cards',
+    MAXIMUM_NATIVE_CLIENT_CONTRIBUTIONS,
+  ).map(validateNativeClientCard)
+  const references = nativeClientArray(
+    document.contributions.references,
+    'native-client.json.contributions.references',
+    MAXIMUM_NATIVE_CLIENT_CONTRIBUTIONS,
+  ).map(validateNativeClientReference)
+  if (inspectors.length + settings.length + commands.length + cards.length + references.length === 0) {
     fail('invalid-native-client', 'native-client.json must declare at least one contribution.')
+  }
+  if (inspectors.length + settings.length + commands.length + cards.length + references.length
+      > MAXIMUM_NATIVE_CLIENT_CONTRIBUTIONS) {
+    fail('invalid-native-client', `native-client.json must declare at most ${MAXIMUM_NATIVE_CLIENT_CONTRIBUTIONS} contributions.`)
   }
 
   const endpointIDs = new Set()
@@ -1096,6 +1277,20 @@ function validateNativeClientDocument(document, entries) {
     }
     commandNames.add(command.name)
   }
+  const cardIDs = new Set()
+  for (const card of cards) {
+    if (cardIDs.has(card.id)) {
+      fail('invalid-native-client', `Duplicate native card id ${JSON.stringify(card.id)}.`)
+    }
+    cardIDs.add(card.id)
+  }
+  const referenceIDs = new Set()
+  for (const reference of references) {
+    if (referenceIDs.has(reference.id)) {
+      fail('invalid-native-client', `Duplicate native reference id ${JSON.stringify(reference.id)}.`)
+    }
+    referenceIDs.add(reference.id)
+  }
   const unusedEndpoints = endpoints.filter(endpoint => !referencedEndpointIDs.has(endpoint.id))
   if (unusedEndpoints.length > 0) {
     fail('invalid-native-client', `Unused native endpoint ${JSON.stringify(unusedEndpoints[0].id)} is not exposed.`)
@@ -1105,6 +1300,8 @@ function validateNativeClientDocument(document, entries) {
   if (inspectors.length > 0) requiredPermissions.add('ui.inspector')
   if (settings.length > 0) requiredPermissions.add('ui.settings-link')
   if (commands.length > 0) requiredPermissions.add('ui.command')
+  if (cards.length > 0) requiredPermissions.add('ui.card')
+  if (references.length > 0) requiredPermissions.add('ui.reference')
   for (const inspector of inspectors) {
     const endpoint = endpoints.find(candidate => candidate.id === inspector.endpoint)
     requiredPermissions.add(`host.service:${endpoint.service}.${endpoint.method}`)
@@ -1118,12 +1315,16 @@ function validateNativeClientDocument(document, entries) {
 
   const permissions = validateNativeClientPermissions(document.permissions, requiredPermissions)
   const normalized = {
-    schemaVersion: 1,
+    schemaVersion: document.schemaVersion,
     minimumRuntime: document.minimumRuntime,
     contributions: {
       inspectors: inspectors.sort((left, right) => left.order - right.order || left.id.localeCompare(right.id)),
       settings: settings.sort((left, right) => left.order - right.order || left.id.localeCompare(right.id)),
       commands: commands.sort((left, right) => left.order - right.order || left.name.localeCompare(right.name)),
+      ...(document.schemaVersion === 1 ? {} : {
+        cards: cards.sort((left, right) => left.order - right.order || left.id.localeCompare(right.id)),
+        references: references.sort((left, right) => left.order - right.order || left.id.localeCompare(right.id)),
+      }),
     },
     endpoints: endpoints.sort((left, right) => left.id.localeCompare(right.id)),
     permissions,
@@ -1643,6 +1844,17 @@ async function downloadFile(url, destination) {
   throw downloadTransportError('Plugin archive download', failures)
 }
 
+function isNotFoundDownloadError(error) {
+  if (!(error instanceof MarketplaceError)) return false
+  const messages = [
+    error.message,
+    ...(Array.isArray(error.data?.transports)
+      ? error.data.transports.map(transport => transport?.message)
+      : []),
+  ]
+  return messages.some(message => typeof message === 'string' && /HTTP 404\b/i.test(message))
+}
+
 async function atomicWriteJSON(destination, value) {
   const temporary = `${destination}.${process.pid}.${randomUUID()}.tmp`
   try {
@@ -2044,6 +2256,9 @@ export class MarketplaceManager {
     }
     assertJSONValue(value, 'native endpoint result')
     assertNativeClientCredentialFree(value, 'native endpoint result')
+    if (Buffer.byteLength(JSON.stringify(value), 'utf8') > MAXIMUM_NATIVE_CLIENT_ENDPOINT_RESULT_BYTES) {
+      fail('endpoint-result-too-large', 'Native endpoint result exceeds the 64 KiB wire limit.')
+    }
     return { ok: true, value }
   }
 
@@ -2425,7 +2640,35 @@ export class MarketplaceManager {
     }
     const github = parseGitHubLocation(location)
     const archivePath = path.join(this.downloadsDirectory, `${randomUUID()}.zip`)
-    await downloadFile(github.archiveURL, archivePath)
+    // GitHub's HEAD archive endpoint is convenient but is not available for
+    // every repository mirror. For an unpinned repository, retry a 404 with
+    // the conventional branches. Network/TLS failures are not retried here;
+    // the transport layer already tried every on-device network path and a
+    // second request would only add another minute of waiting.
+    const refs = github.ref === undefined
+      ? ['HEAD', 'main', 'master']
+      : [github.ref]
+    let selectedRef
+    let lastError
+    for (const ref of refs) {
+      const archiveURL = `https://codeload.github.com/${github.owner}/${github.repository}/zip/${encodeURIComponent(ref)}`
+      try {
+        await downloadFile(archiveURL, archivePath)
+        selectedRef = ref
+        break
+      } catch (error) {
+        lastError = error
+        if (github.ref !== undefined || !isNotFoundDownloadError(error) || ref === refs.at(-1)) {
+          throw error
+        }
+      }
+    }
+    if (selectedRef === undefined) {
+      throw lastError ?? new MarketplaceError(
+        'download-failed',
+        'The plugin repository has no downloadable HEAD, main, or master branch.',
+      )
+    }
     return {
       archivePath,
       temporaryArchive: true,
@@ -2435,7 +2678,7 @@ export class MarketplaceManager {
         location: github.canonicalURL,
         repositoryURL: github.canonicalURL,
         repositoryKey: github.repositoryKey,
-        ...(github.ref === undefined ? {} : { ref: github.ref }),
+        ...(github.ref === undefined ? { ref: selectedRef } : { ref: github.ref }),
         ...(github.subpath === undefined ? {} : { subpath: github.subpath }),
       },
     }

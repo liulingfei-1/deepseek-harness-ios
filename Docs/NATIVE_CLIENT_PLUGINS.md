@@ -57,6 +57,7 @@ Declare the sidecar independently from `dsh.client` in `package.json`:
         "name": "example_status",
         "description": "Invoke the existing Host tool.",
         "inputHint": "<query>",
+        "inputImages": true,
         "order": 30,
         "action": {
           "kind": "hostTool",
@@ -107,7 +108,7 @@ The sidecar only links to a namespace. It cannot supply a second settings implem
 
 ### Commands
 
-A command registers a native slash command and invokes an existing Host tool. `inputHint` and `action.inputKey` must either both be present or both be absent. Static `arguments` must be JSON and are limited to 16 KiB.
+A command registers a native slash command and invokes an existing Host tool. `inputHint` and `action.inputKey` must either both be present or both be absent. Set optional `inputImages: true` when the command accepts staged image attachments; the Host tool receives them in the `$imageAttachments` argument. Static `arguments` must be JSON and are limited to 16 KiB. Commands omit `inputImages` when false for backwards-compatible manifests.
 
 The sidecar cannot register executable Swift code. The command action is only a typed reference to a tool already provided by the active Host plugin.
 

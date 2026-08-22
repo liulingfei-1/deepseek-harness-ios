@@ -67,7 +67,7 @@ final class ConversationControlsTests: XCTestCase {
         XCTAssertEqual(ToolPermissionMode.readOnly.decision(for: .sensitiveRead), .ask)
         XCTAssertEqual(ToolPermissionMode.readOnly.decision(for: .sideEffect), .deny)
         XCTAssertEqual(ToolPermissionMode.workspaceWrite.decision(for: .sideEffect), .ask)
-        XCTAssertEqual(ToolPermissionMode.dangerFullAccess.decision(for: .destructive), .allow)
+        XCTAssertEqual(ToolPermissionMode.dangerFullAccess.decision(for: .destructive), .ask)
     }
 
     func testLegacyControlStateDefaultsToWorkspaceWritePermission() throws {
@@ -131,11 +131,29 @@ final class ConversationControlsTests: XCTestCase {
             modelHost: "other.example.com",
             approvalResources: ["ish-sandbox:/workspace"]
         )
+        let otherTool = try ToolApprovalRequest(
+            runID: request.runID,
+            call: AgentToolCall(id: "call-2", name: "run_code", arguments: "{}"),
+            risk: .sideEffect,
+            summary: "code",
+            modelHost: "api.example.com",
+            approvalResources: ["ish-sandbox:/workspace"]
+        )
+        let otherPath = try ToolApprovalRequest(
+            runID: request.runID,
+            call: call,
+            risk: .sideEffect,
+            summary: "shell",
+            modelHost: "api.example.com",
+            approvalResources: ["ish-sandbox:/other"]
+        )
         XCTAssertFalse(grant.allows(escalated))
         XCTAssertFalse(grant.allows(otherDestination))
+        XCTAssertFalse(grant.allows(otherTool))
+        XCTAssertFalse(grant.allows(otherPath))
     }
 
-    func testDeviceApprovalGrantCoversEveryLocalRiskLevel() throws {
+    func testDeviceApprovalGrantDoesNotCoverDestructiveRiskOrAnotherDestination() throws {
         let shellCall = AgentToolCall(
             id: "call-device",
             name: "shell_execute",
@@ -166,7 +184,7 @@ final class ConversationControlsTests: XCTestCase {
             modelHost: "api.example.com",
             approvalResources: ["ish-sandbox:/workspace"]
         )
-        XCTAssertTrue(grant.allows(destructive))
+        XCTAssertFalse(grant.allows(destructive))
 
         let otherModel = try ToolApprovalRequest(
             runID: shellRequest.runID,
@@ -177,6 +195,40 @@ final class ConversationControlsTests: XCTestCase {
             approvalResources: ["ish-sandbox:/workspace"]
         )
         XCTAssertFalse(grant.allows(otherModel))
+    }
+
+    func testExactDestructiveGrantRequiresMatchingToolPathAndDestination() throws {
+        let call = AgentToolCall(
+            id: "danger-1",
+            name: "shell_execute",
+            arguments: "{\"command\":\"rm file\"}"
+        )
+        let request = try ToolApprovalRequest(
+            runID: UUID(),
+            call: call,
+            risk: .destructive,
+            summary: "dangerous shell",
+            modelHost: "https://api.example.com",
+            approvalResources: ["ish-sandbox:/workspace"]
+        )
+        let grant = ToolApprovalGrant(scope: request.scope)
+        XCTAssertTrue(grant.allows(request))
+        XCTAssertFalse(grant.allows(try ToolApprovalRequest(
+            runID: request.runID,
+            call: call,
+            risk: .destructive,
+            summary: "dangerous shell",
+            modelHost: "https://other.example.com",
+            approvalResources: ["ish-sandbox:/workspace"]
+        )))
+        XCTAssertFalse(grant.allows(try ToolApprovalRequest(
+            runID: request.runID,
+            call: call,
+            risk: .destructive,
+            summary: "dangerous shell",
+            modelHost: "https://api.example.com",
+            approvalResources: ["ish-sandbox:/mounted-folder"]
+        )))
     }
 
     func testToolApprovalGrantsPersistAcrossSettingsStoreInstances() throws {
@@ -203,5 +255,18 @@ final class ConversationControlsTests: XCTestCase {
         XCTAssertEqual(reloaded, [grant])
         SettingsStore(defaults: defaults).clearToolApprovalGrants()
         XCTAssertTrue(SettingsStore(defaults: defaults).loadToolApprovalGrants().isEmpty)
+    }
+
+    func testCorruptApprovalStoreFailsClosedAndCanBeRevoked() throws {
+        let suiteName = "com.llf.harnessmobile.tool-approval-corrupt.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.set(Data("not-json".utf8), forKey: "tool.approval-grants.v1")
+        let store = SettingsStore(defaults: defaults)
+        XCTAssertTrue(store.loadToolApprovalGrants().isEmpty)
+        store.clearToolApprovalGrants()
+        XCTAssertTrue(store.loadToolApprovalGrants().isEmpty)
     }
 }

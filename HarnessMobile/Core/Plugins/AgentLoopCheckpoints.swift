@@ -37,6 +37,58 @@ struct CordisAgentPreStepContext: Sendable, Equatable {
     let messages: [AgentMessage]
 }
 
+/// A frozen view of one pending queue occurrence immediately before the
+/// native loop claims it. DeepSeek Harness treats MessageId as the sole inbox
+/// identity; this mobile checkpoint exposes that identity and its ownership
+/// envelope only as immutable facts.
+struct CordisAgentInboxPreClaimContext: Sendable, Equatable {
+    let agentID: UUID
+    let runID: UUID
+    let turn: Int
+    let step: Int
+    let boundary: QueuedInputBoundary
+    let message: QueuedAgentInput
+    let source: String
+    let workspaceBoundary: String
+}
+
+/// Durable inbox lifecycle facts. These are observe-only events: plugins may
+/// not change MessageId, source, disposition, or queue ownership after the
+/// native store has committed the transition.
+struct CordisAgentInboxInsertedContext: Sendable, Equatable {
+    let agentID: UUID
+    let runID: UUID
+    let message: QueuedAgentInput
+    let source: String
+    let boundary: QueuedInputBoundary
+}
+
+struct CordisAgentInboxClaimedContext: Sendable, Equatable {
+    let agentID: UUID
+    let runID: UUID
+    let turn: Int
+    let message: QueuedAgentInput
+    let source: String
+    let boundary: QueuedInputBoundary
+}
+
+struct CordisAgentInboxDiscardedContext: Sendable, Equatable {
+    let agentID: UUID
+    let runID: UUID
+    let message: QueuedAgentInput
+    let source: String
+    let boundary: QueuedInputBoundary
+    let reason: String
+}
+
+/// The deliberately narrow mutation surface for pending input. Plugins may
+/// change text or consume the exact occurrence, but cannot replace its id,
+/// source, disposition, timestamp, or workspace ownership.
+enum CordisAgentInboxPreClaimDecision: Sendable, Equatable {
+    case claim(text: String)
+    case discard
+}
+
 enum CordisAgentPreStepDecision: Sendable, Equatable {
     case enter([AgentMessage])
     case reject(reason: String)
@@ -60,14 +112,16 @@ struct CordisModelRequestPlan: Sendable, Equatable {
         apiKey: String,
         systemPrompt: String,
         messages: [AgentMessage],
-        tools: [ModelToolDefinition]
+        tools: [ModelToolDefinition],
+        imagePayloads: [ModelImagePayload] = []
     ) -> ModelRequest {
         ModelRequest(
             configuration: configuration,
             apiKey: apiKey,
             systemPrompt: systemPrompt,
             messages: messages,
-            tools: tools
+            tools: tools,
+            imagePayloads: imagePayloads
         )
     }
 }
@@ -171,10 +225,19 @@ enum CordisPreToolDecision: Sendable, Equatable {
 struct CordisToolExecutionResult: Sendable, Equatable {
     let text: String
     let isError: Bool
+    /// Canonical JSON value returned by the tool. `text` is the current
+    /// presentation content for model/session compatibility; finalizers may
+    /// replace only that content.
+    let value: JSONValue?
 
-    init(text: String, isError: Bool) {
+    init(text: String, isError: Bool, value: JSONValue? = nil) {
         self.text = text
         self.isError = isError
+        self.value = value
+    }
+
+    func replacingContent(_ text: String) -> Self {
+        Self(text: text, isError: isError, value: value)
     }
 }
 
@@ -222,12 +285,29 @@ enum CordisAgentLoopEvents {
     static let agentError = CordisEventKey<CordisAgentErrorContext>("agent/error")
     static let toolsResult = CordisEventKey<CordisToolResultContext>("tools/result")
     static let toolsChange = CordisEventKey<CordisNoPayload>("tools/change")
+    static let agentInboxInserted = CordisEventKey<CordisAgentInboxInsertedContext>(
+        "agent/inbox/inserted"
+    )
+    static let agentInboxClaimed = CordisEventKey<CordisAgentInboxClaimedContext>(
+        "agent/inbox/claimed"
+    )
+    static let agentInboxDiscarded = CordisEventKey<CordisAgentInboxDiscardedContext>(
+        "agent/inbox/discarded"
+    )
 }
 
 /// Checkpoint names and semantics intentionally mirror DeepSeek Harness' public
 /// `agent/*` and `tools/*` Cordis waterfalls. `AgentRuntime` can adopt them one
 /// boundary at a time without coupling the plugin kernel to UI state.
 enum CordisAgentLoopCheckpoints {
+    /// Mobile-only admission node placed immediately before the durable queue
+    /// claim. Its ordering follows the vendored Inbox claim contract while
+    /// keeping the supported mutation surface smaller than `agent/pre-step`.
+    static let inboxPreClaim = CordisCheckpointKey<
+        CordisAgentInboxPreClaimContext,
+        CordisAgentInboxPreClaimDecision
+    >("agent/inbox/pre-claim")
+
     /// Mobile memory providers may rewrite or reject the messages entering a
     /// step before the canonical `agent/pre-step` waterfall runs.
     static let memoryRecall = CordisCheckpointKey<

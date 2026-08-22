@@ -33,8 +33,12 @@ actor NativeAgentPluginStore {
         guard document.schemaVersion == 1 else {
             throw NativeAgentPluginError.invalidCompiledPlugin("插件注册表版本不兼容。")
         }
-        return try document.plugins.map {
-            try $0.validated(allowedBaseTools: allowedBaseTools)
+        // A single stale compiled plugin must not hide every other plugin.
+        // Keep valid entries and let the AppModel disable entries that fail
+        // during runtime registration. Mutating operations will naturally
+        // rewrite the registry with the surviving entries.
+        return document.plugins.compactMap { plugin in
+            try? plugin.validated(allowedBaseTools: allowedBaseTools)
         }
     }
 
@@ -65,6 +69,27 @@ actor NativeAgentPluginStore {
             throw NativeAgentPluginError.notFound(id)
         }
         plugins[index].enabled = enabled
+        try save(plugins)
+        return plugins
+    }
+
+    func setSettings(
+        id: String,
+        values: JSONValue,
+        allowedBaseTools: Set<String>
+    ) throws -> [NativeAgentCompiledPlugin] {
+        var plugins = try load(allowedBaseTools: allowedBaseTools)
+        guard let index = plugins.firstIndex(where: { $0.id == id }) else {
+            throw NativeAgentPluginError.notFound(id)
+        }
+        guard var settings = plugins[index].settings else {
+            throw NativeAgentPluginError.invalidCompiledPlugin("这个插件没有可编辑设置。")
+        }
+        try NativeAgentJSONSchemaValidator.validate(value: values, schema: settings.schema)
+        try ISHPluginHostCredentialFirewall.validate(values)
+        settings.values = values
+        plugins[index].settings = settings
+        plugins[index] = try plugins[index].validated(allowedBaseTools: allowedBaseTools)
         try save(plugins)
         return plugins
     }

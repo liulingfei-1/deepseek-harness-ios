@@ -58,12 +58,7 @@ actor ISHPluginHostInstaller {
             hostVersion: manifest.hostVersion,
             protocolVersion: manifest.protocolVersion
         )
-        let cordisPackage = target
-            .appendingPathComponent("node_modules", isDirectory: true)
-            .appendingPathComponent("@deepseek-ai", isDirectory: true)
-            .appendingPathComponent("cordis", isDirectory: true)
-            .appendingPathComponent("package.json")
-        if fileManager.fileExists(atPath: cordisPackage.path),
+        if dependenciesMatch(manifest, in: target),
            let stampData = try? Data(contentsOf: stampURL),
            let stamp = try? JSONDecoder().decode(InstallStamp.self, from: stampData),
            stamp == expectedStamp {
@@ -86,7 +81,11 @@ actor ISHPluginHostInstaller {
                 command: command,
                 workspaceURL: workspaceURL,
                 timeout: 1_800,
-                maximumOutputBytes: 512 * 1_024
+                maximumOutputBytes: 512 * 1_024,
+                policy: ISHSandboxExecutionPolicy(
+                    mode: .dangerFullAccess,
+                    workspaceRoot: workspaceURL
+                )
             )
             guard result.exitCode == 0 else {
                 throw ISHPluginHostError.installationFailed(result.combinedOutput)
@@ -104,6 +103,27 @@ actor ISHPluginHostInstaller {
             manifest: manifest,
             installedDependenciesNow: true
         )
+    }
+
+    private func dependenciesMatch(
+        _ manifest: ISHPluginHostInstallManifest,
+        in target: URL
+    ) -> Bool {
+        manifest.packages.allSatisfy { package in
+            let packageURL = package.name
+                .split(separator: "/")
+                .reduce(target.appendingPathComponent("node_modules", isDirectory: true)) {
+                    $0.appendingPathComponent(String($1), isDirectory: true)
+                }
+                .appendingPathComponent("package.json")
+            guard let data = try? Data(contentsOf: packageURL),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  object["name"] as? String == package.name,
+                  object["version"] as? String == package.version else {
+                return false
+            }
+            return true
+        }
     }
 
     private func stageResources(from bundle: Bundle, to target: URL) throws {
