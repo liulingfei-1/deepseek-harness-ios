@@ -552,15 +552,19 @@ struct SetupView: View {
                 forceRefresh: forceRefresh
             )
             guard requestIdentity == ModelCatalogIdentity(configuration: draft) else { return }
-            catalog = .merging(
+            let refreshedCatalog = SetupModelCatalog.merging(
                 snapshot,
                 existing: visibleCatalog.models,
                 for: requestConfiguration
             )
+            catalog = refreshedCatalog
             if draft.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-               let firstModel = catalog.models.first {
+               let firstModel = refreshedCatalog.models.first {
                 draft.model = firstModel.id
             }
+            draft.inputModalities = refreshedCatalog.models.first(
+                where: { $0.id == draft.model }
+            )?.inputModalities
         } catch is CancellationError {
             return
         } catch {
@@ -715,12 +719,22 @@ private struct SetupModelCatalog {
         for discoveredModel in snapshot.models {
             if let position = positions[discoveredModel.id] {
                 let existing = models[position]
+                let builtIn = ModelProviderCatalog.descriptor(for: configuration.providerID)
+                    .builtInModels
+                    .first(where: { $0.id == discoveredModel.id })
+                let refreshedModalities = discoveredModel.inputModalities == [.text]
+                    && builtIn?.inputModalities.contains(.image) == true
+                    ? builtIn?.inputModalities ?? discoveredModel.inputModalities
+                    : discoveredModel.inputModalities
                 models[position] = ProviderModel(
                     id: discoveredModel.id,
                     name: discoveredModel.name ?? existing.name,
                     contextWindow: discoveredModel.contextWindow ?? existing.contextWindow,
                     maxOutputTokens: discoveredModel.maxOutputTokens ?? existing.maxOutputTokens,
-                    inputModalities: existing.inputModalities,
+                    // A refreshed provider catalog is authoritative for model
+                    // capabilities. Keeping the cached value can leave a
+                    // vision model marked as text-only after discovery.
+                    inputModalities: refreshedModalities,
                     openAICompatibility: existing.openAICompatibility
                 )
             } else {

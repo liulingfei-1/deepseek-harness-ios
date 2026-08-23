@@ -19,7 +19,8 @@ final class CustomOpenAICompatibleWireTests: XCTestCase {
                     "",
                     reasoning: "provider-private reasoning",
                     toolCalls: [AgentToolCall(id: "call-1", name: "clock", arguments: "{}")]
-                )
+                ),
+                .tool(callID: "call-1", content: "12:00")
             ],
             tools: []
         )
@@ -67,7 +68,10 @@ final class CustomOpenAICompatibleWireTests: XCTestCase {
             configuration: configuration,
             apiKey: "test-only",
             systemPrompt: "system",
-            messages: [.assistant("", toolCalls: [AgentToolCall(id: "c", name: "clock", arguments: "{}")])],
+            messages: [
+                .assistant("", toolCalls: [AgentToolCall(id: "c", name: "clock", arguments: "{}")]),
+                .tool(callID: "c", content: "12:00")
+            ],
             tools: []
         )
 

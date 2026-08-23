@@ -199,6 +199,60 @@ final class ProviderProfileTests: XCTestCase {
         XCTAssertFalse(ModelProviderCatalog.supportsImageInput(textOnly))
     }
 
+    func testKnownModelUsesItsDeclaredAPIOutputCapacityInsteadOfLegacyProfileCap() throws {
+        var profile = ProviderProfile.catalogDefault(
+            for: .deepSeekOfficial,
+            maxOutputTokens: 4_096
+        )
+        XCTAssertEqual(profile.maxOutputTokens, 256_000)
+
+        // A persisted profile can retain its old field value. Selecting a
+        // model must still produce the capacity that the current provider
+        // catalog declared for that concrete model, even when the individual
+        // stored model record itself was cached before the catalog update.
+        profile.maxOutputTokens = 4_096
+        let visionIndex = try XCTUnwrap(
+            profile.models.firstIndex { $0.id == "deepseek-v4-flash-vision-exp" }
+        )
+        profile.models[visionIndex] = ProviderModel(
+            id: "deepseek-v4-flash-vision-exp",
+            maxOutputTokens: 4_096,
+            inputModalities: [.text]
+        )
+        let configuration = try profile.configuration(
+            model: "deepseek-v4-flash-vision-exp"
+        ).validated()
+        XCTAssertEqual(configuration.maxOutputTokens, 256_000)
+        XCTAssertEqual(configuration.inputModalities, [.text, .image])
+    }
+
+    func testDiscoveredModelCapacityCanExceedHistoricAppLimit() throws {
+        let profile = ProviderProfile(
+            id: "large-output-gateway",
+            displayName: "Large Output Gateway",
+            providerID: .customOpenAICompatible,
+            wireProtocol: .openAIChatCompletions,
+            baseURL: "https://gateway.example/v1",
+            models: [ProviderModel(id: "large-output", maxOutputTokens: 262_144)],
+            defaultModel: "large-output",
+            reasoningMode: .providerDefault,
+            maxOutputTokens: 4_096,
+            isCustom: true
+        )
+
+        let configuration = try profile.validated().configuration().validated()
+        XCTAssertEqual(configuration.maxOutputTokens, 262_144)
+    }
+
+    func testKnownVisionModelOverridesStaleTextOnlyCapabilityCache() {
+        var configuration = AgentConfiguration()
+        configuration.providerID = .deepSeekOfficial
+        configuration.model = "deepseek-v4-flash-vision-exp"
+        configuration.inputModalities = [.text]
+
+        XCTAssertTrue(ModelProviderCatalog.supportsImageInput(configuration))
+    }
+
     func testDirectoryRejectsCredentialReferenceSharedByTwoProfiles() throws {
         let sharedReference = CredentialReference(rawValue: "provider.shared.api-key")
         let first = makeProfile(

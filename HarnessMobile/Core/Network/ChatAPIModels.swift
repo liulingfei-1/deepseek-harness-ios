@@ -220,6 +220,61 @@ struct ChatAPIErrorEnvelope: Decodable, Sendable {
 }
 
 enum ChatWireSerializer {
+    /// Validate the provider-facing tool transcript before encoding it.
+    /// OpenAI-compatible gateways otherwise report this as an opaque HTTP 400.
+    static func validateToolTranscript(_ messages: [AgentMessage]) throws {
+        var calls: [String: Int] = [:]
+        var results: [String: Int] = [:]
+
+        for (index, message) in messages.enumerated() {
+            switch message.role {
+            case .assistant:
+                for call in message.toolCalls {
+                    let id = call.id.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !id.isEmpty else {
+                        throw ModelClientError.invalidToolTranscript(
+                            "assistant 工具调用缺少非空 id（消息 #\(index + 1)）。"
+                        )
+                    }
+                    guard calls[id] == nil else {
+                        throw ModelClientError.invalidToolTranscript(
+                            "工具调用 id \"\(id)\" 重复（消息 #\(index + 1)）。"
+                        )
+                    }
+                    calls[id] = index
+                }
+            case .tool:
+                guard let rawID = message.toolCallID else {
+                    throw ModelClientError.invalidToolTranscript(
+                        "tool 消息缺少 tool_call_id（消息 #\(index + 1)）。"
+                    )
+                }
+                let id = rawID.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !id.isEmpty, let callIndex = calls[id], callIndex < index else {
+                    throw ModelClientError.invalidToolTranscript(
+                        "tool 消息引用了不存在或尚未声明的工具调用 id \"\(id)\"（消息 #\(index + 1)）。"
+                    )
+                }
+                let count = (results[id] ?? 0) + 1
+                guard count == 1 else {
+                    throw ModelClientError.invalidToolTranscript(
+                        "工具调用 id \"\(id)\" 对应了多个 tool 结果。"
+                    )
+                }
+                results[id] = count
+            case .user:
+                continue
+            }
+        }
+
+        let missing = calls.keys.filter { results[$0] == nil }.sorted()
+        guard missing.isEmpty else {
+            throw ModelClientError.invalidToolTranscript(
+                "assistant 工具调用缺少对应的 tool 结果：\(missing.joined(separator: ", "))."
+            )
+        }
+    }
+
     static func makeRequest(_ request: ModelRequest) -> ChatCompletionsRequest {
         let configuration = request.configuration
         return ChatCompletionsRequest(

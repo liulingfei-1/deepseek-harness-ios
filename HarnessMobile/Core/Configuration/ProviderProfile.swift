@@ -86,6 +86,13 @@ struct ProviderProfile: Codable, Sendable, Equatable, Identifiable {
         maxOutputTokens: Int = 8_192
     ) -> ProviderProfile {
         let descriptor = ModelProviderCatalog.descriptor(for: providerID)
+        // Do not carry the old 8K app default into a provider model that has
+        // already declared a larger API output budget. The selected model is
+        // still re-resolved in configuration(model:) when the user switches
+        // models or refreshes discovery.
+        let declaredDefaultMaximum = descriptor.builtInModels.first(
+            where: { $0.id == descriptor.defaultModel }
+        )?.maxOutputTokens
         return ProviderProfile(
             id: providerID.rawValue,
             displayName: descriptor.displayName,
@@ -102,7 +109,7 @@ struct ProviderProfile: Codable, Sendable, Equatable, Identifiable {
             openAICompatibility: nil,
             retryPolicy: .upstreamDefault,
             maxSteps: maxSteps,
-            maxOutputTokens: maxOutputTokens,
+            maxOutputTokens: declaredDefaultMaximum ?? maxOutputTokens,
             isCustom: providerID == .customOpenAICompatible
         )
     }
@@ -182,6 +189,14 @@ struct ProviderProfile: Codable, Sendable, Equatable, Identifiable {
     ) -> AgentConfiguration {
         let selectedModelID = model ?? defaultModel
         let selectedModel = models.first(where: { $0.id == selectedModelID })
+        // Provider profiles are persisted across catalog upgrades. For a
+        // known built-in model, keep user/discovery metadata but never let an
+        // old cached capability lower the current provider contract. This is
+        // especially important for Vision: a historic 4K record must not
+        // override its current output capacity or erase image support.
+        let catalogModel = descriptor.builtInModels.first {
+            $0.id == selectedModelID
+        }
         let modelCompatibility = selectedModel?.openAICompatibility
         let mergedCompatibility: OpenAICompletionsCompatibility?
         if openAICompatibility == nil, modelCompatibility == nil {
@@ -196,13 +211,19 @@ struct ProviderProfile: Codable, Sendable, Equatable, Identifiable {
             credentialReference: credentialReference,
             baseURL: baseURL,
             model: selectedModelID,
-            inputModalities: selectedModel?.inputModalities,
+            inputModalities: catalogModel?.inputModalities
+                ?? selectedModel?.inputModalities,
             reasoningMode: reasoningMode ?? self.reasoningMode,
             openAIWireProfile: openAIWireProfile,
             openAICompatibility: mergedCompatibility,
             retryPolicy: retryPolicy,
             maxSteps: maxSteps,
-            maxOutputTokens: maxOutputTokens
+            // When a model catalog supplies a maximum, it is the provider API
+            // contract. Never silently lower it to the profile's legacy 8K
+            // field; otherwise a length finish creates an unnecessary retry.
+            maxOutputTokens: catalogModel?.maxOutputTokens
+                ?? selectedModel?.maxOutputTokens
+                ?? maxOutputTokens
         )
     }
 
@@ -218,7 +239,7 @@ struct ProviderProfile: Codable, Sendable, Equatable, Identifiable {
         guard !normalizedDefaultModel.isEmpty else {
             throw ProviderProfileError.emptyDefaultModel
         }
-        guard (128...65_536).contains(maxOutputTokens) else {
+        guard maxOutputTokens >= 128 else {
             throw AgentConfigurationError.invalidMaxOutputTokens
         }
 

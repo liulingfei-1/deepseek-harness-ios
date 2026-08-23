@@ -73,12 +73,6 @@ const PREPARED_NATIVE_SOURCE_TTL_MS = 30 * 60 * 1000
 const NATIVE_CLIENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
 const NATIVE_CLIENT_COMMAND_PATTERN = /^[a-z][a-z0-9_-]{0,63}$/
 const NATIVE_CLIENT_SERVICE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/
-const UNSUPPORTED_MARKET_CATEGORIES = new Set([
-  'UI 增强',
-  '主题与外观',
-  '插件市场与管理',
-  '娱乐',
-])
 const NATIVE_COMPILATION_FAILURES = new Set([
   'missing-entrypoint',
   'unsupported-patch',
@@ -87,7 +81,12 @@ const NATIVE_COMPILATION_EXTENSIONS = new Set([
   '.cjs', '.js', '.json', '.jsx', '.md', '.mjs', '.ts', '.tsx', '.yaml', '.yml',
 ])
 const NATIVE_COMPILATION_IGNORED_DIRECTORIES = new Set([
-  '.git', 'build', 'coverage', 'dist', 'lib', 'node_modules',
+  // This is not a trust or compatibility filter.  A marketplace archive is
+  // staged intact; only its private Git metadata is irrelevant to both the
+  // mobile compiler and the iSH runtime.  In particular, published `lib/`,
+  // `build/`, `dist/`, `coverage/`, and vendored `node_modules/` sources must
+  // remain available for native-first analysis.
+  '.git',
 ])
 
 export class MarketplaceError extends Error {
@@ -420,21 +419,13 @@ function cleanCategoryHeading(raw) {
 }
 
 function catalogCompatibility(category) {
-  if (UNSUPPORTED_MARKET_CATEGORIES.has(category)) {
-    return {
-      compatibility: 'unsupported',
-      reason: category === '娱乐'
-        ? '娱乐类插件依赖桌面 Web Client，手机 Host 不执行。'
-        : '该分类主要注入 DSH 桌面 Web UI，当前手机端不兼容。',
-    }
-  }
   if (category === '工具与能力' || category === '技能包'
     || category === '工作流与自动化' || category === '记忆') {
     return { compatibility: 'supported' }
   }
   return {
     compatibility: 'review',
-    reason: '安装时会在手机内校验 bundle、依赖和 Host 服务兼容性。',
+    reason: '不会因分类拒绝安装：将先尝试原生编译，再在手机 iSH 中加载。桌面 Web Client 专属效果若没有手机等价实现，会在安装结果中明确说明。',
   }
 }
 
@@ -651,9 +642,10 @@ function archiveExtractionPlan(entries, requestedSubpath) {
     }
     if (parts.length === 0) continue
     if (parts[0] === '__MACOSX' || parts.at(-1) === '.DS_Store') continue
-    if (parts.some(part => part.toLowerCase() === 'node_modules')) {
-      fail('invalid-zip', 'Bundled node_modules directories are not accepted; dependencies must be installed by mobile npm.')
-    }
+    // Do not reject vendored JavaScript dependencies merely because they are
+    // under `node_modules`. Some marketplace plugins publish a self-contained
+    // runtime or omit dependency metadata. The archive-size, file-count,
+    // traversal, symlink and later iSH-native-addon checks still apply.
     const relativePath = parts.join('/')
     const folded = relativePath.toLowerCase()
     if (selectedNames.has(folded)) fail('invalid-zip', `Duplicate or case-colliding ZIP path ${relativePath}.`)
@@ -810,6 +802,9 @@ async function packageCandidates(root, depth = 0, output = []) {
   if (depth > 6 || output.length > 64) return output
   const directory = await opendir(root)
   for await (const entry of directory) {
+    // Dependency manifests are not competing marketplace bundle roots. This
+    // affects only bundle-root discovery; it does not discard their files from
+    // the staged archive or native compiler snapshot.
     if (entry.name === 'node_modules' || entry.name === '.git') continue
     const target = path.join(root, entry.name)
     const info = await lstat(target)
@@ -833,13 +828,27 @@ function nativeCompilationPriority(relativePath) {
   if (normalized.includes('/service.') || normalized.includes('/store.')) return 750
   if (normalized.startsWith('src/') || normalized.includes('/src/')) return 700
   if (normalized.startsWith('readme')) return 300
+  // Vendored sources are retained, but are considered after the plugin's own
+  // entrypoint and source tree when the bounded compiler window is full.
+  if (normalized.startsWith('node_modules/')) return 50
   return 100
 }
 
 async function nativeCompilationFiles(root, relativeRoot = '', output = []) {
   if (output.length >= 512) return output
   const directory = await opendir(path.join(root, relativeRoot))
-  for await (const entry of directory) {
+  const entries = []
+  for await (const entry of directory) entries.push(entry)
+  // Visit the plugin package before its vendored dependency tree so a large
+  // `node_modules` cannot hide the actual plugin entrypoint behind the
+  // diagnostic file ceiling. This is ordering, not filtering: every allowed
+  // source directory is still traversed while capacity remains.
+  entries.sort((left, right) => {
+    const leftDependency = left.name === 'node_modules' ? 1 : 0
+    const rightDependency = right.name === 'node_modules' ? 1 : 0
+    return leftDependency - rightDependency || left.name.localeCompare(right.name)
+  })
+  for (const entry of entries) {
     if (NATIVE_COMPILATION_IGNORED_DIRECTORIES.has(entry.name)) continue
     const relativePath = relativeRoot === '' ? entry.name : `${relativeRoot}/${entry.name}`
     const target = path.join(root, ...relativePath.split('/'))
@@ -850,7 +859,6 @@ async function nativeCompilationFiles(root, relativeRoot = '', output = []) {
       continue
     }
     if (!info.isFile() || !NATIVE_COMPILATION_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) continue
-    if (/(?:^|\/)(?:package-lock|pnpm-lock|yarn\.lock)(?:\.|$)/i.test(relativePath)) continue
     output.push({ relativePath, size: info.size })
   }
   return output

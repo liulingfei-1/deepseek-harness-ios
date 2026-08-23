@@ -3,6 +3,71 @@ import XCTest
 
 @MainActor
 final class AppModelModelDiscoveryTests: XCTestCase {
+    func testRefreshingCatalogReplacesStaleCachedImageCapability() {
+        var configuration = AgentConfiguration()
+        configuration.model = "deepseek-v4-flash-vision-exp"
+
+        let staleCachedModel = ProviderModel(
+            id: configuration.model,
+            name: "DeepSeek-V4-Flash-Vision-Exp",
+            inputModalities: [.text]
+        )
+        let discoveredVisionModel = ProviderModel(
+            id: configuration.model,
+            name: "DeepSeek-V4-Flash-Vision-Exp",
+            inputModalities: [.text, .image]
+        )
+        let snapshot = ModelCatalogSnapshot(
+            providerID: .deepSeekOfficial,
+            source: .remote,
+            catalogVersion: "test",
+            fetchedAt: Date(),
+            models: [discoveredVisionModel]
+        )
+
+        let catalog = SessionModelCatalog.merging(
+            snapshot,
+            existing: [staleCachedModel],
+            for: configuration
+        )
+
+        XCTAssertEqual(
+            catalog.models.first(where: { $0.id == configuration.model })?.inputModalities,
+            [.text, .image]
+        )
+    }
+
+    func testRefreshingCatalogDoesNotEraseBuiltInVisionCapabilityWhenGatewayOmitsIt() {
+        let configuration = AgentConfiguration(
+            providerID: .deepSeekOfficial,
+            model: "deepseek-v4-flash-vision-exp"
+        )
+        let existing = [ProviderModel(
+            id: configuration.model,
+            name: "DeepSeek-V4-Flash-Vision-Exp",
+            inputModalities: [.text, .image]
+        )]
+        let gatewayModel = ProviderModel(
+            id: configuration.model,
+            name: "DeepSeek-V4-Flash-Vision-Exp",
+            inputModalities: [.text]
+        )
+        let snapshot = ModelCatalogSnapshot(
+            providerID: .deepSeekOfficial,
+            source: .remote,
+            catalogVersion: "test",
+            fetchedAt: Date(),
+            models: [gatewayModel]
+        )
+
+        let catalog = SessionModelCatalog.merging(snapshot, existing: existing, for: configuration)
+
+        XCTAssertEqual(
+            catalog.models.first(where: { $0.id == configuration.model })?.inputModalities,
+            [.text, .image]
+        )
+    }
+
     func testTemporaryCredentialIsScopedToDiscoveryAndIsNotPersisted() async throws {
         let fixture = try makeFixture()
         defer {

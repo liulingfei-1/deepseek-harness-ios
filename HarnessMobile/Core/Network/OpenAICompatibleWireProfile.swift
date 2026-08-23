@@ -335,6 +335,7 @@ enum OpenAICompatibleWireSerializer {
         _ request: ModelRequest,
         profile: OpenAICompatibleWireProfile? = nil
     ) throws -> Data {
+        try ChatWireSerializer.validateToolTranscript(request.messages)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         let canonical = try encoder.encode(ChatWireSerializer.makeRequest(request))

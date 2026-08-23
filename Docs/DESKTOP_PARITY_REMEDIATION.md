@@ -17,6 +17,8 @@
 - workflow 结果使用紧凑 JSON，降低工具卡片和轨迹的无意义文本体积。
 - workflow 子 Agent 具备可注入的超时/终止宽限窗口；普通分支失败保留为 `null`，取消则在 workflow 边界传播为 `CancellationError`，不会发布“已完成”。
 - XCTest 聚焦集已通过：`HarnessJobsTests`、`NativeToolEventPresentationTests`、`WorkflowToolTests` 共 41 项，0 failures（Xcode Beta / iPhone 17 simulator）。
+- iSH Host transport 的回调现在携带严格的 transport generation；旧 iSH 进程在自动重启后迟到的 stdout/stderr/exit 不会污染新 Host 的状态、framer 或 pending RPC。`ISHPluginHostTests` 25 项通过（SwiftPM，Xcode Beta toolchain）。
+- Harness trace 现在在 run 启动前登记 runID -> sessionID，Cordis/plugin trace 会继承所属会话；诊断导出、Agent diagnostics 和轨迹面板均严格按 sessionID（可再按 runID）过滤，不再把父/子会话或无主全局事件混入。`HarnessTraceStoreTests` 5 项通过（Xcode Beta SwiftPM；真机并发父子 run 仍待验收）。
 
 ## 2. 版本基线
 
@@ -68,6 +70,7 @@
 | WIRE-004 | DONE | 放宽可证明完整的 SSE 结束变体 | 兼容网关不必同时伪造 semantic finish 和 `[DONE]`，不降低截断检测 |
 | WIRE-005 | VERIFY | 提供可配置 provider retry policy | Provider Profile 已持久化官方 nested `normal`/`always` 配置；运行时支持有界错误码重试、下游 recovery 优先的持续重试、Retry-After 上限、本地 Double 退避、空响应与部分流重试、取消边界和精确 trajectory 事件。SwiftPM 全量与 Xcode 聚焦测试通过，真实网关/真机取消压力仍待验收 |
 | WIRE-006 | VERIFY | V4 Vision 能力广告与真实 endpoint 可用性解耦 | 内置目录精确声明图片能力；动态 `/models` 只接受合法且明确的 `input`/`input_modalities`，绝不从模型名称猜测图片能力；能力广告不等于 endpoint 可用性，已补 fixture/单元测试，真实 endpoint live test 待执行 |
+| WIRE-008 | VERIFY | 输出预算完全遵循选定模型的 API 容量 | 已知内置模型的当前 `maxOutputTokens` 与输入模态覆盖过期 Profile/model 缓存（包括 Vision 的历史 4K 记录）；不再对 `length` 追加 continuation 或重发工具调用。纯 text/reasoning 截断以 `isIncomplete` 持久化，截断 tool JSON 立即 fail-closed、绝不执行；只有瞬态传输/服务端失败继续遵循 Provider retry policy。SwiftPM 定向回归通过，真实 API 与 iPhone 16 Pro 待验收 |
 
 ## 7. IMG：多模态与图片工具
 
@@ -135,11 +138,11 @@
 | PLUGIN-003 | VERIFY | 事件确认式 `llm/stream` 流式桥 | Swift 保留原生 `AsyncThrowingStream` 与凭据边界；iSH Host 按 start/event/finish-error-cancel 接收无凭据 envelope，并以 next/drop/replace 提供逐块背压与改写，Host 故障 fail-open，取消和 partial/error 仍由 Swift 传播；待 Node smoke 与真机长流验收 |
 | PLUGIN-004 | VERIFY | 将原生 Code Mode dispatcher 纳入统一 checkpoint | Host 和 native 插件使用同一次序、授权和 trajectory |
 | PLUGIN-005 | VERIFY | 动态 contribution 原子更新与回滚 | 新 generation 失败时旧 generation 仍有效，依赖可重连 |
-| PLUGIN-006 | VERIFY | Host 重启后动态定义恢复策略 | 进程内定义丢失时有明确的重放/重建/不可恢复状态 |
+| PLUGIN-006 | VERIFY | Host 重启后动态定义恢复策略 | 进程内定义丢失时有明确的重放/重建/不可恢复状态；transport generation 已隔离迟到旧进程回调，动态定义重建/真机 inventory 握手仍待验收 |
 | PLUGIN-007 | TODO | 按版本扩展 `dsh.nativeClient` contribution kinds | 只扩展审计过的 inspector/card/command/settings/reference 类型 |
 | PLUGIN-008 | IOS-REPLACEMENT | Web `dsh.client` React/slots/themes | 继续明确拒绝任意 Web/native code，通过受控 native manifest 替代 |
-| PLUGIN-009 | DONE | 主 Agent 插件编译—诊断—修正—重试闭环 | 校验失败返回稳定错误码、阶段、retryable、同一 prepared_token 和下一步动作；diagnostics_read 提供完整脱敏 trace，主 Agent 可修正清单后重试 |
-| PLUGIN-010 | VERIFY | 插件市场安装与对话安装使用同一管线 | 两个入口共享下载、校验、native-first、iSH fallback、rollback 和诊断；AppModel 已统一接入，待真机双入口验收 |
+| PLUGIN-009 | VERIFY | 主 Agent 插件编译—诊断—修正—重试闭环 | 校验失败返回稳定错误码、阶段、retryable、同一 prepared_token 和下一步动作；`prompt_contexts[file].path` 现在指出精确字段、收到的值与合法私有路径模板，compiler policy 同步禁止以 list/contains 预检隐藏路径。`NativeAgentPluginTests` 19/19 通过；仍需在 iPhone 16 Pro 以 `dsh-skillradar` 真机复测。 |
+| PLUGIN-010 | VERIFY | 插件市场安装与对话安装使用同一管线 | 两个入口共享下载、校验、native-first、iSH fallback、rollback 和诊断；snapshot 保留上游 `lib/` 运行时代码，prepared native 安装沿 Host 规范化 sourceKey 持久化，不再在保存成功后误报来源不匹配。待真机双入口验收 |
 | PLUGIN-011 | VERIFY | 增加代码生成与开发模式可观测性 | 编译页面已有阶段、输入、产物和日志；结构化失败诊断已进入 diagnostics_read，待 Xcode/真机确认完整可见性 |
 
 ## 12. TOOL：桌面工具能力
@@ -322,5 +325,9 @@
 | 2026-08-22 | 对齐上游 `time-context`：设置页显式开启并选择 iPhone/UTC 时区和刷新间隔；运行时在 pre-step 追加 durable plugin snapshot，不修改 system/header，刷新窗口内保留稳定前缀 | `TimeContextSettingsTests` 3/3、AgentRuntime durable/header 测试及 Xcode Beta iOS 定向测试通过；设备执行边界审计通过 | CTX-005 DONE |
 | 2026-08-22 | 对齐上游 session-title service/两个 LLM provider：首问或全部提问 cadence、独立 Provider Profile/模型、128 token/64 KiB 输入/1 KiB 输出/15 秒超时、无工具请求、Keychain 凭据、离线 fallback、用户标题 pin、显式 regenerate 与 title trajectory 事件 | `SessionTitleSettingsTests` SwiftPM/Xcode Beta 3/3；Provider 删除时路由回退测试已扩展；SwiftPM 全量 606 项、3 跳过、0 失败 | CTX-006 DONE |
 | 2026-08-22 | 清理桌面对齐文档的过期缺口：slash continuation/native `@`、Host commands、compaction route、child breadcrumb、feedback sidecar、Jobs delivery、MCP/LSP 当前边界与剩余顺序均改为当前实现；Profile Bundle 安装边界不再写成已完成 | 文档逐项对照当前生产代码与测试；`git diff --check` 纳入本轮收尾 | BASE-005 DONE |
+| 2026-08-23 | 重构 AppModel 的插件市场/原生插件协调边界：原生清单物化、runtime/store 注册、回滚和编译追踪迁至 `AppModel+NativePluginLifecycle.swift`；主 Agent 市场工具、prepared-token 交接和 iSH fallback 迁至 `AppModel+PluginMarketplaceTool.swift`；继续复用既有 `PluginInstallCoordinator`、`NativeAgentPluginCompiler`、native store 和 Host。 | Xcode Beta arm64 Simulator build 通过；iPhone 17 Pro Simulator 聚焦 `NativeAgentPluginTests` 18/18、`PluginInstallCoordinatorTests` 10/10 通过；未改变 PLUGIN-009/010/011 的 iPhone 16 Pro 真机 VERIFY 状态。 | PLUGIN-009~011 VERIFY |
 | 2026-08-22 | 将 Codex/Claude Code Profile Bundle 从 npm 包主页和全 0 哈希改为官方不可变 tarball URL 与实测 SHA-256；校验器 fail-closed 拒绝占位哈希 | 官方 npm registry metadata 与下载字节交叉核对；`AgentProviderBundleTests` 9/9 | PROFILE-001 VERIFY，仍待 iSH 安装器/真机执行 |
 | 2026-08-22 | 扩展锁定 `dsh-v0.1.1-rc.2` / `b150a551...` 的跨版本夹具：reasoning replay、取消前缀、inline/file-id 图片、file/session 引用、continuable subagent descriptor v2、job snapshot/completion notice | `RC2CompatibilityFixtureTests` 6/6、既有上游 fixture 2/2、三份 JSON `jq empty` 与 diff check 通过 | BASE-004 DONE |
+| 2026-08-23 | 在 OpenAI/DeepSeek 与 Anthropic Messages 请求编码边界增加 tool transcript 完整性校验：assistant tool call id 必须唯一且每个恰有一个 tool 结果，禁止孤立/无 id/重复结果；失败结果仍作为合法 tool result 传输，错误在本地以结构化 `invalidToolTranscript` 返回，避免远端 400 | `DeepSeekWireTests` 24/24、`CustomOpenAICompatibleWireTests` 6/6、`AnthropicMessagesWireTests` 7/7 通过；`git diff --check` 通过；真实 provider 与 iPhone 16 Pro 尚待验收 | WIRE-007 VERIFY |
+| 2026-08-23 | 修复本机子 Agent 首次任务顺序：`initialUserMessage` 在首个 provider request 前按消息 ID 幂等追加到 provider-facing conversation；不再出现只有 system prompt、点开子会话才继续的假卡死 | 新增 `AgentRuntimeTests.testInitialUserMessageIsIncludedInFirstProviderRequestWhenHistoryIsEmpty` 通过；真实 iPhone 子 Agent 冷启动仍待验收 | SUB-007 VERIFY |
+| 2026-08-23 | 修复真实诊断暴露的插件与 length 链路：native source snapshot 不再过滤 `lib/`；保存原生插件时沿 prepared canonical sourceKey，成功不会再误报来源不匹配；私有 file context 校验给出字段/实际值/路径模板；Vision 以当前目录覆盖陈旧 4K 模型缓存；`length` 不再触发应用内 continuation 或工具重发，纯输出持久化为 incomplete、截断工具调用 fail-closed | `AgentRuntimeTests` 60/60、`ProviderProfileTests` 12/12、`NativeAgentPluginTests` 19/19、`PluginInstallCoordinatorTests` 11/11、Plugin Host check、无远端执行审计与 diff check 通过；真实 API/iPhone 16 Pro 安装和长输出仍待验收 | WIRE-008、PLUGIN-009~010 VERIFY |

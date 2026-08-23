@@ -8,6 +8,10 @@ struct WorkspaceView: View {
     @State private var reauthorizingMountID: UUID?
     @State private var mountPendingRemoval: WorkspaceStore.MountSnapshot?
     @State private var isRemovalConfirmationPresented = false
+    @State private var isFileExporterPresented = false
+    @State private var exportDocument: ConversationExportFileDocument?
+    @State private var exportContentType: UTType = .data
+    @State private var exportFilename = "workspace-file"
 
     var body: some View {
         List {
@@ -26,7 +30,10 @@ struct WorkspaceView: View {
                     )
                 } else {
                     ForEach(model.workspaceFiles, id: \.path) { file in
-                        WorkspaceFileRow(file: file)
+                        WorkspaceFileRow(
+                            file: file,
+                            onExport: { export(file) }
+                        )
                     }
                 }
             }
@@ -69,6 +76,17 @@ struct WorkspaceView: View {
                     await model.importDocument(url)
                 }
             case let .failure(error):
+                model.presentError(error)
+            }
+        }
+        .fileExporter(
+            isPresented: $isFileExporterPresented,
+            document: exportDocument,
+            contentType: exportContentType,
+            defaultFilename: exportFilename
+        ) { result in
+            exportDocument = nil
+            if case let .failure(error) = result {
                 model.presentError(error)
             }
         }
@@ -129,6 +147,20 @@ struct WorkspaceView: View {
     private func requestRemoval(_ mount: WorkspaceStore.MountSnapshot) {
         mountPendingRemoval = mount
         isRemovalConfirmationPresented = true
+    }
+
+    private func export(_ file: WorkspaceStore.FileEntry) {
+        Task {
+            do {
+                let data = try await model.workspaceFileData(path: file.path)
+                exportDocument = ConversationExportFileDocument(data: data)
+                exportContentType = UTType(filenameExtension: URL(fileURLWithPath: file.path).pathExtension) ?? .data
+                exportFilename = URL(fileURLWithPath: file.path).lastPathComponent
+                isFileExporterPresented = true
+            } catch {
+                model.presentError(error)
+            }
+        }
     }
 }
 
@@ -250,6 +282,7 @@ private struct WorkspaceMountRow: View {
 
 private struct WorkspaceFileRow: View {
     let file: WorkspaceStore.FileEntry
+    let onExport: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
@@ -267,6 +300,14 @@ private struct WorkspaceFileRow: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
+            Spacer(minLength: 8)
+            Menu {
+                Button("导出文件", systemImage: "square.and.arrow.up", action: onExport)
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .frame(width: 32, height: 32)
+            }
+            .accessibilityLabel("导出 \(file.path)")
         }
     }
 }

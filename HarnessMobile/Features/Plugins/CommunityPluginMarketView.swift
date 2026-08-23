@@ -787,10 +787,9 @@ private struct CommunityPluginCatalogDetailView: View {
                         }
                         .disabled(
                             model.isISHPluginMarketplaceWorking
-                                || item.compatibility == .unsupported
                         )
                     } footer: {
-                        Text("安装完成后默认保持关闭；依赖下载、校验和执行都在手机 iSH 内完成。")
+                        Text("插件分类不会阻止安装；源码、依赖下载和执行均留在手机 iSH 内完成。")
                     }
                 }
                 .communityPluginListChrome()

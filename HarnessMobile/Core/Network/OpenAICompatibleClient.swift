@@ -725,6 +725,7 @@ enum ModelClientError: LocalizedError, Sendable {
     case incompleteStream
     case streamError(String)
     case providerStreamFailure(code: String?, message: String)
+    case invalidToolTranscript(String)
 
     var errorDescription: String? {
         switch self {
@@ -765,6 +766,8 @@ enum ModelClientError: LocalizedError, Sendable {
                 return "模型流式响应失败：\(message) [code=\(code)]"
             }
             return "模型流式响应失败：\(message)"
+        case let .invalidToolTranscript(message):
+            return "工具调用历史无效：\(message)"
         }
     }
 

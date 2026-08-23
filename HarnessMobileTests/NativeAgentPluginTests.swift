@@ -183,6 +183,50 @@ final class NativeAgentPluginTests: XCTestCase {
         }
     }
 
+    func testInvalidFilePromptContextReportsExactFieldValueAndLegalTemplates() throws {
+        var plugin = try makePlugin()
+        plugin = NativeAgentCompiledPlugin(
+            schemaVersion: plugin.schemaVersion,
+            id: plugin.id,
+            name: plugin.name,
+            version: plugin.version,
+            description: plugin.description,
+            source: plugin.source,
+            sourceDigest: plugin.sourceDigest,
+            compiledAt: plugin.compiledAt,
+            compilerProviderID: plugin.compilerProviderID,
+            compilerModel: plugin.compilerModel,
+            enabled: plugin.enabled,
+            promptSections: plugin.promptSections,
+            promptContexts: [
+                NativeAgentPromptContext(
+                    name: "memory-skill",
+                    order: 1,
+                    source: .file,
+                    path: "skills/memory.md",
+                    maximumCharacters: 2_048,
+                    prefix: "",
+                    suffix: ""
+                )
+            ],
+            settings: plugin.settings,
+            tools: plugin.tools,
+            toolGuards: plugin.toolGuards,
+            compatibilityNotes: plugin.compatibilityNotes
+        )
+
+        XCTAssertThrowsError(
+            try plugin.validated(allowedBaseTools: ["workspace_read_text"])
+        ) { error in
+            let message = error.localizedDescription
+            XCTAssertTrue(message.contains("prompt_contexts[0].path"))
+            XCTAssertTrue(message.contains("skills/memory.md"))
+            XCTAssertTrue(message.contains("<plugin-storage>/<filename>"))
+            XCTAssertTrue(message.contains("<session-storage>/<filename>"))
+            XCTAssertTrue(message.contains(".harness-mobile/native-agent-plugins/<plugin-id>/<filename>"))
+        }
+    }
+
     func testCompilerSystemPromptDefinesHiddenPathContract() {
         let prompt = NativeAgentPluginCompiler.systemPrompt(toolDirectory: "[]")
 
@@ -193,6 +237,8 @@ final class NativeAgentPluginTests: XCTestCase {
         XCTAssertTrue(prompt.contains("ios_native"))
         XCTAssertTrue(prompt.contains("apple-healthkit"))
         XCTAssertTrue(prompt.contains("<session-storage>"))
+        XCTAssertTrue(prompt.contains("<plugin-storage>/<filename>"))
+        XCTAssertTrue(prompt.contains(".harness-mobile/native-agent-plugins/<plugin-id>/<filename>"))
         XCTAssertTrue(prompt.contains("prompt_contexts"))
         XCTAssertTrue(prompt.contains("tool_guards"))
     }
@@ -313,6 +359,43 @@ final class NativeAgentPluginTests: XCTestCase {
         }
 
         XCTAssertEqual(decision, .ask)
+    }
+
+    func testNativeToolGuardAcceptsHumanReadableLocalizedLabel() throws {
+        let plugin = try makePlugin(
+            toolGuards: [
+                NativeAgentToolGuard(
+                    label: "skill_radar 只读扫描",
+                    toolNames: ["memory_add"],
+                    risks: [.pure],
+                    decision: .allow,
+                    reason: "只读扫描。"
+                )
+            ]
+        )
+
+        XCTAssertEqual(plugin.toolGuards.first?.label, "skill_radar 只读扫描")
+    }
+
+    func testNativeToolGuardReportsTheInvalidField() {
+        XCTAssertThrowsError(
+            try makePlugin(
+                toolGuards: [
+                    NativeAgentToolGuard(
+                        label: "valid label",
+                        toolNames: [],
+                        risks: [],
+                        decision: .allow,
+                        reason: nil
+                    )
+                ]
+            ).validated(allowedBaseTools: NativeAgentPluginPolicy.approvedBaseToolNames)
+        ) { error in
+            XCTAssertEqual(
+                error.localizedDescription,
+                "手机 Agent 生成的原生插件未通过校验：tool_guards[0] 不合法：至少填写 tool_names 或 risks 之一。"
+            )
+        }
     }
 
     func testMarketplaceCompatibilityNotesAreNotReportedAsLoadFailure() throws {

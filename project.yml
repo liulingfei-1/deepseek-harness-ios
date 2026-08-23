@@ -27,6 +27,12 @@ targets:
     sources:
       - path: HarnessMobile
         excludes:
+          # AI collaboration rules are source-adjacent documentation, not
+          # application resources. Keeping them out of the target also avoids
+          # colliding `AGENTS.md` bundle names when XcodeGen recurses.
+          - App/AGENTS.md
+          - Core/Agent/AGENTS.md
+          - Core/Plugins/AGENTS.md
           - Resources/PluginHost/node_modules
       # Keep the marketplace transaction coordinator explicit while the
       # project is regenerated from this spec. This file is intentionally
@@ -133,6 +139,8 @@ targets:
     platform: iOS
     sources:
       - path: HarnessMobileTests
+        excludes:
+          - AGENTS.md
     dependencies:
       - target: HarnessMobile
       - package: HarnessMobileCore

@@ -198,6 +198,8 @@ async function createPluginArchive({
   main = './index.js',
   patch = validPatch(packageName, archiveName.replace(/[^A-Za-z0-9._-]/g, '-')),
   source = 'export function apply() {}\n',
+  sourcePath = 'index.js',
+  extraFiles = {},
   client = false,
   nativeClient,
   nativeAddon = false,
@@ -226,10 +228,18 @@ async function createPluginArchive({
       }),
     },
   }
+  const sourceFiles = [
+    { relativePath: sourcePath, content: source },
+    ...Object.entries(extraFiles).map(([relativePath, content]) => ({ relativePath, content })),
+  ]
   await Promise.all([
     writeFile(path.join(sourceRoot, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`),
     writeFile(path.join(sourceRoot, 'cordis.patch.yml'), patch),
-    writeFile(path.join(sourceRoot, 'index.js'), source),
+    ...sourceFiles.map(async ({ relativePath, content }) => {
+      const target = path.join(sourceRoot, relativePath)
+      await mkdir(path.dirname(target), { recursive: true })
+      await writeFile(target, content)
+    }),
     ...(client ? [writeFile(path.join(sourceRoot, 'client.js'), 'export function apply() {}\n')] : []),
     ...(nativeClient === undefined ? [] : [
       writeFile(path.join(sourceRoot, 'native-client.json'), `${JSON.stringify(nativeClient, null, 2)}\n`),
@@ -851,6 +861,50 @@ try {
   assert.match(preparedFirst.preparedToken, /^[a-f0-9]{32}$/)
   assert.equal(preparedFirst.nativeCandidate.packageName, marketPackageName)
   assert.ok(preparedFirst.nativeCandidate.files.some(file => file.path === 'package.json'))
+
+  const libRuntimeArchive = await createPluginArchive({
+    archiveName: 'lib-runtime-snapshot',
+    packageName: '@harness-mobile/lib-runtime-snapshot',
+    main: './lib/index.js',
+    sourcePath: 'lib/index.js',
+    source: 'export function apply() { return \'runtime-from-lib\' }\n',
+    extraFiles: {
+      'build/generated.js': 'export const generated = true\n',
+      'coverage/report.js': 'export const covered = true\n',
+      'dist/bundle.js': 'export const bundled = true\n',
+    },
+  })
+  const preparedLibRuntime = await rpc('plugin/prepare-native', {
+    source: { kind: 'localZip', location: libRuntimeArchive },
+  })
+  const libSnapshotPaths = preparedLibRuntime.nativeCandidate.files.map(file => file.path)
+  assert.ok(libSnapshotPaths.includes('lib/index.js'))
+  assert.ok(libSnapshotPaths.includes('build/generated.js'))
+  assert.ok(libSnapshotPaths.includes('coverage/report.js'))
+  assert.ok(libSnapshotPaths.includes('dist/bundle.js'))
+  await rpc('plugin/discard-prepared-native', {
+    preparedToken: preparedLibRuntime.preparedToken,
+  })
+
+  // Bundled JavaScript dependencies are ordinary marketplace source, not an
+  // invalid archive. They remain available to the native-first compiler.
+  const bundledDependencyArchive = await createPluginArchive({
+    archiveName: 'bundled-dependency-snapshot',
+    packageName: '@harness-mobile/bundled-dependency-snapshot',
+    extraFiles: {
+      'node_modules/portable-dependency/index.js': 'export const portable = true\n',
+    },
+  })
+  const preparedBundledDependency = await rpc('plugin/prepare-native', {
+    source: { kind: 'localZip', location: bundledDependencyArchive },
+  })
+  assert.ok(preparedBundledDependency.nativeCandidate.files.some(
+    file => file.path === 'node_modules/portable-dependency/index.js',
+  ))
+  await rpc('plugin/discard-prepared-native', {
+    preparedToken: preparedBundledDependency.preparedToken,
+  })
+
   const installed = await rpc('plugin/install', {
     source: { kind: 'localZip', location: firstArchive },
     preparedToken: preparedFirst.preparedToken,

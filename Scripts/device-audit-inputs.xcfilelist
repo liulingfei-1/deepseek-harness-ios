@@ -1,8 +1,12 @@
 $(SRCROOT)/HarnessMobile/App/AppModel.swift
+$(SRCROOT)/HarnessMobile/App/AppModel+ProviderBundles.swift
+$(SRCROOT)/HarnessMobile/App/AppModel+NativePluginLifecycle.swift
+$(SRCROOT)/HarnessMobile/App/AppModel+PluginMarketplaceTool.swift
 $(SRCROOT)/HarnessMobile/App/AppModelUITesting.swift
 $(SRCROOT)/HarnessMobile/App/AppRootView.swift
 $(SRCROOT)/HarnessMobile/App/DeepSeekHarnessMobileApp.swift
 $(SRCROOT)/HarnessMobile/Core/Agent/AgentMessage.swift
+$(SRCROOT)/HarnessMobile/Core/Agent/AgentContextPipeline.swift
 $(SRCROOT)/HarnessMobile/Core/Agent/AgentRuntime.swift
 $(SRCROOT)/HarnessMobile/Core/Agent/ConversationCompactor.swift
 $(SRCROOT)/HarnessMobile/Core/Agent/ConversationMessageWindow.swift

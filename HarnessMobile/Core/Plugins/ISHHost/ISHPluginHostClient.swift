@@ -31,9 +31,14 @@ actor ISHPluginHostClient {
     }
 
     private enum TransportEvent: Sendable {
-        case stdout(Data)
-        case stderr(Data)
-        case exited(ISHPluginHostTransportExit)
+        // Every callback is tagged with the transport instance that emitted
+        // it. iSH can deliver an old process' exit callback after a rejected
+        // write has already started a replacement process; without this tag an
+        // obsolete exit can mark the fresh Host as exited and fail its new
+        // pending requests.
+        case stdout(UInt64, Data)
+        case stderr(UInt64, Data)
+        case exited(UInt64, ISHPluginHostTransportExit)
     }
 
     private static let maximumRequestBytes = 512 * 1_024
@@ -76,6 +81,7 @@ actor ISHPluginHostClient {
     private var outboundWriteInFlight = false
     private var outboundDrainTask: Task<Void, Never>?
     private var outboundGeneration: UInt64 = 0
+    private var transportGeneration: UInt64 = 0
 
     init(
         transport: any ISHPluginHostTransport,
@@ -105,17 +111,19 @@ actor ISHPluginHostClient {
         synchronizedEventCounts.removeAll(keepingCapacity: true)
         synchronizedSkillDocuments.removeAll(keepingCapacity: true)
         resetOutboundQueue()
-        let eventContinuation = startTransportEventConsumer()
+        transportGeneration &+= 1
+        let transportGeneration = transportGeneration
+        let eventContinuation = startTransportEventConsumer(generation: transportGeneration)
         do {
             let pid = try await transport.start(
                 onStdout: { data in
-                    eventContinuation.yield(.stdout(data))
+                    eventContinuation.yield(.stdout(transportGeneration, data))
                 },
                 onStderr: { data in
-                    eventContinuation.yield(.stderr(data))
+                    eventContinuation.yield(.stderr(transportGeneration, data))
                 },
                 onExit: { exit in
-                    eventContinuation.yield(.exited(exit))
+                    eventContinuation.yield(.exited(transportGeneration, exit))
                     eventContinuation.finish()
                 }
             )
@@ -610,13 +618,15 @@ actor ISHPluginHostClient {
         framer = ISHPluginHostNDJSONFramer()
         synchronizedEventCounts.removeAll(keepingCapacity: true)
         synchronizedSkillDocuments.removeAll(keepingCapacity: true)
-        let eventContinuation = startTransportEventConsumer()
+        transportGeneration &+= 1
+        let transportGeneration = transportGeneration
+        let eventContinuation = startTransportEventConsumer(generation: transportGeneration)
         do {
             let pid = try await transport.start(
-                onStdout: { data in eventContinuation.yield(.stdout(data)) },
-                onStderr: { data in eventContinuation.yield(.stderr(data)) },
+                onStdout: { data in eventContinuation.yield(.stdout(transportGeneration, data)) },
+                onStderr: { data in eventContinuation.yield(.stderr(transportGeneration, data)) },
                 onExit: { exit in
-                    eventContinuation.yield(.exited(exit))
+                    eventContinuation.yield(.exited(transportGeneration, exit))
                     eventContinuation.finish()
                 }
             )
@@ -647,7 +657,7 @@ actor ISHPluginHostClient {
         await transport.stop()
     }
 
-    private func startTransportEventConsumer() -> AsyncStream<TransportEvent>.Continuation {
+    private func startTransportEventConsumer(generation: UInt64) -> AsyncStream<TransportEvent>.Continuation {
         stopTransportEventConsumer()
         let (stream, continuation) = AsyncStream<TransportEvent>.makeStream()
         transportEventContinuation = continuation
@@ -669,11 +679,14 @@ actor ISHPluginHostClient {
 
     private func receiveTransportEvent(_ event: TransportEvent) async {
         switch event {
-        case let .stdout(data):
+        case let .stdout(generation, data):
+            guard generation == transportGeneration else { return }
             await receiveStdout(data)
-        case let .stderr(data):
+        case let .stderr(generation, data):
+            guard generation == transportGeneration else { return }
             receiveStderr(data)
-        case let .exited(exit):
+        case let .exited(generation, exit):
+            guard generation == transportGeneration else { return }
             receiveExit(exit)
         }
     }

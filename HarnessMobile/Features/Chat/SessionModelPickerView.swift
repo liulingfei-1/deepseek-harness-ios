@@ -454,11 +454,19 @@ struct SessionModelPickerView: View {
             guard requestIdentity == SessionModelCatalogIdentity(configuration: draft) else {
                 return
             }
-            catalog = .merging(
+            let refreshedCatalog = SessionModelCatalog.merging(
                 snapshot,
                 existing: visibleCatalog.models,
                 for: requestConfiguration
             )
+            catalog = refreshedCatalog
+            // Keep the request configuration in sync with the refreshed
+            // capability metadata. Without this, an already-selected vision
+            // model can remain explicitly cached as `.text` and fail the
+            // runtime image-input guard even though the catalog is correct.
+            draft.inputModalities = refreshedCatalog.models.first(
+                where: { $0.id == draft.model }
+            )?.inputModalities
         } catch is CancellationError {
             return
         } catch {
@@ -493,7 +501,7 @@ struct SessionModelPickerView: View {
     }
 }
 
-private struct SessionModelCatalogIdentity: Equatable {
+struct SessionModelCatalogIdentity: Equatable {
     let profileID: String
     let providerID: ModelProviderID
     let baseURL: String
@@ -505,7 +513,7 @@ private struct SessionModelCatalogIdentity: Equatable {
     }
 }
 
-private struct SessionModelCatalog {
+struct SessionModelCatalog {
     let identity: SessionModelCatalogIdentity
     let source: ModelCatalogSource
     let fetchedAt: Date?
@@ -551,12 +559,23 @@ private struct SessionModelCatalog {
         for discoveredModel in snapshot.models {
             if let position = positions[discoveredModel.id] {
                 let current = models[position]
+                let builtIn = ModelProviderCatalog.descriptor(for: configuration.providerID)
+                    .builtInModels
+                    .first(where: { $0.id == discoveredModel.id })
+                let refreshedModalities = discoveredModel.inputModalities == [.text]
+                    && builtIn?.inputModalities.contains(.image) == true
+                    ? builtIn?.inputModalities ?? discoveredModel.inputModalities
+                    : discoveredModel.inputModalities
                 models[position] = ProviderModel(
                     id: discoveredModel.id,
                     name: discoveredModel.name ?? current.name,
                     contextWindow: discoveredModel.contextWindow ?? current.contextWindow,
                     maxOutputTokens: discoveredModel.maxOutputTokens ?? current.maxOutputTokens,
-                    inputModalities: current.inputModalities,
+                    // The refreshed catalog is authoritative for capabilities.
+                    // Keeping `current.inputModalities` here preserves stale
+                    // `.text` metadata from an older profile and makes
+                    // `deepseek-v4-flash-vision-exp` fail the vision guard.
+                    inputModalities: refreshedModalities,
                     openAICompatibility: current.openAICompatibility
                 )
             } else {

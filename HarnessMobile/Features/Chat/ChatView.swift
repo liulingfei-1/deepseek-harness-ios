@@ -28,13 +28,6 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Spacer()
-                sessionOptionsButton
-            }
-            .padding(.horizontal, 12)
-            .frame(height: 40)
-
             switch conversationMode {
             case .chat:
                 chatSurface
@@ -81,6 +74,10 @@ struct ChatView: View {
                 .buttonStyle(.plain)
                 .disabled(model.isRunning)
                 .accessibilityLabel("选择模型，当前 \(model.effectiveConfiguration.model)")
+            }
+
+            ToolbarItem(placement: .topBarTrailing) {
+                sessionOptionsButton
             }
 
         }
@@ -333,12 +330,14 @@ struct ChatView: View {
     }
 
     private var sessionOptionsButton: some View {
-        Button("会话选项") {
+        Button {
             isSessionOptionsPresented = true
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .imageScale(.large)
         }
-        .buttonStyle(.plain)
-        .font(.subheadline)
         .accessibilityLabel("会话选项")
+        .accessibilityHint("打开对话、轨迹、模型和工具权限选项")
         .accessibilityIdentifier("会话选项")
     }
 

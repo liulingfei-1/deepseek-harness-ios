@@ -394,7 +394,7 @@ struct NativeAgentCompiledPlugin: Codable, Sendable, Equatable, Identifiable {
         }
 
         var contextNames = Set<String>()
-        for context in promptContexts {
+        for (index, context) in promptContexts.enumerated() {
             guard contextNames.insert(context.name).inserted,
                   Self.isContributionName(context.name),
                   (-10_000...10_000).contains(context.order),
@@ -407,9 +407,7 @@ struct NativeAgentCompiledPlugin: Codable, Sendable, Equatable, Identifiable {
             case .file:
                 guard let path = context.path,
                       Self.isPrivateContextPath(path) else {
-                    throw NativeAgentPluginError.invalidCompiledPlugin(
-                        "文件上下文必须使用插件私有目录中的精确路径。"
-                    )
+                    throw Self.invalidPromptContextPath(index, path: context.path)
                 }
             case .conversation, .settings:
                 guard context.path == nil else {
@@ -474,17 +472,41 @@ struct NativeAgentCompiledPlugin: Codable, Sendable, Equatable, Identifiable {
         }
 
         var guardLabels = Set<String>()
-        for guardRule in toolGuards {
-            guard guardLabels.insert(guardRule.label).inserted,
-                  Self.isContributionName(guardRule.label),
-                  guardRule.toolNames.count <= 32,
-                  Set(guardRule.toolNames).count == guardRule.toolNames.count,
-                  guardRule.risks.count <= 5,
-                  Set(guardRule.risks).count == guardRule.risks.count,
-                  !guardRule.toolNames.isEmpty || !guardRule.risks.isEmpty,
-                  guardRule.toolNames.allSatisfy({ $0 == "*" || Self.isToolName($0) }),
-                  (guardRule.reason?.utf8.count ?? 0) <= 2_048 else {
-                throw NativeAgentPluginError.invalidCompiledPlugin("工具策略守卫不合法。")
+        for (index, guardRule) in toolGuards.enumerated() {
+            guard guardLabels.insert(guardRule.label).inserted else {
+                throw Self.invalidToolGuard(index, "label 与另一条守卫重复：\(guardRule.label)")
+            }
+            // Labels are human-readable trace text, not contribution identifiers. The
+            // public manifest schema deliberately accepts localized labels with spaces.
+            guard Self.isToolGuardLabel(guardRule.label) else {
+                throw Self.invalidToolGuard(
+                    index,
+                    "label 必须是去除首尾空白后的非空文本（最多 96 UTF-8 字节，且不能含控制字符）"
+                )
+            }
+            guard guardRule.toolNames.count <= 32 else {
+                throw Self.invalidToolGuard(index, "tool_names 最多 32 项")
+            }
+            guard Set(guardRule.toolNames).count == guardRule.toolNames.count else {
+                throw Self.invalidToolGuard(index, "tool_names 不能包含重复工具名")
+            }
+            guard guardRule.risks.count <= 5 else {
+                throw Self.invalidToolGuard(index, "risks 最多 5 项")
+            }
+            guard Set(guardRule.risks).count == guardRule.risks.count else {
+                throw Self.invalidToolGuard(index, "risks 不能包含重复风险级别")
+            }
+            guard !guardRule.toolNames.isEmpty || !guardRule.risks.isEmpty else {
+                throw Self.invalidToolGuard(index, "至少填写 tool_names 或 risks 之一")
+            }
+            guard guardRule.toolNames.allSatisfy({ $0 == "*" || Self.isToolName($0) }) else {
+                throw Self.invalidToolGuard(
+                    index,
+                    "tool_names 只能是已声明的小写工具名、连字符/下划线，或通配符 *"
+                )
+            }
+            guard (guardRule.reason?.utf8.count ?? 0) <= 2_048 else {
+                throw Self.invalidToolGuard(index, "reason 最多 2048 UTF-8 字节")
             }
             if guardRule.decision == .deny {
                 guard let reason = guardRule.reason?
@@ -602,6 +624,29 @@ struct NativeAgentCompiledPlugin: Codable, Sendable, Equatable, Identifiable {
             CharacterSet.alphanumerics.contains(scalar)
                 || scalar == "-" || scalar == "_" || scalar == "." || scalar == ":"
         }
+    }
+
+    private static func isToolGuardLabel(_ value: String) -> Bool {
+        !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && value.utf8.count <= 96
+            && !value.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+    }
+
+    private static func invalidToolGuard(
+        _ index: Int,
+        _ reason: String
+    ) -> NativeAgentPluginError {
+        .invalidCompiledPlugin("tool_guards[\(index)] 不合法：\(reason)。")
+    }
+
+    private static func invalidPromptContextPath(
+        _ index: Int,
+        path: String?
+    ) -> NativeAgentPluginError {
+        let actual = path.map { String(reflecting: $0) } ?? "<missing>"
+        return .invalidCompiledPlugin(
+            "prompt_contexts[\(index)].path 无效：\(actual)。source=file 只能使用精确私有路径模板 `<plugin-storage>/<filename>`、`<session-storage>/<filename>` 或 `.harness-mobile/native-agent-plugins/<plugin-id>/<filename>`；源码仓库路径（例如 `skills/memory.md`）不会在运行时挂载。"
+        )
     }
 
     private static func isPrivateContextPath(_ value: String) -> Bool {

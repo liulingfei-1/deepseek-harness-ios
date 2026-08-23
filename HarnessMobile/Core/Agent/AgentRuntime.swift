@@ -3,9 +3,6 @@ import Foundation
 
 enum AgentRuntimeEvent: Sendable, Equatable {
     case stepStarted(Int)
-    case modelResponseRetrying(maxOutputTokens: Int)
-    case modelResponseContinuing(attempt: Int)
-    case modelToolCallRecovering(attempt: Int)
     case contextInjected(AgentContextInjection)
     case textDelta(String)
     case reasoningDelta(String)
@@ -131,12 +128,6 @@ actor AgentRuntime {
     private var openSessionStep: SessionStepData?
     private var promptContributionFingerprints: [String: String] = [:]
     private static let maximumParallelToolCalls = MobileHarnessPrompt.maximumParallelToolCalls
-    /// Three official session-reference snapshots can each occupy 64 KiB,
-    /// plus the untrusted-context envelope and source metadata.
-    private static let maximumInstructionInjectionBytes = 256 * 1_024
-    private static let clearedRuntimeContext =
-        "Current runtime context: none. Earlier runtime-context snapshots no longer apply."
-
     init(
         agentID: UUID? = nil,
         runID: UUID = UUID(),
@@ -292,6 +283,15 @@ actor AgentRuntime {
         var lastRequestContext: SessionRequestContextData?
         var retainedRuntimeContext = history.last(where: \AgentMessage.isRuntimeContextSnapshot)?.content
 
+        // A fresh child session passes its first task through
+        // initialUserMessage while durable history is still empty. Include it
+        // in the provider-facing conversation before the first request;
+        // retries remain idempotent by message identity.
+        if let initialUserMessage,
+           !conversation.contains(where: { $0.id == initialUserMessage.id }) {
+            conversation.append(initialUserMessage)
+        }
+
         try await beginTurn(turn, userMessage: initialUserMessage)
         if let initialUserMessage {
             try await appendInstructionInjections(
@@ -427,41 +427,12 @@ actor AgentRuntime {
                 retained: &retainedRuntimeContext
             )
 
-            let baseRequestPlan = CordisModelRequestPlan(configuration: callConfiguration)
-            var requestPlan = baseRequestPlan
-            if let plugins {
-                requestPlan = try await plugins.run(
-                    CordisAgentLoopCheckpoints.request,
-                    input: CordisAgentRequestContext(
-                        agentID: agentID,
-                        runID: runID,
-                        turn: turn,
-                        step: step,
-                        request: requestPlan
-                    ),
-                    target: .agent(agentID),
-                    traceContext: CordisTraceContext(runID: runID, turn: turn, step: step)
-                ) {
-                    baseRequestPlan
-                }
-                let agentRequestPlan = requestPlan
-                requestPlan = try await plugins.run(
-                    CordisAgentLoopCheckpoints.orchestrationRequest,
-                    input: CordisAgentRequestContext(
-                        agentID: agentID,
-                        runID: runID,
-                        turn: turn,
-                        step: step,
-                        request: agentRequestPlan
-                    ),
-                    target: .agent(agentID),
-                    traceContext: CordisTraceContext(runID: runID, turn: turn, step: step)
-                ) {
-                    agentRequestPlan
-                }
-            }
-            requestPlan.configuration = try requestPlan.configuration.validated()
-            callConfiguration = requestPlan.configuration
+            let assembledStepRequest = try await assembleStepRequest(
+                configuration: callConfiguration,
+                turn: turn,
+                step: step
+            )
+            callConfiguration = assembledStepRequest.configuration
             let requestHeader = Self.sessionRequestHeader(
                 configuration: callConfiguration,
                 systemPrompt: requestSystemPrompt,
@@ -504,7 +475,7 @@ actor AgentRuntime {
                 initialConfiguration: configuration,
                 initialAPIKey: apiKey
             )
-            var request = requestPlan.modelRequest(
+            var request = assembledStepRequest.modelRequest(
                 apiKey: requestAPIKey,
                 systemPrompt: requestSystemPrompt,
                 messages: conversation,
@@ -570,13 +541,6 @@ actor AgentRuntime {
             let providerRetryPolicy = try ModelRetryPolicy.resolved(
                 request.configuration.retryPolicy
             )
-            var lengthRetryAttempt = 0
-            var lengthContinuationAttempt = 0
-            var toolCallRecoveryAttempt = 0
-            var didDiscardLengthTruncatedToolCall = false
-            var continuedText = ""
-            var continuedReasoning = ""
-            var continuedChunkSeqs: [UInt64] = []
             var assistantChunkSeqs: [UInt64] = []
             modelRequest: while true {
                 do {
@@ -682,279 +646,7 @@ actor AgentRuntime {
                     // malformed model response with no finish event.
                     try Task.checkCancellation()
 
-                    if finishReason == .length, accumulator.hasToolCallDeltas {
-                        didDiscardLengthTruncatedToolCall = true
-                    }
-
-                    // Reasoning models can consume the entire output budget before
-                    // producing either a complete answer or a tool call. Never commit
-                    // that truncated attempt. Give the exact durable request one clean
-                    // retry with a larger budget; a second length finish still fails
-                    // safely below.
-                    if finishReason == .length,
-                       lengthRetryAttempt == 0 {
-                        let currentLimit = request.configuration.maxOutputTokens
-                        let retryLimit = min(65_536, max(currentLimit + 1_024, currentLimit * 2))
-                        if retryLimit > currentLimit {
-                            await traceHandler(
-                                HarnessTraceDraft(
-                                    kind: .modelCompleted,
-                                    runID: runID,
-                                    turn: turn,
-                                    step: step,
-                                    name: request.configuration.model,
-                                    durationMilliseconds: Date.now.timeIntervalSince(requestStartedAt) * 1_000,
-                                    attributes: [
-                                        "recovery": .string(
-                                            accumulator.hasToolCallDeltas
-                                                ? "retry-incomplete-tool-call"
-                                                : "retry-output-budget-exhausted"
-                                        ),
-                                        "nextMaxOutputTokens": .number(Double(retryLimit))
-                                    ],
-                                    payload: .modelResponse(
-                                        HarnessTraceModelResponse(
-                                            text: accumulator.text,
-                                            reasoning: accumulator.reasoning.isEmpty ? nil : accumulator.reasoning,
-                                            toolCalls: [],
-                                            finishReason: ModelFinishReason.length.rawValue,
-                                            usage: turnUsage.map(HarnessTraceTokenUsage.init)
-                                        )
-                                    )
-                                )
-                            )
-
-                            var retryConfiguration = request.configuration
-                            retryConfiguration.maxOutputTokens = retryLimit
-                            retryConfiguration = try retryConfiguration.validated()
-                            callConfiguration = retryConfiguration
-                            request = ModelRequest(
-                                configuration: retryConfiguration,
-                                apiKey: request.apiKey,
-                                systemPrompt: request.systemPrompt,
-                                messages: request.messages,
-                                tools: request.tools,
-                                imagePayloads: request.imagePayloads
-                            )
-                            let retryHeader = Self.sessionRequestHeader(
-                                configuration: retryConfiguration,
-                                systemPrompt: requestSystemPrompt,
-                                tools: toolDefinitions
-                            )
-                            if lastRequestHeader != retryHeader {
-                                _ = try await recordSessionEvent(
-                                    .requestHeader(header: retryHeader, reason: .change)
-                                )
-                                lastRequestHeader = retryHeader
-                            }
-                            await eventHandler(
-                                .modelResponseRetrying(maxOutputTokens: retryLimit)
-                            )
-                            await traceHandler(
-                                HarnessTraceDraft(
-                                    kind: .modelRequest,
-                                    timestamp: .now,
-                                    runID: runID,
-                                    turn: turn,
-                                    step: step,
-                                    name: retryConfiguration.model,
-                                    attributes: [
-                                        "retryReason": .string(
-                                            accumulator.hasToolCallDeltas
-                                                ? "length-incomplete-tool-call"
-                                                : "length-output-budget-exhausted"
-                                        ),
-                                        "retryAttempt": .number(1)
-                                    ],
-                                    payload: .modelRequest(HarnessTraceModelRequest(request))
-                                )
-                            )
-                            lengthRetryAttempt += 1
-                            accumulator = TurnAccumulator()
-                            finishReason = nil
-                            turnUsage = nil
-                            assistantChunkSeqs.removeAll(keepingCapacity: true)
-                            continue modelRequest
-                        }
-                    }
-
-                    // Some provider/model combinations enforce a lower output
-                    // ceiling than the advertised max_tokens value. If a clean
-                    // text/reasoning response still reaches that ceiling after
-                    // the larger-budget retry, continue from the partial answer
-                    // instead of surfacing `unsafeFinishReason(length)`. A
-                    // reasoning-only delta is still useful durable output: deep
-                    // reasoning models can spend the whole first budget thinking
-                    // before emitting their answer. Partial tool calls are never
-                    // continued because executing or reconstructing truncated
-                    // JSON arguments would be unsafe.
-                    if finishReason == .length,
-                       !accumulator.hasToolCallDeltas,
-                       lengthContinuationAttempt < 3 {
-                        let partialText = accumulator.text
-                        let partialReasoning = accumulator.reasoning
-                        continuedText = Self.joinContinuation(
-                            continuedText,
-                            partialText
-                        )
-                        continuedReasoning = Self.joinContinuation(
-                            continuedReasoning,
-                            partialReasoning
-                        )
-                        continuedChunkSeqs.append(contentsOf: assistantChunkSeqs)
-                        lengthContinuationAttempt += 1
-
-                        await traceHandler(
-                            HarnessTraceDraft(
-                                kind: .modelCompleted,
-                                runID: runID,
-                                turn: turn,
-                                step: step,
-                                name: request.configuration.model,
-                                durationMilliseconds: Date.now.timeIntervalSince(requestStartedAt) * 1_000,
-                                attributes: [
-                                    "recovery": .string("continue-output-budget-exhausted"),
-                                    "continuationAttempt": .number(Double(lengthContinuationAttempt))
-                                ],
-                                payload: .modelResponse(
-                                    HarnessTraceModelResponse(
-                                        text: partialText,
-                                        reasoning: partialReasoning.isEmpty ? nil : partialReasoning,
-                                        toolCalls: [],
-                                        finishReason: ModelFinishReason.length.rawValue,
-                                        usage: turnUsage.map(HarnessTraceTokenUsage.init)
-                                    )
-                                )
-                            )
-                        )
-
-                        var continuationMessages = request.messages
-                        if !partialText.isEmpty || !partialReasoning.isEmpty {
-                            continuationMessages.append(
-                                .assistant(
-                                    partialText,
-                                    reasoning: partialReasoning.isEmpty ? nil : partialReasoning
-                                )
-                            )
-                        }
-                        continuationMessages.append(
-                            .user(
-                                "[Harness continuation] Continue the same response from where it stopped. "
-                                    + "Do not repeat completed text. Finish the answer or emit the necessary tool calls now."
-                            )
-                        )
-                        request = ModelRequest(
-                            configuration: request.configuration,
-                            apiKey: request.apiKey,
-                            systemPrompt: request.systemPrompt,
-                            messages: continuationMessages,
-                            tools: request.tools,
-                            imagePayloads: request.imagePayloads
-                        )
-                        await eventHandler(
-                            .modelResponseContinuing(attempt: lengthContinuationAttempt)
-                        )
-                        await traceHandler(
-                            HarnessTraceDraft(
-                                kind: .modelRequest,
-                                timestamp: .now,
-                                runID: runID,
-                                turn: turn,
-                                step: step,
-                                name: request.configuration.model,
-                                attributes: [
-                                    "retryReason": .string("length-continue-partial-response"),
-                                    "continuationAttempt": .number(Double(lengthContinuationAttempt))
-                                ],
-                                payload: .modelRequest(HarnessTraceModelRequest(request))
-                            )
-                        )
-                        accumulator = TurnAccumulator()
-                        finishReason = nil
-                        turnUsage = nil
-                        assistantChunkSeqs.removeAll(keepingCapacity: true)
-                        continue modelRequest
-                    }
-
-                    // Never execute or splice JSON arguments from a truncated tool
-                    // call. A provider can still enforce a smaller output ceiling
-                    // after the larger-budget retry, though, which is common while
-                    // the main Agent authors a native plugin manifest. Start a new
-                    // model attempt from the last durable conversation and require a
-                    // compact, complete tool call. The discarded partial arguments
-                    // are intentionally not replayed to the model or persisted as an
-                    // assistant message.
-                    if finishReason == .length,
-                       accumulator.hasToolCallDeltas,
-                       toolCallRecoveryAttempt < 2 {
-                        toolCallRecoveryAttempt += 1
-                        await traceHandler(
-                            HarnessTraceDraft(
-                                kind: .modelCompleted,
-                                runID: runID,
-                                turn: turn,
-                                step: step,
-                                name: request.configuration.model,
-                                durationMilliseconds: Date.now.timeIntervalSince(requestStartedAt) * 1_000,
-                                attributes: [
-                                    "recovery": .string("discard-truncated-tool-call-and-reissue"),
-                                    "recoveryAttempt": .number(Double(toolCallRecoveryAttempt))
-                                ],
-                                payload: .modelResponse(
-                                    HarnessTraceModelResponse(
-                                        text: accumulator.text,
-                                        reasoning: accumulator.reasoning.isEmpty ? nil : accumulator.reasoning,
-                                        toolCalls: [],
-                                        finishReason: ModelFinishReason.length.rawValue,
-                                        usage: turnUsage.map(HarnessTraceTokenUsage.init)
-                                    )
-                                )
-                            )
-                        )
-
-                        var recoveryMessages = request.messages
-                        recoveryMessages.append(
-                            .user(
-                                """
-                                [Harness tool-call recovery \(toolCallRecoveryAttempt)/2]
-                                Your previous tool call was discarded because its JSON arguments were cut off by the provider output limit. Re-issue the intended operation as one complete tool call now. Do not repeat analysis, prose, source excerpts, or completed work. Use compact valid JSON, omit optional/default fields, and request at most one tool. Never continue or repair the discarded partial JSON. For a native_manifest, keep instructions concise while preserving behavior.
-                                """
-                            )
-                        )
-                        request = ModelRequest(
-                            configuration: request.configuration,
-                            apiKey: request.apiKey,
-                            systemPrompt: request.systemPrompt,
-                            messages: recoveryMessages,
-                            tools: request.tools,
-                            imagePayloads: request.imagePayloads
-                        )
-                        await eventHandler(
-                            .modelToolCallRecovering(attempt: toolCallRecoveryAttempt)
-                        )
-                        await traceHandler(
-                            HarnessTraceDraft(
-                                kind: .modelRequest,
-                                timestamp: .now,
-                                runID: runID,
-                                turn: turn,
-                                step: step,
-                                name: request.configuration.model,
-                                attributes: [
-                                    "retryReason": .string("length-reissue-complete-tool-call"),
-                                    "recoveryAttempt": .number(Double(toolCallRecoveryAttempt))
-                                ],
-                                payload: .modelRequest(HarnessTraceModelRequest(request))
-                            )
-                        )
-                        accumulator = TurnAccumulator()
-                        finishReason = nil
-                        turnUsage = nil
-                        assistantChunkSeqs.removeAll(keepingCapacity: true)
-                        continue modelRequest
-                    }
-                    if !didDiscardLengthTruncatedToolCall,
-                       finishReason == .stop,
+                    if finishReason == .stop,
                        accumulator.text.isEmpty,
                        accumulator.reasoning.isEmpty,
                        !accumulator.hasToolCallDeltas {
@@ -962,16 +654,8 @@ actor AgentRuntime {
                     }
                     break modelRequest
                 } catch is CancellationError {
-                    let interruptedText = Self.joinContinuation(
-                        continuedText,
-                        accumulator.text
-                    )
-                    let interruptedReasoning = Self.joinContinuation(
-                        continuedReasoning,
-                        accumulator.reasoning
-                    )
-                    let visibleText = Self.nonWhitespacePrefix(interruptedText)
-                    let visibleReasoning = Self.nonWhitespacePrefix(interruptedReasoning)
+                    let visibleText = Self.nonWhitespacePrefix(accumulator.text)
+                    let visibleReasoning = Self.nonWhitespacePrefix(accumulator.reasoning)
                     if visibleText != nil || visibleReasoning != nil {
                         let modelSource = AgentModelSource(
                             provider: request.configuration.providerID.rawValue,
@@ -993,7 +677,7 @@ actor AgentRuntime {
                                 ),
                                 usage: turnUsage.map(Self.sessionUsage),
                                 interrupted: true,
-                                sourceEventSeqs: continuedChunkSeqs + assistantChunkSeqs
+                                sourceEventSeqs: assistantChunkSeqs
                             )
                         )
                         conversation.append(interruptedAssistant)
@@ -1161,20 +845,11 @@ actor AgentRuntime {
             guard let finishReason else {
                 throw AgentRuntimeError.invalidFinishSequence
             }
-            try accumulator.prepend(
-                text: continuedText,
-                reasoning: continuedReasoning
-            )
-            // A provider occasionally acknowledges the compact reissue prompt
-            // with an empty `stop` response. Treating that as success would
-            // commit a blank assistant message and silently lose the operation
-            // whose truncated arguments we deliberately discarded. Keep the
-            // original safe failure semantics in that edge case.
-            if didDiscardLengthTruncatedToolCall,
-               finishReason == .stop,
-               accumulator.text.isEmpty,
-               accumulator.reasoning.isEmpty,
-               !accumulator.hasToolCallDeltas {
+            // A truncated tool-call payload is never executable. There is no
+            // synthetic continuation or recovery request: the provider's output
+            // budget is authoritative, and a new request could repeat side
+            // effects under a different context.
+            if finishReason == .length, accumulator.hasToolCallDeltas {
                 throw AgentRuntimeError.unsafeFinishReason(.length)
             }
             let isSafeLengthTruncation = finishReason == .length
@@ -1236,7 +911,7 @@ actor AgentRuntime {
                         configuration: request.configuration
                     ),
                     usage: turnUsage.map(Self.sessionUsage),
-                    sourceEventSeqs: continuedChunkSeqs + assistantChunkSeqs
+                    sourceEventSeqs: assistantChunkSeqs
                 )
             )
 
@@ -1338,6 +1013,79 @@ actor AgentRuntime {
                 status: "tool-calls"
             )
         }
+    }
+
+    /// The ordered request-plan checkpoint chain is isolated from the stream
+    /// loop so configuration mutations remain easy to audit. It intentionally
+    /// contains no prompt, messages, tools, image bytes, or credentials:
+    /// Cordis request hooks may change only the validated route configuration.
+    private struct AssembledStepRequest: Sendable {
+        let plan: CordisModelRequestPlan
+
+        var configuration: AgentConfiguration { plan.configuration }
+
+        func modelRequest(
+            apiKey: String,
+            systemPrompt: String,
+            messages: [AgentMessage],
+            tools: [ModelToolDefinition],
+            imagePayloads: [ModelImagePayload]
+        ) -> ModelRequest {
+            plan.modelRequest(
+                apiKey: apiKey,
+                systemPrompt: systemPrompt,
+                messages: messages,
+                tools: tools,
+                imagePayloads: imagePayloads
+            )
+        }
+    }
+
+    /// Preserve the desktop-compatible order of the two route-only Cordis
+    /// checkpoints. The caller publishes prompt/context events separately, so
+    /// those durable and UI-facing orderings stay unchanged.
+    private func assembleStepRequest(
+        configuration: AgentConfiguration,
+        turn: Int,
+        step: Int
+    ) async throws -> AssembledStepRequest {
+        let basePlan = CordisModelRequestPlan(configuration: configuration)
+        guard let plugins else {
+            var plan = basePlan
+            plan.configuration = try plan.configuration.validated()
+            return AssembledStepRequest(plan: plan)
+        }
+
+        let agentPlan = try await plugins.run(
+            CordisAgentLoopCheckpoints.request,
+            input: CordisAgentRequestContext(
+                agentID: agentID,
+                runID: runID,
+                turn: turn,
+                step: step,
+                request: basePlan
+            ),
+            target: .agent(agentID),
+            traceContext: CordisTraceContext(runID: runID, turn: turn, step: step)
+        ) {
+            basePlan
+        }
+        var orchestrationPlan = try await plugins.run(
+            CordisAgentLoopCheckpoints.orchestrationRequest,
+            input: CordisAgentRequestContext(
+                agentID: agentID,
+                runID: runID,
+                turn: turn,
+                step: step,
+                request: agentPlan
+            ),
+            target: .agent(agentID),
+            traceContext: CordisTraceContext(runID: runID, turn: turn, step: step)
+        ) {
+            agentPlan
+        }
+        orchestrationPlan.configuration = try orchestrationPlan.configuration.validated()
+        return AssembledStepRequest(plan: orchestrationPlan)
     }
 
     private func resolveImagePayloads(
@@ -3532,15 +3280,7 @@ actor AgentRuntime {
     ) async throws {
         guard let userMessageInjectionProvider else { return }
         let injections = await userMessageInjectionProvider(message)
-        let normalizedContents = Set(
-            injections.compactMap { injection in
-                injection.normalizedUserContent?.trimmingCharacters(in: .whitespacesAndNewlines)
-            }.filter { !$0.isEmpty }
-        )
-        guard normalizedContents.count <= 1 else {
-            throw AgentRuntimeError.conflictingNormalizedUserContent
-        }
-        if let normalized = normalizedContents.first,
+        if let normalized = try AgentContextPipeline.normalizedUserContent(in: injections),
            let messageIndex = conversation.lastIndex(where: { $0.id == message.id }) {
             conversation[messageIndex].content = normalized
         }
@@ -3558,21 +3298,11 @@ actor AgentRuntime {
         step: Int,
         to conversation: inout [AgentMessage]
     ) async throws {
-        for injection in injections {
-            let content = injection.content.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !content.isEmpty else { continue }
-            guard content.utf8.count <= Self.maximumInstructionInjectionBytes else {
-                throw AgentRuntimeError.injectedInstructionTooLarge
-            }
-            let injectedMessage = AgentMessage(
-                role: .user,
-                content: content,
-                source: injection.source
-            )
-            conversation.append(injectedMessage)
-            try await recordUserMessage(injectedMessage, source: injection.source)
+        for injection in try AgentContextPipeline.prepare(injections) {
+            conversation.append(injection.message)
+            try await recordUserMessage(injection.message, source: injection.source)
             await publishContextInjection(
-                content: content,
+                content: injection.content,
                 source: injection.source,
                 turn: turn,
                 step: step
@@ -3590,33 +3320,20 @@ actor AgentRuntime {
         to conversation: inout [AgentMessage],
         retained: inout String?
     ) async throws {
-        if retained == nil, current.isEmpty { return }
-        let snapshot = current.isEmpty ? Self.clearedRuntimeContext : current
-        guard retained != snapshot else { return }
-        guard snapshot.utf8.count <= 128 * 1_024 else {
-            throw AgentRuntimeError.injectedInstructionTooLarge
-        }
-
-        let source: JSONValue = .object([
-            "kind": .string("plugin"),
-            "plugin": .string(AgentMessage.runtimeContextPluginID),
-            "form": .string("snapshot")
-        ])
-        let message = AgentMessage(
-            role: .user,
-            content: snapshot,
-            source: source
-        )
-        conversation.append(message)
-        try await recordUserMessage(message, source: source)
-        retained = snapshot
+        guard let snapshot = try AgentContextPipeline.nextRuntimeContextSnapshot(
+            current: current,
+            retained: retained
+        ) else { return }
+        conversation.append(snapshot.message)
+        try await recordUserMessage(snapshot.message, source: snapshot.source)
+        retained = snapshot.content
         await publishContextInjection(
-            content: snapshot,
-            source: source,
+            content: snapshot.content,
+            source: snapshot.source,
             turn: turn,
             step: step
         )
-        await eventHandler(.messagesCommitted([message]))
+        await eventHandler(.messagesCommitted([snapshot.message]))
     }
 
     /// The desktop client shows every effective prompt producer as a compact
@@ -4071,15 +3788,6 @@ actor AgentRuntime {
             ?? .string(text)
     }
 
-    private static func joinContinuation(_ prefix: String, _ suffix: String) -> String {
-        guard !prefix.isEmpty else { return suffix }
-        guard !suffix.isEmpty else { return prefix }
-        if prefix.last?.isWhitespace == true || suffix.first?.isWhitespace == true {
-            return prefix + suffix
-        }
-        return prefix + "\n" + suffix
-    }
-
     /// Returns the delivered stream prefix unchanged when it contains visible
     /// content. Whitespace-only stream fragments do not form a durable message.
     private static func nonWhitespacePrefix(_ value: String) -> String? {
@@ -4450,13 +4158,6 @@ struct TurnAccumulator: Sendable {
         reasoning += delta
     }
 
-    mutating func prepend(text prefixText: String, reasoning prefixReasoning: String) throws {
-        try account(prefixText)
-        try account(prefixReasoning)
-        text = prefixText + text
-        reasoning = prefixReasoning + reasoning
-    }
-
     mutating func appendToolCall(
         index: Int,
         id: String?,
@@ -4601,7 +4302,7 @@ enum AgentRuntimeError: LocalizedError, Sendable {
         case let .compactionSummaryStreamFailedAfterPartialOutput(description):
             return "上下文压缩模型已输出部分摘要后失败，未回退或提交不完整检查点：\(description)"
         case let .imageInputUnsupported(model):
-            return "当前模型 \(model) 不声明图片输入能力，请切换到 DeepSeek-V4-Flash-Vision-Exp。"
+            return "当前会话包含图片输入（可能来自历史消息），但当前模型 \(model) 未声明图片输入能力。这不是模型输出图片错误；请切换到支持图片输入的模型，或新建纯文本会话后重试。"
         case .imageAttachmentUnavailable:
             return "图片附件无法从本机工作区读取。请重新选择图片后再试。"
         }

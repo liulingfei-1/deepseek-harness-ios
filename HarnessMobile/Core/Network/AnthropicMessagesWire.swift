@@ -119,7 +119,8 @@ enum AnthropicWireSerializer {
     }
 
     static func makeRequest(_ request: ModelRequest) throws -> AnthropicMessagesRequest {
-        AnthropicMessagesRequest(
+        try ChatWireSerializer.validateToolTranscript(request.messages)
+        return AnthropicMessagesRequest(
             model: request.configuration.model,
             system: request.systemPrompt,
             messages: try makeMessages(

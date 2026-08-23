@@ -161,6 +161,9 @@ enum HarnessTracePayload: Codable, Sendable, Equatable {
 struct HarnessTraceDraft: Sendable, Equatable {
     var kind: HarnessTraceEventKind
     var timestamp: Date
+    /// Owning conversation identity. A run id alone is not sufficient because
+    /// an activation may be reused or reported while another session is active.
+    var sessionID: UUID?
     var runID: UUID?
     var turn: Int?
     var step: Int?
@@ -175,6 +178,7 @@ struct HarnessTraceDraft: Sendable, Equatable {
     init(
         kind: HarnessTraceEventKind,
         timestamp: Date = .now,
+        sessionID: UUID? = nil,
         runID: UUID? = nil,
         turn: Int? = nil,
         step: Int? = nil,
@@ -188,6 +192,7 @@ struct HarnessTraceDraft: Sendable, Equatable {
     ) {
         self.kind = kind
         self.timestamp = timestamp
+        self.sessionID = sessionID
         self.runID = runID
         self.turn = turn
         self.step = step
@@ -206,6 +211,7 @@ struct HarnessTraceEvent: Identifiable, Codable, Sendable, Equatable {
     let sequence: UInt64
     let kind: HarnessTraceEventKind
     let timestamp: Date
+    let sessionID: UUID?
     let runID: UUID?
     let turn: Int?
     let step: Int?
@@ -216,6 +222,40 @@ struct HarnessTraceEvent: Identifiable, Codable, Sendable, Equatable {
     let attributes: [String: JSONValue]
     let payload: HarnessTracePayload?
     let error: String?
+
+    init(
+        id: UUID,
+        sequence: UInt64,
+        kind: HarnessTraceEventKind,
+        timestamp: Date,
+        sessionID: UUID? = nil,
+        runID: UUID?,
+        turn: Int?,
+        step: Int?,
+        callID: String?,
+        pluginID: String?,
+        name: String?,
+        durationMilliseconds: Double?,
+        attributes: [String: JSONValue],
+        payload: HarnessTracePayload?,
+        error: String?
+    ) {
+        self.id = id
+        self.sequence = sequence
+        self.kind = kind
+        self.timestamp = timestamp
+        self.sessionID = sessionID
+        self.runID = runID
+        self.turn = turn
+        self.step = step
+        self.callID = callID
+        self.pluginID = pluginID
+        self.name = name
+        self.durationMilliseconds = durationMilliseconds
+        self.attributes = attributes
+        self.payload = payload
+        self.error = error
+    }
 }
 
 struct HarnessTraceSummary: Sendable, Equatable {
@@ -235,10 +275,18 @@ actor HarnessTraceStore {
     private let capacity: Int
     private var nextSequence: UInt64 = 0
     private var storage: [HarnessTraceEvent] = []
+    /// Run ownership is registered before an Agent starts emitting events.
+    /// This lets plugin/Cordis traces, which carry a run id but are produced
+    /// outside the AppModel closure, inherit the exact conversation session.
+    private var runSessions: [UUID: UUID] = [:]
 
     init(capacity: Int = 10_000) {
         self.capacity = max(1, capacity)
         storage.reserveCapacity(min(capacity, 10_000))
+    }
+
+    func register(runID: UUID, sessionID: UUID) {
+        runSessions[runID] = sessionID
     }
 
     @discardableResult
@@ -249,6 +297,7 @@ actor HarnessTraceStore {
             sequence: nextSequence,
             kind: draft.kind,
             timestamp: draft.timestamp,
+            sessionID: draft.sessionID ?? draft.runID.flatMap { runSessions[$0] },
             runID: draft.runID,
             turn: draft.turn,
             step: draft.step,
@@ -270,6 +319,25 @@ actor HarnessTraceStore {
     func events(runID: UUID? = nil) -> [HarnessTraceEvent] {
         guard let runID else { return storage }
         return storage.filter { $0.runID == runID }
+    }
+
+    /// Strict identity projection used by diagnostics and session inspectors.
+    /// Events without an owning session are intentionally excluded: including
+    /// them would reintroduce global/plugin lifecycle rows into a child run.
+    func events(sessionID: UUID, runID: UUID? = nil) -> [HarnessTraceEvent] {
+        storage.filter { event in
+            guard event.sessionID == sessionID else { return false }
+            if let runID { return event.runID == runID }
+            return true
+        }
+    }
+
+    func events(after sequence: UInt64, sessionID: UUID, runID: UUID? = nil) -> [HarnessTraceEvent] {
+        storage.filter { event in
+            guard event.sequence > sequence, event.sessionID == sessionID else { return false }
+            if let runID { return event.runID == runID }
+            return true
+        }
     }
 
     /// Returns only events appended after a previously observed sequence.
@@ -588,6 +656,7 @@ private struct DiagnosticHarnessTraceEvent: Encodable {
     let sequence: UInt64
     let kind: HarnessTraceEventKind
     let timestamp: Date
+    let sessionID: UUID?
     let runID: UUID?
     let turn: Int?
     let step: Int?
@@ -604,6 +673,7 @@ private struct DiagnosticHarnessTraceEvent: Encodable {
         sequence = event.sequence
         kind = event.kind
         timestamp = event.timestamp
+        sessionID = event.sessionID
         runID = event.runID
         turn = event.turn
         step = event.step

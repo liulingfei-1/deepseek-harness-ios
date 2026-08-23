@@ -48,6 +48,29 @@ final class PluginInstallCoordinatorTests: XCTestCase {
         XCTAssertEqual(snapshots, [first])
     }
 
+    func testPreparedCanonicalSourceIdentityCommitsNativeResult() async throws {
+        let coordinator = PluginInstallCoordinator()
+        // The marketplace Host supplies the canonical source before this
+        // transaction starts. The coordinator must carry that exact identity
+        // through commit instead of reconstructing it from UI input.
+        let canonical = Self.source("https://github.com/Example/Plugin")
+        let request = PluginInstallRequest(
+            source: .preparedMarketplace(source: canonical, token: "prepared-token")
+        )
+        let result = PluginInstallResult(
+            pluginID: "native-agent.example-plugin",
+            version: "1.0.0",
+            backend: .native,
+            sourceKey: request.sourceKey,
+            enabled: false
+        )
+
+        let installed = try await coordinator.install(request) { result }
+
+        XCTAssertEqual(installed.sourceKey, request.sourceKey)
+        XCTAssertEqual(installed.backend, PluginBackend.native)
+    }
+
     func testDuplicateDifferentVersionRequiresReplace() async throws {
         let coordinator = PluginInstallCoordinator()
         let firstRequest = PluginInstallRequest(source: .marketplace(Self.source()))
@@ -214,23 +237,32 @@ final class PluginInstallCoordinatorTests: XCTestCase {
     func testInvalidResultDoesNotLeaveActiveTransaction() async throws {
         let coordinator = PluginInstallCoordinator()
         let request = PluginInstallRequest(source: .marketplace(Self.source()))
+        let rollback = RollbackProbe()
         do {
-            _ = try await coordinator.install(request) {
-                PluginInstallResult(
-                    pluginID: "plugin.example",
-                    version: "1.0.0",
-                    scope: .conversation(UUID()),
-                    backend: .ish,
-                    sourceKey: request.sourceKey,
-                    enabled: false
-                )
-            }
+            _ = try await coordinator.install(
+                request,
+                operation: {
+                    PluginInstallResult(
+                        pluginID: "plugin.example",
+                        version: "1.0.0",
+                        scope: .conversation(UUID()),
+                        backend: .ish,
+                        sourceKey: request.sourceKey,
+                        enabled: false
+                    )
+                },
+                rollback: {
+                    await rollback.mark()
+                }
+            )
             XCTFail("A scope mismatch should be rejected.")
         } catch let error as PluginInstallCoordinatorError {
             guard case .resultMismatch = error else {
                 return XCTFail("Unexpected coordinator error: \(error)")
             }
         }
+        let rollbackCalled = await rollback.wasCalled()
+        XCTAssertTrue(rollbackCalled)
 
         let valid = try await coordinator.install(request) { Self.result() }
         XCTAssertEqual(valid.pluginID, "plugin.example")

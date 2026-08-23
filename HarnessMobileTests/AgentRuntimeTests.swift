@@ -208,6 +208,37 @@ final class AgentRuntimeTests: XCTestCase {
         XCTAssertTrue(committedUserMessages.isEmpty)
     }
 
+    func testInitialUserMessageIsIncludedInFirstProviderRequestWhenHistoryIsEmpty() async throws {
+        let script = ModelScript(turns: [[.text("done"), .finish(.stop)]])
+        let sessionEvents = SessionEventRecorder()
+        let initial = AgentMessage.user("compile the plugin now")
+        let runtime = AgentRuntime(
+            client: ScriptedModelClient(script: script),
+            registry: LocalToolRegistry(tools: []),
+            approvalHandler: { _ in true },
+            eventHandler: { _ in },
+            sessionEventHandler: { draft in
+                try await sessionEvents.append(draft)
+            }
+        )
+
+        try await runtime.run(
+            history: [],
+            configuration: AgentConfiguration(),
+            apiKey: "test-only",
+            initialUserMessage: initial
+        )
+
+        let requests = await script.requests
+        XCTAssertEqual(try XCTUnwrap(requests.first).messages.map(\.content), [
+            "compile the plugin now"
+        ])
+        let userEvents = await sessionEvents.events.filter {
+            $0.userMessageData != nil
+        }
+        XCTAssertEqual(userEvents.count, 1)
+    }
+
     func testInstructionInjectionCanNormalizeOnlyTheProviderFacingUserMessage() async throws {
         let script = ModelScript(turns: [[.text("done"), .finish(.stop)]])
         let sessionEvents = SessionEventRecorder()
@@ -520,6 +551,45 @@ final class AgentRuntimeTests: XCTestCase {
             AgentRuntime.promptSourceLabel("harness:base"),
             "@deepseek-ai/dsh-system-prompt"
         )
+    }
+
+    func testContextPipelineRejectsConflictingNormalizedUserContent() {
+        let source: JSONValue = .object(["kind": .string("test")])
+
+        XCTAssertThrowsError(
+            try AgentContextPipeline.normalizedUserContent(in: [
+                AgentRuntimeInstructionInjection(
+                    content: "first",
+                    source: source,
+                    normalizedUserContent: "normalized one"
+                ),
+                AgentRuntimeInstructionInjection(
+                    content: "second",
+                    source: source,
+                    normalizedUserContent: "normalized two"
+                )
+            ])
+        ) { error in
+            guard case AgentRuntimeError.conflictingNormalizedUserContent = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+        }
+    }
+
+    func testContextPipelineUsesAppendOnlyClearedRuntimeSnapshot() throws {
+        let snapshot = try XCTUnwrap(
+            AgentContextPipeline.nextRuntimeContextSnapshot(
+                current: "",
+                retained: "Mode: previously active"
+            )
+        )
+
+        XCTAssertEqual(
+            snapshot.content,
+            "Current runtime context: none. Earlier runtime-context snapshots no longer apply."
+        )
+        XCTAssertEqual(snapshot.message.role, .user)
+        XCTAssertTrue(snapshot.message.isRuntimeContextSnapshot)
     }
 
     func testRuntimeContextChangesAppendAtTailWithoutRewritingSystemHeader() async throws {
@@ -1476,12 +1546,7 @@ final class AgentRuntimeTests: XCTestCase {
             ),
             .finish(.length)
         ]
-        // One larger-budget retry plus two compact tool-call recovery attempts.
-        // Every response remains truncated, so the runtime must eventually
-        // fail closed without executing any of the plausible-looking JSON.
-        let script = ModelScript(
-            turns: [truncatedTurn, truncatedTurn, truncatedTurn, truncatedTurn]
-        )
+        let script = ModelScript(turns: [truncatedTurn])
         let counter = ToolCounter()
         let recorder = EventRecorder()
         let runtime = AgentRuntime(
@@ -1506,18 +1571,16 @@ final class AgentRuntimeTests: XCTestCase {
 
         let executionCount = await counter.value
         XCTAssertEqual(executionCount, 0)
+        let requestCount = await script.requests.count
+        XCTAssertEqual(requestCount, 1)
         let events = await recorder.events
-        XCTAssertTrue(events.contains { event in
-            guard case let .modelResponseRetrying(maxOutputTokens) = event else { return false }
-            return maxOutputTokens == 16_384
-        })
         XCTAssertFalse(events.contains { event in
             if case .messagesCommitted = event { return true }
             return false
         })
     }
 
-    func testLengthTruncatedToolCallRetriesWithLargerBudgetAndExecutesOnlyCleanCall() async throws {
+    func testLengthTruncatedToolCallDoesNotReissueEvenWhenLaterScriptWouldBeValid() async throws {
         let script = ModelScript(
             turns: [[
                 .toolCallDelta(
@@ -1551,52 +1614,13 @@ final class AgentRuntimeTests: XCTestCase {
             eventHandler: { event in await recorder.append(event) }
         )
 
-        try await runtime.run(
-            history: [.user("test")],
-            configuration: AgentConfiguration(),
-            apiKey: "test-only"
-        )
-
-        let executionCount = await counter.value
-        XCTAssertEqual(executionCount, 1)
-        let requests = await script.requests
-        XCTAssertEqual(requests.map(\.configuration.maxOutputTokens), [8_192, 16_384, 16_384])
-        let events = await recorder.events
-        XCTAssertTrue(events.contains { event in
-            guard case let .toolFinished(call, _, isError) = event else { return false }
-            return call.id == "call-2" && !isError
-        })
-    }
-
-    func testEmptyStopAfterTruncatedToolCallDoesNotCommitBlankAssistant() async throws {
-        let script = ModelScript(turns: [[
-            .toolCallDelta(
-                index: 0,
-                id: "truncated-call",
-                type: "function",
-                name: "echo",
-                arguments: "{\"value\":\"incomplete"
-            ),
-            .finish(.length)
-        ], [
-            .finish(.stop)
-        ]])
-        let counter = ToolCounter()
-        let recorder = EventRecorder()
-        let runtime = AgentRuntime(
-            client: ScriptedModelClient(script: script),
-            registry: LocalToolRegistry(tools: [EchoTool(counter: counter)]),
-            approvalHandler: { _ in true },
-            eventHandler: { event in await recorder.append(event) }
-        )
-
         do {
             try await runtime.run(
                 history: [.user("test")],
                 configuration: AgentConfiguration(),
                 apiKey: "test-only"
             )
-            XCTFail("An empty acknowledgement must not hide a truncated tool call")
+            XCTFail("A truncated tool call must fail instead of being reissued")
         } catch let error as AgentRuntimeError {
             guard case .unsafeFinishReason(.length) = error else {
                 return XCTFail("Unexpected error: \(error)")
@@ -1605,20 +1629,19 @@ final class AgentRuntimeTests: XCTestCase {
 
         let executionCount = await counter.value
         XCTAssertEqual(executionCount, 0)
-        let committed = await recorder.events.contains { event in
-            if case .messagesCommitted = event { return true }
+        let requests = await script.requests
+        XCTAssertEqual(requests.map(\.configuration.maxOutputTokens), [8_192])
+        let events = await recorder.events
+        XCTAssertFalse(events.contains { event in
+            if case .toolFinished = event { return true }
             return false
-        }
-        XCTAssertFalse(committed)
+        })
     }
 
-    func testReasoningOnlyLengthFinishRetriesBeforeCommittingAnything() async throws {
+    func testReasoningOnlyLengthFinishCommitsIncompleteResponseWithoutContinuation() async throws {
         let script = ModelScript(turns: [[
             .reasoning("unfinished private reasoning"),
             .finish(.length)
-        ], [
-            .text("complete answer"),
-            .finish(.stop)
         ]])
         let recorder = EventRecorder()
         let runtime = AgentRuntime(
@@ -1635,26 +1658,21 @@ final class AgentRuntimeTests: XCTestCase {
         )
 
         let requests = await script.requests
-        XCTAssertEqual(requests.map(\.configuration.maxOutputTokens), [8_192, 16_384])
+        XCTAssertEqual(requests.map(\.configuration.maxOutputTokens), [8_192])
         let committed = await recorder.events.flatMap { event -> [AgentMessage] in
             guard case let .messagesCommitted(messages) = event else { return [] }
             return messages
         }
-        XCTAssertEqual(committed.map(\.content), ["complete answer"])
-        XCTAssertFalse(committed.contains { $0.reasoning?.contains("unfinished") == true })
+        XCTAssertEqual(committed.map(\.content), [""])
+        XCTAssertEqual(committed.first?.reasoning, "unfinished private reasoning")
+        XCTAssertTrue(committed.first?.isIncomplete == true)
     }
 
-    func testRepeatedTextLengthFinishContinuesWithoutCommittingATruncatedTurn() async throws {
+    func testTextLengthFinishCommitsOneIncompleteResponseWithoutContinuation() async throws {
         let script = ModelScript(turns: [[
-            .reasoning("first attempt exceeded the provider ceiling"),
+            .reasoning("partial rationale"),
+            .text("partial response"),
             .finish(.length)
-        ], [
-            .reasoning("use the prepared source"),
-            .text("partial "),
-            .finish(.length)
-        ], [
-            .text("finished"),
-            .finish(.stop)
         ]])
         let recorder = EventRecorder()
         let runtime = AgentRuntime(
@@ -1671,67 +1689,15 @@ final class AgentRuntimeTests: XCTestCase {
         )
 
         let requests = await script.requests
-        XCTAssertEqual(requests.map(\.configuration.maxOutputTokens), [8_192, 16_384, 16_384])
-        XCTAssertTrue(
-            requests[2].messages.contains {
-                $0.role == .user && $0.content.contains("[Harness continuation]")
-            }
-        )
+        XCTAssertEqual(requests.map(\.configuration.maxOutputTokens), [8_192])
         let recordedEvents = await recorder.events
         let committed = recordedEvents.flatMap { event -> [AgentMessage] in
             guard case let .messagesCommitted(messages) = event else { return [] }
             return messages
         }
-        XCTAssertEqual(committed.map(\.content), ["partial finished"])
-        XCTAssertEqual(committed.first?.reasoning, "use the prepared source")
-        XCTAssertTrue(recordedEvents.contains { event in
-            guard case let .modelResponseContinuing(attempt) = event else { return false }
-            return attempt == 1
-        })
-    }
-
-    func testRepeatedReasoningOnlyLengthFinishCommitsIncompleteReasoningInsteadOfFailingTurn() async throws {
-        let script = ModelScript(turns: [
-            [.reasoning("discarded retry"), .finish(.length)],
-            [.reasoning("reasoning-1 "), .finish(.length)],
-            [.reasoning("reasoning-2 "), .finish(.length)],
-            [.reasoning("reasoning-3 "), .finish(.length)],
-            [.reasoning("reasoning-4"), .finish(.length)]
-        ])
-        let recorder = EventRecorder()
-        let runtime = AgentRuntime(
-            client: ScriptedModelClient(script: script),
-            registry: LocalToolRegistry(tools: []),
-            approvalHandler: { _ in true },
-            eventHandler: { event in await recorder.append(event) }
-        )
-
-        try await runtime.run(
-            history: [.user("deep dive")],
-            configuration: AgentConfiguration(),
-            apiKey: "test-only"
-        )
-
-        let requests = await script.requests
-        XCTAssertEqual(requests.map(\.configuration.maxOutputTokens), [
-            8_192, 16_384, 16_384, 16_384, 16_384
-        ])
-        XCTAssertTrue(
-            requests.dropFirst(2).allSatisfy { request in
-                request.messages.contains {
-                    $0.role == .assistant && $0.reasoning?.isEmpty == false
-                }
-            }
-        )
-
-        let committed = await recorder.events.flatMap { event -> [AgentMessage] in
-            guard case let .messagesCommitted(messages) = event else { return [] }
-            return messages
-        }
-        let message = try XCTUnwrap(committed.last)
-        XCTAssertEqual(message.content, "")
-        XCTAssertEqual(message.reasoning, "reasoning-1 reasoning-2 reasoning-3 reasoning-4")
-        XCTAssertTrue(message.isIncomplete)
+        XCTAssertEqual(committed.map(\.content), ["partial response"])
+        XCTAssertEqual(committed.first?.reasoning, "partial rationale")
+        XCTAssertTrue(committed.first?.isIncomplete == true)
     }
 
     func testSessionEventsFollowDurableTurnAndStepOrder() async throws {
@@ -3064,13 +3030,10 @@ final class AgentRuntimeTests: XCTestCase {
         )
     }
 
-    func testTextOnlyLengthFinishRetriesAndCommitsOnlyCompleteAssistantMessage() async throws {
+    func testTextOnlyLengthFinishPersistsIncompleteAssistantMessage() async throws {
         let script = ModelScript(turns: [[
             .text("partial response"),
             .finish(.length)
-        ], [
-            .text("complete response"),
-            .finish(.stop)
         ]])
         let sessionEvents = SessionEventRecorder()
         let runtime = AgentRuntime(
@@ -3104,7 +3067,7 @@ final class AgentRuntimeTests: XCTestCase {
         let expectedContent: JSONValue = .array([
             .object([
                 "type": .string("text"),
-                "text": .string("complete response")
+                "text": .string("partial response")
             ])
         ])
         XCTAssertEqual(
@@ -3113,7 +3076,7 @@ final class AgentRuntimeTests: XCTestCase {
         )
 
         let reason = try XCTUnwrap(events.last?.turnEndData?.reason.objectValue)
-        XCTAssertEqual(reason["kind"], .string("completed"))
+        XCTAssertEqual(reason["kind"], .string("truncated"))
     }
 }
 

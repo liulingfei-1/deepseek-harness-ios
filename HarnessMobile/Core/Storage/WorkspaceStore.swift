@@ -434,6 +434,25 @@ actor WorkspaceStore {
         return text
     }
 
+    /// Reads one workspace file for native export/share. This supports both
+    /// bounded UTF-8 text and binary files; Agent text tools keep using
+    /// `readText` and preserve their UTF-8 contract.
+    func readData(path: String) throws -> Data {
+        let resolvedPath = try resolvedWorkspacePath(for: path, write: false)
+        let url = resolvedPath.url
+        let values = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        guard values.isRegularFile == true else {
+            throw WorkspaceError.notAFile
+        }
+        guard let size = values.fileSize, size <= maximumReadableBytes else {
+            throw WorkspaceError.fileTooLarge(maximumReadableBytes)
+        }
+        if resolvedPath.isExternalMount {
+            return try coordinatedRead(at: url)
+        }
+        return try Data(contentsOf: url, options: [.mappedIfSafe])
+    }
+
     func writeText(path: String, text: String) throws {
         try ensureRoot()
         let data = Data(text.utf8)

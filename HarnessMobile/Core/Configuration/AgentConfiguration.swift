@@ -173,7 +173,12 @@ struct AgentConfiguration: Codable, Sendable, Equatable {
                 throw AgentConfigurationError.invalidInputModalities
             }
         }
-        guard (128...65_536).contains(maxOutputTokens) else {
+        // Output capacity is a provider/model contract, not an app-level
+        // throttle. Known models are resolved by ProviderProfile before this
+        // point; an unlisted compatible model may still advertise a capacity
+        // above the historic 65,536-token UI limit, so only reject values the
+        // wire protocol cannot represent.
+        guard maxOutputTokens >= 128 else {
             throw AgentConfigurationError.invalidMaxOutputTokens
         }
         guard ReasoningMode.supportedModes(for: providerID).contains(reasoningMode) else {
@@ -268,7 +273,7 @@ enum AgentConfigurationError: LocalizedError, Sendable {
         case .invalidInputModalities:
             return "模型输入类型必须包含 text，且不能包含重复项。"
         case .invalidMaxOutputTokens:
-            return "最大输出 Token 必须在 128 到 65536 之间。"
+            return "最大输出 Token 必须至少为 128。已知模型会使用其 API 声明的输出上限。"
         case let .unsupportedProviderWire(providerID):
             let provider = ModelProviderCatalog.descriptor(for: providerID)
             return provider.compatibilityNotice

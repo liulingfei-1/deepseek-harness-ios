@@ -15,6 +15,8 @@ let package = Package(
             name: "HarnessMobileCore",
             path: "HarnessMobile/Core",
             exclude: [
+                "Agent/AGENTS.md",
+                "Plugins/AGENTS.md",
                 "Tools/CameraOCRTool.swift",
                 "Tools/ProductionToolCatalog.swift"
             ]
@@ -27,7 +29,8 @@ let package = Package(
                 "AppModelProviderProfileTests.swift",
                 "AppModelModelDiscoveryTests.swift",
                 "ProductionToolCatalogTests.swift",
-                "ISHPluginHostNodeSmoke.mjs"
+                "ISHPluginHostNodeSmoke.mjs",
+                "AGENTS.md"
             ]
         )
     ]

@@ -56,6 +56,31 @@ final class HarnessTraceStoreTests: XCTestCase {
         XCTAssertEqual(afterClear.map(\.sequence), [5])
     }
 
+    func testSessionAndRunIdentityFilteringExcludesParentAndUnownedEvents() async {
+        let store = HarnessTraceStore(capacity: 20)
+        let parentSession = UUID()
+        let childSession = UUID()
+        let parentRun = UUID()
+        let childRun = UUID()
+        await store.register(runID: parentRun, sessionID: parentSession)
+        await store.register(runID: childRun, sessionID: childSession)
+
+        _ = await store.record(HarnessTraceDraft(kind: .runStarted, runID: parentRun))
+        _ = await store.record(HarnessTraceDraft(kind: .runStarted, runID: childRun))
+        _ = await store.record(HarnessTraceDraft(kind: .error, name: "unowned"))
+
+        let childEvents = await store.events(sessionID: childSession)
+        XCTAssertEqual(childEvents.map(\.runID), [childRun])
+        let foreignEvents = await store.events(sessionID: childSession, runID: parentRun)
+        let incrementalEvents = await store.events(
+            after: 0,
+            sessionID: childSession,
+            runID: childRun
+        )
+        XCTAssertTrue(foreignEvents.isEmpty)
+        XCTAssertEqual(incrementalEvents.count, 1)
+    }
+
     func testDiagnosticReportDropsStreamingDeltasAndKeepsFinalizedEvents() throws {
         var events: [SessionEvent] = []
         for sequence in 1...6_000 {

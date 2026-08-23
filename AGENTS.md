@@ -43,6 +43,7 @@
 
 - 超过 1500 行的文件至少包括：`AppModel.swift`、`AgentRuntime.swift`、`WorkspaceStore.swift`、`SessionEventTrajectory.swift`、`SlashCommandCore.swift`、`ISHPluginHostDynamicHarnessBridge.swift`、`CordisPluginRuntime.swift`、`TrajectoryView.swift`、`ChatView.swift`、`NativeToolEventViews.swift` 及对应测试。
 - 读取大文件前先用 `rg -n`、`sed -n` 定位相关类型/方法；只读取必要窗口，不整文件灌入上下文。
+- 修改 `HarnessMobile/App/`、`HarnessMobile/Core/Agent/`、`HarnessMobile/Core/Plugins/` 或 `HarnessMobileTests/` 前，先读该目录最近的 `AGENTS.md`；它只补充该模块的入口、边界和最小验证，不重复本文件。
 
 ## 工作纪律
 

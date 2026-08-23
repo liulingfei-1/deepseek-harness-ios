@@ -256,6 +256,9 @@ enum ModelProviderCatalog {
         result.inputModalities = descriptor.builtInModels.first(
             where: { $0.id == descriptor.defaultModel }
         )?.inputModalities
+        result.maxOutputTokens = descriptor.builtInModels.first(
+            where: { $0.id == descriptor.defaultModel }
+        )?.maxOutputTokens ?? result.maxOutputTokens
         result.reasoningMode = descriptor.defaultReasoningMode
         return result
     }
@@ -272,12 +275,20 @@ enum ModelProviderCatalog {
     }
 
     static func supportsImageInput(_ configuration: AgentConfiguration) -> Bool {
+        let normalized = configuration.model.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        // Built-in capabilities are authoritative for known models. This
+        // intentionally wins over an old persisted text-only value so a model
+        // discovered before the vision metadata fix cannot stay stuck in a
+        // text-only state.
+        let models = descriptor(for: configuration.providerID).builtInModels
+        if models.first(where: { $0.id.lowercased() == normalized })?
+            .inputModalities.contains(.image) == true {
+            return true
+        }
         if let inputModalities = configuration.inputModalities {
             return inputModalities.contains(.image)
         }
-        let normalized = configuration.model.trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        let models = descriptor(for: configuration.providerID).builtInModels
         return models.first(where: { $0.id.lowercased() == normalized })?
             .inputModalities.contains(.image) == true
     }

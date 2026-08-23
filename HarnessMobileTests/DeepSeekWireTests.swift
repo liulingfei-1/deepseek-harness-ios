@@ -7,6 +7,53 @@ import XCTest
 #endif
 
 final class DeepSeekWireTests: XCTestCase {
+    func testToolTranscriptValidationRejectsMissingResultLocally() {
+        let request = ModelRequest(
+            configuration: AgentConfiguration(),
+            apiKey: "test-only",
+            systemPrompt: "system",
+            messages: [
+                .assistant("", toolCalls: [
+                    AgentToolCall(id: "call-missing", name: "fixture", arguments: "{}")
+                ])
+            ],
+            tools: []
+        )
+
+        XCTAssertThrowsError(try OpenAICompatibleClient.encodeOpenAIRequestBody(request)) { error in
+            guard case let ModelClientError.invalidToolTranscript(message) = error else {
+                return XCTFail("expected local tool transcript validation, got: \(error)")
+            }
+            XCTAssertTrue(message.contains("call-missing"))
+        }
+    }
+
+    func testToolTranscriptValidationRejectsOrphanAndDuplicateResults() {
+        let orphan = ModelRequest(
+            configuration: AgentConfiguration(),
+            apiKey: "test-only",
+            systemPrompt: "system",
+            messages: [.tool(callID: "orphan", content: "bad")],
+            tools: []
+        )
+        XCTAssertThrowsError(try OpenAICompatibleClient.encodeOpenAIRequestBody(orphan))
+
+        let duplicate = ModelRequest(
+            configuration: AgentConfiguration(),
+            apiKey: "test-only",
+            systemPrompt: "system",
+            messages: [
+                .assistant("", toolCalls: [
+                    AgentToolCall(id: "call-duplicate", name: "fixture", arguments: "{}")
+                ]),
+                .tool(callID: "call-duplicate", content: "one"),
+                .tool(callID: "call-duplicate", content: "two")
+            ],
+            tools: []
+        )
+        XCTAssertThrowsError(try OpenAICompatibleClient.encodeOpenAIRequestBody(duplicate))
+    }
+
     func testModelReplayEnvelopeRoundTripsWithoutFlatteningAdapterState() throws {
         let replayState: JSONValue = .object([
             "kind": .string("signed-thinking"),
@@ -161,7 +208,13 @@ final class DeepSeekWireTests: XCTestCase {
             configuration: AgentConfiguration(model: "deepseek-v4-flash-vision-exp"),
             apiKey: "test-only",
             systemPrompt: "system",
-            messages: [user, .tool(callID: "call-1", content: "done")],
+            messages: [
+                user,
+                .assistant("", toolCalls: [
+                    AgentToolCall(id: "call-1", name: "fixture", arguments: "{}")
+                ]),
+                .tool(callID: "call-1", content: "done")
+            ],
             tools: [],
             imagePayloads: [ModelImagePayload(id: id, mimeType: "image/png", data: Data([1, 2, 3]))]
         )
@@ -176,7 +229,7 @@ final class DeepSeekWireTests: XCTestCase {
             ((userContent[1]["image_url"] as? [String: String])?["url"]),
             "data:image/png;base64,AQID"
         )
-        XCTAssertEqual(messages[2]["content"] as? String, "done")
+        XCTAssertEqual(messages[3]["content"] as? String, "done")
     }
 
     func testVisionMessageUsesDeepSeekFilePartWhenFileAPIReferenceIsAvailable() throws {
