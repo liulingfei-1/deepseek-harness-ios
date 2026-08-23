@@ -1,0 +1,58 @@
+name: Bug report
+description: Report a reproducible Harness Mobile problem
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please remove API keys, Authorization headers, personal files, exact locations, and unredacted conversation exports.
+  - type: input
+    id: revision
+    attributes:
+      label: App revision
+      description: Git commit or build number.
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device and iOS version
+      placeholder: iPhone 16 Pro, iOS 26.x
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Chat or streaming
+        - Provider or model discovery
+        - Tools or workspace
+        - iSH command sandbox
+        - Plugin install or runtime
+        - Background or Live Activity
+        - UI performance
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      placeholder: What did you do, what happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Redacted diagnostics
+      description: Attach a redacted Harness-Diagnostics log or paste the relevant excerpt.
+  - type: checkboxes
+    id: redaction
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed credentials and private content from this report.
+          required: true
