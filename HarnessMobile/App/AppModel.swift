@@ -752,6 +752,7 @@ final class AppModel {
                 state = try await sessionStore.loadState()
             }
             applySessionState(state)
+            await refreshSessionRunProjection()
             await projectFeedbackSidecar()
             await workStateCoordinator.replace(with: workState)
             await refreshTrajectory()
@@ -2689,6 +2690,7 @@ final class AppModel {
             )
             guard nextProjection != backgroundSystemProjection else { return }
             backgroundSystemProjection = nextProjection
+            refreshWidgetProjection()
             await traceStore.record(
                 HarnessTraceDraft(
                     kind: .backgroundTask,
@@ -5675,6 +5677,7 @@ final class AppModel {
     private func projectRunPresentation(_ snapshot: SessionRunPresentation) async {
         if case .terminal = snapshot.phase {
             sessionRunSnapshots.removeValue(forKey: snapshot.identity.sessionID)
+            refreshWidgetProjection()
             await refreshAppIntentRunningSessionProjection()
             guard activeSessionID == snapshot.identity.sessionID else { return }
             selectedRunPresentation = snapshot
@@ -5696,6 +5699,7 @@ final class AppModel {
             return
         }
         sessionRunSnapshots[snapshot.identity.sessionID] = registered
+        refreshWidgetProjection()
         await refreshAppIntentRunningSessionProjection()
         guard activeSessionID == snapshot.identity.sessionID else { return }
         selectedRunPresentation = snapshot
@@ -7698,6 +7702,7 @@ final class AppModel {
         sessionRunSnapshots = Dictionary(
             uniqueKeysWithValues: aggregate.runs.map { ($0.identity.sessionID, $0) }
         )
+        refreshWidgetProjection()
         await refreshAppIntentRunningSessionProjection()
     }
 

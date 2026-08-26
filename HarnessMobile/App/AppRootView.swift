@@ -7,6 +7,7 @@ struct AppRootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var navigationPath: [AppRoute] = []
     @State private var intentInboxNotifier = AppIntentInboxNotifier.shared
+    @State private var pendingWidgetSessionDeepLink: UUID?
 
     private var stateTransitionAnimation: Animation? {
         ProcessInfo.processInfo.arguments.contains("-disable-animations-for-ui-testing")
@@ -41,6 +42,10 @@ struct AppRootView: View {
         .animation(stateTransitionAnimation, value: model.isReady)
         .animation(stateTransitionAnimation, value: model.isConfigured)
         .task {
+            handlePendingIntent()
+        }
+        .onOpenURL { url in
+            pendingWidgetSessionDeepLink = HarnessWidgetProjectionStore.sessionID(from: url)
             handlePendingIntent()
         }
         .onChange(of: intentInboxNotifier.revision) {
@@ -118,7 +123,15 @@ struct AppRootView: View {
         Task { @MainActor in
             let consumedIntent = await model.consumeAppIntentInbox()
             let consumedShare = await model.consumeShareHandoffs()
-            if consumedIntent || consumedShare {
+            var consumedWidgetDeepLink = false
+            if let sessionID = pendingWidgetSessionDeepLink,
+               model.isReady,
+               model.isConfigured {
+                await model.switchConversation(to: sessionID)
+                consumedWidgetDeepLink = model.activeSessionID == sessionID
+                pendingWidgetSessionDeepLink = nil
+            }
+            if consumedIntent || consumedShare || consumedWidgetDeepLink {
                 openChat()
             }
         }

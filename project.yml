@@ -162,9 +162,18 @@ targets:
   HarnessMobileLiveActivity:
     type: app-extension
     platform: iOS
+    entitlements:
+      path: HarnessMobileLiveActivity/HarnessMobileLiveActivity.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.llf.harnessmobile.share
     sources:
       - path: HarnessMobileLiveActivity
+        excludes:
+          - Info.plist
+          - HarnessMobileLiveActivity.entitlements
       - path: HarnessMobile/Core/Background/HarnessActivityAttributes.swift
+      - path: HarnessMobile/Core/Storage/HarnessWidgetProjection.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.llf.harnessmobile.liveactivity

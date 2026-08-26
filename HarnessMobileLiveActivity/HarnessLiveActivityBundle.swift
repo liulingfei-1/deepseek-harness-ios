@@ -5,5 +5,6 @@ import WidgetKit
 struct HarnessLiveActivityBundle: WidgetBundle {
     var body: some Widget {
         HarnessLiveActivityWidget()
+        HarnessSessionWidget()
     }
 }
