@@ -1124,6 +1124,118 @@ final class AgentRuntimeTests: XCTestCase {
         XCTAssertEqual(durableTools.map(\.content), ["done-1", "done-2", "done-3"])
     }
 
+    func testPinnedDeepSeekToolSchedulerDifferentialFixture() async throws {
+        let fixture = try ToolSchedulerFixture.load()
+        let lock = try DeepSeekUpstreamLock.load()
+        XCTAssertEqual(fixture.schemaVersion, 1)
+        XCTAssertEqual(fixture.source.project, "deepseek-ai/deepseek-harness")
+        XCTAssertEqual(fixture.source.lockPath, "Dependencies/upstreams.lock.json")
+        XCTAssertEqual(fixture.source.commit, lock.deepseekHarness.commit)
+
+        for scenario in fixture.scenarios {
+            switch scenario.id {
+            case "reclassification-before-launch":
+                let result = try await runToolSchedulerReclassificationScenario()
+                XCTAssertEqual(result.modeChecks, scenario.expected.modeChecks, scenario.id)
+                XCTAssertEqual(result.startedIDs, scenario.expected.startedIDs, scenario.id)
+                XCTAssertEqual(result.maximumConcurrent, scenario.expected.maximumConcurrent, scenario.id)
+                XCTAssertEqual(result.resultIDs, scenario.expected.resultIDs, scenario.id)
+            case "abort-started-vs-skipped":
+                let result = try await runToolSchedulerAbortScenario()
+                XCTAssertEqual(result.startedIDs, scenario.expected.startedIDs, scenario.id)
+                XCTAssertEqual(result.resultIDs, scenario.expected.resultIDs, scenario.id)
+                XCTAssertEqual(result.resultErrorCodes, scenario.expected.resultErrorCodes, scenario.id)
+            default:
+                XCTFail("Unknown tool scheduler fixture scenario: \(scenario.id)")
+            }
+        }
+    }
+
+    private func runToolSchedulerReclassificationScenario() async throws -> ToolSchedulerScenarioResult {
+        let script = ModelScript(turns: [
+            [
+                .toolCallDelta(index: 0, id: "reclass-1", type: "function", name: "reclassifying_gate", arguments: "{\"id\":\"1\",\"resource\":\"r1\"}"),
+                .toolCallDelta(index: 1, id: "reclass-2", type: "function", name: "reclassifying_gate", arguments: "{\"id\":\"2\",\"resource\":\"r2\"}"),
+                .toolCallDelta(index: 2, id: "reclass-3", type: "function", name: "reclassifying_gate", arguments: "{\"id\":\"3\",\"resource\":\"r3\"}"),
+                .finish(.toolCalls)
+            ],
+            [.text("done"), .finish(.stop)]
+        ])
+        let gate = ParallelToolGate()
+        let mode = ReclassifyingModeProbe(parallelChecks: 2)
+        let recorder = EventRecorder()
+        let runtime = AgentRuntime(
+            client: ScriptedModelClient(script: script),
+            registry: LocalToolRegistry(tools: [ReclassifyingGateTool(gate: gate, mode: mode)]),
+            approvalHandler: { _ in true },
+            eventHandler: { event in await recorder.append(event) }
+        )
+
+        let task = Task {
+            try await runtime.run(history: [.user("reclassify")], configuration: AgentConfiguration(), apiKey: "test-only")
+        }
+        try await eventually { await gate.startedIDs == ["1", "2"] }
+        await gate.release("1")
+        try await eventually { mode.checks == [true, true, false] }
+        await gate.release("2")
+        try await eventually { await gate.startedIDs == ["1", "2", "3"] }
+        await gate.release("3")
+        try await task.value
+
+        let requests = await script.requests
+        let resultIDs = requests[1].messages.filter { $0.role == .tool }.compactMap(\.toolCallID)
+        return ToolSchedulerScenarioResult(
+            modeChecks: mode.checks,
+            startedIDs: await gate.startedIDs,
+            maximumConcurrent: await gate.maximumConcurrent,
+            resultIDs: resultIDs,
+            resultErrorCodes: []
+        )
+    }
+
+    private func runToolSchedulerAbortScenario() async throws -> ToolSchedulerScenarioResult {
+        let script = ModelScript(turns: [[
+            .toolCallDelta(index: 0, id: "abort-1", type: "function", name: "parallel_gate", arguments: "{\"id\":\"1\",\"resource\":\"r1\"}"),
+            .toolCallDelta(index: 1, id: "abort-2", type: "function", name: "parallel_gate", arguments: "{\"id\":\"2\",\"resource\":\"r2\"}"),
+            .toolCallDelta(index: 2, id: "abort-3", type: "function", name: "parallel_gate", arguments: "{\"id\":\"3\",\"resource\":\"r3\"}"),
+            .toolCallDelta(index: 3, id: "abort-4", type: "function", name: "parallel_gate", arguments: "{\"id\":\"4\",\"resource\":\"r4\"}"),
+            .finish(.toolCalls)
+        ]])
+        let gate = ParallelToolGate()
+        let sessionEvents = SessionEventRecorder()
+        let runtime = AgentRuntime(
+            client: ScriptedModelClient(script: script),
+            registry: LocalToolRegistry(tools: [ParallelGateTool(gate: gate)]),
+            approvalHandler: { _ in true },
+            eventHandler: { _ in },
+            sessionEventHandler: { draft in try await sessionEvents.append(draft) }
+        )
+        let task = Task {
+            try await runtime.run(history: [.user("abort")], configuration: AgentConfiguration(), apiKey: "test-only")
+        }
+        try await eventually { await gate.startedIDs == ["1", "2"] }
+        task.cancel()
+        await gate.release("1")
+        await gate.release("2")
+        do {
+            try await task.value
+            XCTFail("Cancelled scheduler run must throw")
+        } catch is CancellationError {
+            // Expected.
+        }
+
+        let results = await sessionEvents.events.filter { $0.type == SessionEventVocabulary.toolResult }
+        let resultIDs = results.compactMap { $0.toolResultData?.callID }
+        let resultErrorCodes = results.compactMap { $0.toolResultData?.error?.objectValue?["code"]?.stringValue }
+        return ToolSchedulerScenarioResult(
+            modeChecks: [],
+            startedIDs: await gate.startedIDs,
+            maximumConcurrent: await gate.maximumConcurrent,
+            resultIDs: resultIDs,
+            resultErrorCodes: resultErrorCodes
+        )
+    }
+
     func testApprovalCallWaitsForParallelPoolToDrain() async throws {
         let script = ModelScript(turns: [
             [
@@ -1666,6 +1778,7 @@ final class AgentRuntimeTests: XCTestCase {
         XCTAssertEqual(committed.map(\.content), [""])
         XCTAssertEqual(committed.first?.reasoning, "unfinished private reasoning")
         XCTAssertTrue(committed.first?.isIncomplete == true)
+        XCTAssertEqual(committed.first?.incompleteReason, .modelOutputLength)
     }
 
     func testTextLengthFinishCommitsOneIncompleteResponseWithoutContinuation() async throws {
@@ -1698,6 +1811,7 @@ final class AgentRuntimeTests: XCTestCase {
         XCTAssertEqual(committed.map(\.content), ["partial response"])
         XCTAssertEqual(committed.first?.reasoning, "partial rationale")
         XCTAssertTrue(committed.first?.isIncomplete == true)
+        XCTAssertEqual(committed.first?.incompleteReason, .modelOutputLength)
     }
 
     func testSessionEventsFollowDurableTurnAndStepOrder() async throws {
@@ -1965,12 +2079,14 @@ final class AgentRuntimeTests: XCTestCase {
         XCTAssertEqual(interrupted.reasoning, "considering the request")
         XCTAssertTrue(interrupted.toolCalls.isEmpty)
         XCTAssertTrue(interrupted.isIncomplete)
+        XCTAssertEqual(interrupted.incompleteReason, .cancelled)
 
         let durableEvents = await sessionEvents.events
         let assistantEvent = try XCTUnwrap(
             durableEvents.first { $0.type == SessionEventVocabulary.assistantMessage }
         )
         XCTAssertTrue(assistantEvent.assistantMessageData?.interrupted == true)
+        XCTAssertEqual(assistantEvent.assistantMessageData?.incompleteReason, .cancelled)
         XCTAssertEqual(
             assistantEvent.sourceEventSeqs,
             durableEvents.filter { $0.type == SessionEventVocabulary.assistantChunk }.map(\.seq)
@@ -1996,6 +2112,7 @@ final class AgentRuntimeTests: XCTestCase {
         XCTAssertEqual(projectedAssistant.content, interrupted.content)
         XCTAssertEqual(projectedAssistant.reasoning, interrupted.reasoning)
         XCTAssertTrue(projectedAssistant.isIncomplete)
+        XCTAssertEqual(projectedAssistant.incompleteReason, .cancelled)
 
         let followUpScript = ModelScript(turns: [[.text("continued"), .finish(.stop)]])
         let followUpRuntime = AgentRuntime(
@@ -3074,9 +3191,372 @@ final class AgentRuntimeTests: XCTestCase {
             assistant.assistantMessageData?.message.objectValue?["content"],
             expectedContent
         )
-
+        XCTAssertEqual(
+            assistant.assistantMessageData?.incompleteReason,
+            .modelOutputLength
+        )
         let reason = try XCTUnwrap(events.last?.turnEndData?.reason.objectValue)
         XCTAssertEqual(reason["kind"], .string("truncated"))
+    }
+
+    func testPinnedDeepSeekAgentLifecycleDifferentialFixture() async throws {
+        let fixture = try AgentLifecycleFixture.load()
+        let lock = try DeepSeekUpstreamLock.load()
+        XCTAssertEqual(fixture.schemaVersion, 1)
+        XCTAssertEqual(fixture.source.project, "deepseek-ai/deepseek-harness")
+        XCTAssertEqual(fixture.source.lockPath, "Dependencies/upstreams.lock.json")
+        XCTAssertEqual(fixture.source.commit, lock.deepseekHarness.commit)
+
+        for scenario in fixture.scenarios {
+            let events = try await AgentLifecycleFixtureRunner.run(scenario.id)
+            XCTAssertEqual(
+                events.map(\.type),
+                scenario.eventTypes,
+                "Unexpected durable event sequence for \(scenario.id)"
+            )
+            XCTAssertEqual(
+                AgentLifecycleFixtureRunner.sourceLinks(in: events),
+                scenario.sourceLinks,
+                "Unexpected source-event sequence for \(scenario.id)"
+            )
+
+            let turnsStarted = events.filter { $0.type == SessionEventVocabulary.turnStart }.count
+            let stepsStarted = events.filter { $0.type == SessionEventVocabulary.stepStart }.count
+            let turnsEnded = events.filter { $0.type == SessionEventVocabulary.turnEnd }.count
+            let stepsEnded = events.filter { $0.type == SessionEventVocabulary.stepEnd }.count
+            XCTAssertEqual(turnsStarted, scenario.closure.turnStarts, scenario.id)
+            XCTAssertEqual(stepsStarted, scenario.closure.stepStarts, scenario.id)
+            XCTAssertEqual(turnsEnded, scenario.closure.turnEnds, scenario.id)
+            XCTAssertEqual(stepsEnded, scenario.closure.stepEnds, scenario.id)
+            XCTAssertEqual(turnsStarted, turnsEnded, "Unclosed turn in \(scenario.id)")
+            XCTAssertEqual(stepsStarted, stepsEnded, "Unclosed step in \(scenario.id)")
+            XCTAssertEqual(
+                events.compactMap { $0.turnEndData?.reason.objectValue?["kind"]?.stringValue },
+                scenario.closure.terminalKinds,
+                "Unexpected terminal closure for \(scenario.id)"
+            )
+        }
+    }
+}
+
+private struct AgentLifecycleFixture: Decodable {
+    let schemaVersion: Int
+    let source: Source
+    let scenarios: [Scenario]
+
+    struct Source: Decodable {
+        let project: String
+        let commit: String
+        let lockPath: String
+    }
+
+    struct Scenario: Decodable {
+        let id: String
+        let eventTypes: [String]
+        let sourceLinks: [String]
+        let closure: Closure
+    }
+
+    struct Closure: Decodable {
+        let turnStarts: Int
+        let stepStarts: Int
+        let turnEnds: Int
+        let stepEnds: Int
+        let terminalKinds: [String]
+    }
+
+    static func load() throws -> Self {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let url = root
+            .appendingPathComponent("CompatibilityFixtures", isDirectory: true)
+            .appendingPathComponent("deepseek", isDirectory: true)
+            .appendingPathComponent("agent-lifecycle-v1.json")
+        return try JSONDecoder().decode(Self.self, from: Data(contentsOf: url))
+    }
+}
+
+private struct DeepSeekUpstreamLock: Decodable {
+    let deepseekHarness: Entry
+
+    struct Entry: Decodable {
+        let commit: String
+    }
+
+    static func load() throws -> Self {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let url = root
+            .appendingPathComponent("Dependencies", isDirectory: true)
+            .appendingPathComponent("upstreams.lock.json")
+        return try JSONDecoder().decode(Self.self, from: Data(contentsOf: url))
+    }
+}
+
+private enum AgentLifecycleFixtureRunner {
+    static func run(_ id: String) async throws -> [SessionEvent] {
+        switch id {
+        case "normal-response":
+            return try await normalResponse()
+        case "empty-response":
+            return try await emptyResponse()
+        case "tool-turn":
+            return try await toolTurn()
+        case "steer":
+            return try await steer()
+        case "inject":
+            return try await inject()
+        case "followup":
+            return try await followup()
+        case "pre-step-rejection":
+            return try await preStepRejection()
+        case "request-failure-retry":
+            return try await requestFailureRetry()
+        case "cancellation":
+            return try await cancellation()
+        default:
+            throw AgentLifecycleFixtureError.unknownScenario(id)
+        }
+    }
+
+    static func sourceLinks(in events: [SessionEvent]) -> [String] {
+        let typesBySequence = Dictionary(uniqueKeysWithValues: events.map { ($0.seq, $0.type) })
+        return events.compactMap { event in
+            guard let sourceEventSeqs = event.sourceEventSeqs, !sourceEventSeqs.isEmpty else {
+                return nil
+            }
+            let sourceTypes = sourceEventSeqs.compactMap { typesBySequence[$0] }
+            return "\(event.type)<-\(sourceTypes.joined(separator: ","))"
+        }
+    }
+
+    private static func normalResponse() async throws -> [SessionEvent] {
+        let events = SessionEventRecorder()
+        let runtime = runtime(
+            client: ScriptedModelClient(script: ModelScript(turns: [[.text("normal"), .finish(.stop)]])),
+            sessionEvents: events
+        )
+        try await run(runtime)
+        return await events.events
+    }
+
+    private static func emptyResponse() async throws -> [SessionEvent] {
+        let events = SessionEventRecorder()
+        let runtime = runtime(
+            client: ScriptedModelClient(script: ModelScript(turns: [[.finish(.stop)]])),
+            sessionEvents: events
+        )
+        do {
+            try await run(runtime, configuration: noRetryConfiguration())
+            throw AgentLifecycleFixtureError.expectedFailure("empty response")
+        } catch is ModelClientError {
+            return await events.events
+        }
+    }
+
+    private static func toolTurn() async throws -> [SessionEvent] {
+        let events = SessionEventRecorder()
+        let runtime = runtime(
+            client: ScriptedModelClient(script: ModelScript(turns: [
+                [.toolCallDelta(index: 0, id: "lifecycle-tool", type: "function", name: "echo", arguments: "{\"value\":\"tool\"}"), .finish(.toolCalls)],
+                [.text("done"), .finish(.stop)]
+            ])),
+            tools: [EchoTool(counter: ToolCounter())],
+            sessionEvents: events
+        )
+        var configuration = AgentConfiguration()
+        configuration.maxSteps = 2
+        try await run(runtime, configuration: configuration)
+        return await events.events
+    }
+
+    private static func steer() async throws -> [SessionEvent] {
+        let events = SessionEventRecorder()
+        let queued = try QueuedAgentInput(
+            id: UUID(uuidString: "00000000-0000-0000-0000-00000000A001")!,
+            text: "steered direction",
+            disposition: .steer,
+            createdAt: Date(timeIntervalSinceReferenceDate: 1)
+        )
+        let inbox = TestQueuedInputInbox(inputs: [queued])
+        let runtime = runtime(
+            client: ScriptedModelClient(script: ModelScript(turns: [
+                [.toolCallDelta(index: 0, id: "steer-tool", type: "function", name: "echo", arguments: "{\"value\":\"first\"}"), .finish(.toolCalls)],
+                [.text("steered response"), .finish(.stop)]
+            ])),
+            tools: [EchoTool(counter: ToolCounter())],
+            eventHandler: { event in
+                if case let .messagesCommitted(messages) = event {
+                    await inbox.acknowledge(messageIDs: messages.map(\.id))
+                }
+            },
+            queuedInputProvider: { boundary in await inbox.next(at: boundary) },
+            sessionEvents: events
+        )
+        var configuration = AgentConfiguration()
+        configuration.maxSteps = 2
+        try await run(runtime, configuration: configuration)
+        return await events.events
+    }
+
+    private static func inject() async throws -> [SessionEvent] {
+        let events = SessionEventRecorder()
+        let runtime = AgentRuntime(
+            client: ScriptedModelClient(script: ModelScript(turns: [[.text("injected response"), .finish(.stop)]])),
+            registry: LocalToolRegistry(tools: []),
+            approvalHandler: { _ in true },
+            eventHandler: { _ in },
+            preStepInstructionProvider: { _ in
+                [AgentRuntimeInstructionInjection(
+                    content: "plugin context",
+                    source: .object(["kind": .string("plugin"), "plugin": .string("fixture")])
+                )]
+            },
+            sessionEventHandler: { draft in try await events.append(draft) }
+        )
+        try await run(runtime)
+        return await events.events
+    }
+
+    private static func followup() async throws -> [SessionEvent] {
+        let events = SessionEventRecorder()
+        let queued = try QueuedAgentInput(
+            id: UUID(uuidString: "00000000-0000-0000-0000-00000000A002")!,
+            text: "follow up",
+            disposition: .queued,
+            createdAt: Date(timeIntervalSinceReferenceDate: 2)
+        )
+        let inbox = TestQueuedInputInbox(inputs: [queued])
+        let runtime = runtime(
+            client: ScriptedModelClient(script: ModelScript(turns: [
+                [.text("first response"), .finish(.stop)],
+                [.text("followup response"), .finish(.stop)]
+            ])),
+            eventHandler: { event in
+                if case let .messagesCommitted(messages) = event {
+                    await inbox.acknowledge(messageIDs: messages.map(\.id))
+                }
+            },
+            queuedInputProvider: { boundary in await inbox.next(at: boundary) },
+            sessionEvents: events
+        )
+        try await run(runtime)
+        return await events.events
+    }
+
+    private static func preStepRejection() async throws -> [SessionEvent] {
+        let events = SessionEventRecorder()
+        let plugins = CordisPluginRuntime()
+        _ = try await plugins.install(
+            CordisAgentServices().pluginDefinition(baseSystemPrompt: MobileHarnessPrompt.text)
+        )
+        _ = try await plugins.install(
+            CordisPluginDefinition(id: "fixture.pre-step-rejection", version: "1") { context in
+                try await context.intercept(CordisAgentLoopCheckpoints.preStep) { _, _ in
+                    throw AgentLifecycleFixtureError.preStepRejected
+                }
+            }
+        )
+        let runtime = AgentRuntime(
+            client: ScriptedModelClient(script: ModelScript(turns: [[.text("unreached"), .finish(.stop)]])),
+            registry: LocalToolRegistry(tools: []),
+            plugins: plugins,
+            approvalHandler: { _ in true },
+            eventHandler: { _ in },
+            sessionEventHandler: { draft in try await events.append(draft) }
+        )
+        do {
+            try await run(runtime)
+            throw AgentLifecycleFixtureError.expectedFailure("pre-step rejection")
+        } catch AgentLifecycleFixtureError.preStepRejected {
+            return await events.events
+        }
+    }
+
+    private static func requestFailureRetry() async throws -> [SessionEvent] {
+        let events = SessionEventRecorder()
+        let script = LifecycleRetryScript()
+        let runtime = runtime(client: LifecycleRetryClient(script: script), sessionEvents: events)
+        var configuration = AgentConfiguration()
+        configuration.retryPolicy = ProviderRetryPolicyConfiguration(
+            mode: .normal,
+            maxRetries: 1,
+            backoff: .init(initialDelayMs: 1, maxDelayMs: 1, jitterRatio: 0)
+        )
+        try await run(runtime, configuration: configuration)
+        return await events.events
+    }
+
+    private static func cancellation() async throws -> [SessionEvent] {
+        let events = SessionEventRecorder()
+        let gate = SilentStreamGate()
+        let runtime = runtime(
+            client: PrefixThenHangModelClient(events: [.text("visible prefix")], gate: gate),
+            sessionEvents: events
+        )
+        let task = Task { try await run(runtime) }
+        await gate.waitUntilSubscribed()
+        try await eventually {
+            await events.events.contains { $0.type == SessionEventVocabulary.assistantChunk }
+        }
+        task.cancel()
+        await gate.finish()
+        do {
+            try await task.value
+            throw AgentLifecycleFixtureError.expectedFailure("cancellation")
+        } catch is CancellationError {
+            return await events.events
+        }
+    }
+
+    private static func runtime(
+        client: any LLMStreamingClient,
+        tools: [any LocalAgentTool] = [],
+        eventHandler: @escaping AgentRuntime.EventHandler = { _ in },
+        queuedInputProvider: AgentRuntime.QueuedInputProvider? = nil,
+        sessionEvents: SessionEventRecorder
+    ) -> AgentRuntime {
+        AgentRuntime(
+            client: client,
+            registry: LocalToolRegistry(tools: tools),
+            approvalHandler: { _ in true },
+            eventHandler: eventHandler,
+            queuedInputProvider: queuedInputProvider,
+            sessionEventHandler: { draft in try await sessionEvents.append(draft) }
+        )
+    }
+
+    private static func run(
+        _ runtime: AgentRuntime,
+        configuration: AgentConfiguration = AgentConfiguration()
+    ) async throws {
+        try await runtime.run(
+            history: [.user("lifecycle fixture")],
+            configuration: configuration,
+            apiKey: "test-only"
+        )
+    }
+
+    private static func noRetryConfiguration() -> AgentConfiguration {
+        var configuration = AgentConfiguration()
+        configuration.retryPolicy = ProviderRetryPolicyConfiguration(mode: .normal, maxRetries: 0)
+        return configuration
+    }
+}
+
+private enum AgentLifecycleFixtureError: LocalizedError {
+    case unknownScenario(String)
+    case expectedFailure(String)
+    case preStepRejected
+
+    var errorDescription: String? {
+        switch self {
+        case let .unknownScenario(id): return "Unknown lifecycle fixture scenario \(id)"
+        case let .expectedFailure(name): return "Expected lifecycle fixture failure: \(name)"
+        case .preStepRejected: return "fixture pre-step rejected"
+        }
     }
 }
 
@@ -3148,6 +3628,43 @@ private struct ScriptedModelClient: LLMStreamingClient {
             }
             continuation.onTermination = { _ in
                 task.cancel()
+            }
+        }
+    }
+}
+
+private actor LifecycleRetryScript {
+    private var invocation = 0
+
+    func next() -> Int {
+        invocation += 1
+        return invocation
+    }
+}
+
+private struct LifecycleRetryClient: LLMStreamingClient {
+    let script: LifecycleRetryScript
+
+    func stream(_ request: ModelRequest) -> AsyncThrowingStream<LLMStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                if await script.next() == 1 {
+                    continuation.finish(
+                        throwing: ModelClientError.httpFailure(
+                            ModelProviderHTTPFailureMetadata(
+                                status: 429,
+                                code: "rate_limit",
+                                retryAfterMilliseconds: nil,
+                                requestID: "lifecycle-retry"
+                            ),
+                            "fixture rate limited"
+                        )
+                    )
+                    return
+                }
+                continuation.yield(.text("retried response"))
+                continuation.yield(.finish(.stop))
+                continuation.finish()
             }
         }
     }
@@ -3760,6 +4277,49 @@ private struct ParallelGateTool: LocalAgentTool {
     }
 }
 
+private struct ReclassifyingGateTool: LocalAgentTool {
+    let gate: ParallelToolGate
+    let mode: ReclassifyingModeProbe
+    let definition = ModelToolDefinition(
+        name: "reclassifying_gate",
+        description: "A scheduler reclassification test tool.",
+        parameters: .object([
+            "type": .string("object"),
+            "properties": .object([
+                "id": .object(["type": .string("string")]),
+                "resource": .object(["type": .string("string")])
+            ]),
+            "required": .array([.string("id"), .string("resource")]),
+            "additionalProperties": .bool(false)
+        ])
+    )
+    let risk: ToolRisk = .pure
+
+    func validate(arguments: [String: JSONValue]) throws {
+        try arguments.requireOnlyKeys(["id", "resource"])
+        _ = try arguments.requiredString("id", maximumUTF8Bytes: 64)
+        _ = try arguments.requiredString("resource", maximumUTF8Bytes: 128)
+    }
+
+    func summary(arguments: [String: JSONValue]) -> String {
+        "reclassifying \(arguments["id"]?.stringValue ?? "unknown")"
+    }
+
+    func isConcurrencySafe(arguments _: [String: JSONValue]) throws -> Bool {
+        mode.nextIsParallel()
+    }
+
+    func concurrencyResources(arguments: [String: JSONValue]) throws -> Set<String> {
+        [try arguments.requiredString("resource", maximumUTF8Bytes: 128)]
+    }
+
+    func execute(arguments: [String: JSONValue]) async throws -> String {
+        let id = try arguments.requiredString("id", maximumUTF8Bytes: 64)
+        await gate.run(id)
+        return "done-\(id)"
+    }
+}
+
 private struct ApprovalBarrierTool: LocalAgentTool {
     let definition = ModelToolDefinition(
         name: "approval_barrier",
@@ -3815,6 +4375,70 @@ private actor ParallelToolGate {
             releasedBeforeWait.insert(id)
         }
     }
+}
+
+private final class ReclassifyingModeProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private let parallelChecks: Int
+    private var values: [Bool] = []
+
+    init(parallelChecks: Int) {
+        self.parallelChecks = parallelChecks
+    }
+
+    var checks: [Bool] {
+        lock.lock(); defer { lock.unlock() }
+        return values
+    }
+
+    func nextIsParallel() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        let result = values.count < parallelChecks
+        values.append(result)
+        return result
+    }
+}
+
+private struct ToolSchedulerFixture: Decodable {
+    let schemaVersion: Int
+    let source: Source
+    let scenarios: [Scenario]
+
+    struct Source: Decodable {
+        let project: String
+        let commit: String
+        let lockPath: String
+    }
+
+    struct Scenario: Decodable {
+        let id: String
+        let expected: Expected
+    }
+
+    struct Expected: Decodable {
+        let modeChecks: [Bool]
+        let startedIDs: [String]
+        let maximumConcurrent: Int
+        let resultIDs: [String]
+        let resultErrorCodes: [String]
+    }
+
+    static func load() throws -> Self {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let url = root
+            .appendingPathComponent("CompatibilityFixtures/deepseek/tool-scheduler-v1.json")
+        return try JSONDecoder().decode(Self.self, from: Data(contentsOf: url))
+    }
+}
+
+private struct ToolSchedulerScenarioResult {
+    let modeChecks: [Bool]
+    let startedIDs: [String]
+    let maximumConcurrent: Int
+    let resultIDs: [String]
+    let resultErrorCodes: [String]
 }
 
 private actor ApprovalProbe {

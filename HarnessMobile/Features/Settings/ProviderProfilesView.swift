@@ -63,6 +63,10 @@ struct ProviderProfilesView: View {
                             Button("编辑", systemImage: "pencil") {
                                 presentedEditor = .edit(profile.id)
                             }
+                            Button("快速测试", systemImage: "bolt.horizontal.circle") {
+                                quickTest(profile)
+                            }
+                            .disabled(!canActivate(profile))
                             Button("删除", systemImage: "trash", role: .destructive) {
                                 pendingDeletion = profile
                             }
@@ -363,6 +367,20 @@ struct ProviderProfilesView: View {
         Task {
             do {
                 try await model.removeProviderProfile(id: profile.id)
+            } catch {
+                operationError = error.localizedDescription
+            }
+            workingProfileID = nil
+        }
+    }
+
+    private func quickTest(_ profile: ProviderProfile) {
+        guard canActivate(profile) else { return }
+        workingProfileID = profile.id
+        operationError = nil
+        Task {
+            do {
+                _ = try await model.quickTestProviderProfile(id: profile.id)
             } catch {
                 operationError = error.localizedDescription
             }

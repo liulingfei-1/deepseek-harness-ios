@@ -47,10 +47,6 @@ enum ProductionToolCatalog {
         "workspace_search",
         "workspace_diff",
         "deliverable_write",
-        "mcp_connect",
-        "mcp_list_tools",
-        "mcp_call",
-        "mcp_disconnect",
         "work_state_replace_plan",
         "work_state_replace_todos",
         "work_state_set_goal",
@@ -84,8 +80,7 @@ enum ProductionToolCatalog {
         subagentPolicy: LocalSubagentPolicy = LocalSubagentPolicy(),
         workflowLifecycleSink: @escaping LocalWorkflowLifecycleSink = { _ in },
         terminalProvider: (any ISHTerminalProviding)? = nil,
-        trajectoryRepository: SessionTrajectoryRepository = SessionTrajectoryRepository(),
-        mcpRegistry: MCPClientRegistry? = nil
+        trajectoryRepository: any SessionPersistence = SessionTrajectoryRepository()
     ) -> [any LocalAgentTool] {
         let resolvedSkillRegistry = skillRegistry ?? MobileSkillRegistry(workspaceStore: workspaceStore)
         let resolvedFileSystemEnvironment = fileSystemEnvironment ?? .guarded(
@@ -94,9 +89,6 @@ enum ProductionToolCatalog {
             policy: HarnessFsObservationPolicy()
         )
         let codeModeResolver = CodeModeToolResolver()
-        let resolvedMCPRegistry = mcpRegistry ?? MCPClientRegistry(
-            workspaceURLProvider: { try await workspaceStore.rootURL() }
-        )
         var tools: [any LocalAgentTool] = [
                 AskUserQuestionTool(service: userQuestionService),
                 AgentDiagnosticsTool(provider: diagnosticsProvider),
@@ -183,10 +175,6 @@ enum ProductionToolCatalog {
             ownerSession: sessionID,
             maximumDepth: subagentPolicy.maximumDepth
         ))
-        tools.append(contentsOf: MCPToolSuite.makeTools(
-            workspaceStore: workspaceStore,
-            registry: resolvedMCPRegistry
-        ))
 #if os(iOS)
         tools.append(contentsOf: MobileNativeToolKit.makeSystemTools())
 #endif
@@ -218,8 +206,7 @@ enum ProductionToolCatalog {
         subagentRunner: LocalSubagentRunner? = nil,
         subagentPolicy: LocalSubagentPolicy = LocalSubagentPolicy(),
         workflowLifecycleSink: @escaping LocalWorkflowLifecycleSink = { _ in },
-        trajectoryRepository: SessionTrajectoryRepository = SessionTrajectoryRepository(),
-        mcpRegistry: MCPClientRegistry? = nil
+        trajectoryRepository: any SessionPersistence = SessionTrajectoryRepository()
     ) -> LocalToolRegistry {
         let tools = makeTools(
             workspaceStore: workspaceStore,
@@ -234,8 +221,7 @@ enum ProductionToolCatalog {
             subagentRunner: subagentRunner,
             subagentPolicy: subagentPolicy,
             workflowLifecycleSink: workflowLifecycleSink,
-            trajectoryRepository: trajectoryRepository,
-            mcpRegistry: mcpRegistry
+            trajectoryRepository: trajectoryRepository
         )
         let registry = LocalToolRegistry(tools: tools)
         precondition(
@@ -264,8 +250,7 @@ enum ProductionToolCatalog {
         subagentPolicy: LocalSubagentPolicy = LocalSubagentPolicy(),
         workflowLifecycleSink: @escaping LocalWorkflowLifecycleSink = { _ in },
         terminalProvider: (any ISHTerminalProviding)? = nil,
-        trajectoryRepository: SessionTrajectoryRepository = SessionTrajectoryRepository(),
-        mcpRegistry: MCPClientRegistry? = nil
+        trajectoryRepository: any SessionPersistence = SessionTrajectoryRepository()
     ) -> CordisPluginDefinition {
         return CordisPluginDefinition(
             id: "core.mobile-tools",
@@ -316,8 +301,7 @@ enum ProductionToolCatalog {
                 subagentPolicy: subagentPolicy,
                 workflowLifecycleSink: workflowLifecycleSink,
                 terminalProvider: terminalProvider,
-                trajectoryRepository: trajectoryRepository,
-                mcpRegistry: mcpRegistry
+                trajectoryRepository: trajectoryRepository
             )
             precondition(
                 Set(tools.map { $0.definition.name }) == approvedNames,
@@ -349,7 +333,6 @@ enum ProductionToolCatalog {
             try await context.promptSection(SubagentToolSuite.promptSection)
             try await context.promptSection(WorkflowToolSuite.promptSection)
             try await context.promptSection(RalphToolSuite.promptSection)
-            try await context.promptSection(MCPToolSuite.promptSection)
             try await context.promptSection(
                 CordisPromptSection(
                     name: "tool:lsp",

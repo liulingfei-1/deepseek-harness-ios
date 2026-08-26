@@ -53,6 +53,8 @@
 	<string>当前构建未获得 HomeKit capability；取得签名能力后，才会在你批准时查询或控制智能家居配件。</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>仅在你批准需要访问同一局域网设备的功能时使用本地网络。</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>仅在你明确开启后台粗略定位保活并允许 Always 定位后，于后台任务运行期间使用约 3 公里精度的位置服务；不会存储或显示位置坐标。</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>仅在你批准定位工具时获取一次当前定位，不进行后台跟踪。</string>
 	<key>NSMicrophoneUsageDescription</key>
@@ -75,6 +77,8 @@
 	<true/>
 	<key>UIBackgroundModes</key>
 	<array>
+		<string>audio</string>
+		<string>location</string>
 		<string>processing</string>
 	</array>
 	<key>UILaunchScreen</key>

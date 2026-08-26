@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "project": "deepseek-ai/deepseek-harness",
+    "commit": "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
+    "lockPath": "Dependencies/upstreams.lock.json"
+  },
+  "scenarios": [
+    {
+      "id": "normal-response",
+      "eventTypes": ["turn/start", "step/start", "request/header", "request/context", "assistant/chunk", "assistant/message", "step/end", "turn/end"],
+      "sourceLinks": ["assistant/message<-assistant/chunk"],
+      "closure": { "turnStarts": 1, "stepStarts": 1, "turnEnds": 1, "stepEnds": 1, "terminalKinds": ["completed"] }
+    },
+    {
+      "id": "empty-response",
+      "eventTypes": ["turn/start", "step/start", "request/header", "request/context", "step/end", "turn/end"],
+      "sourceLinks": [],
+      "closure": { "turnStarts": 1, "stepStarts": 1, "turnEnds": 1, "stepEnds": 1, "terminalKinds": ["error"] }
+    },
+    {
+      "id": "tool-turn",
+      "eventTypes": ["turn/start", "step/start", "request/header", "request/context", "assistant/chunk", "assistant/message", "tool/call", "tool/result", "step/end", "step/start", "assistant/chunk", "assistant/message", "step/end", "turn/end"],
+      "sourceLinks": ["assistant/message<-assistant/chunk", "tool/result<-tool/call", "assistant/message<-assistant/chunk"],
+      "closure": { "turnStarts": 1, "stepStarts": 2, "turnEnds": 1, "stepEnds": 2, "terminalKinds": ["completed"] }
+    },
+    {
+      "id": "steer",
+      "eventTypes": ["turn/start", "step/start", "request/header", "request/context", "assistant/chunk", "assistant/message", "tool/call", "tool/result", "step/end", "turn/end", "turn/start", "user/message", "step/start", "assistant/chunk", "assistant/message", "step/end", "turn/end"],
+      "sourceLinks": ["assistant/message<-assistant/chunk", "tool/result<-tool/call", "assistant/message<-assistant/chunk"],
+      "closure": { "turnStarts": 2, "stepStarts": 2, "turnEnds": 2, "stepEnds": 2, "terminalKinds": ["steered", "completed"] }
+    },
+    {
+      "id": "inject",
+      "eventTypes": ["turn/start", "step/start", "user/message", "request/header", "request/context", "assistant/chunk", "assistant/message", "step/end", "turn/end"],
+      "sourceLinks": ["assistant/message<-assistant/chunk"],
+      "closure": { "turnStarts": 1, "stepStarts": 1, "turnEnds": 1, "stepEnds": 1, "terminalKinds": ["completed"] }
+    },
+    {
+      "id": "followup",
+      "eventTypes": ["turn/start", "step/start", "request/header", "request/context", "assistant/chunk", "assistant/message", "step/end", "turn/end", "turn/start", "user/message", "step/start", "assistant/chunk", "assistant/message", "step/end", "turn/end"],
+      "sourceLinks": ["assistant/message<-assistant/chunk", "assistant/message<-assistant/chunk"],
+      "closure": { "turnStarts": 2, "stepStarts": 2, "turnEnds": 2, "stepEnds": 2, "terminalKinds": ["queued-input", "completed"] }
+    },
+    {
+      "id": "pre-step-rejection",
+      "eventTypes": ["turn/start", "step/start", "step/end", "turn/end"],
+      "sourceLinks": [],
+      "closure": { "turnStarts": 1, "stepStarts": 1, "turnEnds": 1, "stepEnds": 1, "terminalKinds": ["error"] }
+    },
+    {
+      "id": "request-failure-retry",
+      "eventTypes": ["turn/start", "step/start", "request/header", "request/context", "llm/retry", "llm/retry-started", "assistant/chunk", "assistant/message", "step/end", "turn/end"],
+      "sourceLinks": ["assistant/message<-assistant/chunk"],
+      "closure": { "turnStarts": 1, "stepStarts": 1, "turnEnds": 1, "stepEnds": 1, "terminalKinds": ["completed"] }
+    },
+    {
+      "id": "cancellation",
+      "eventTypes": ["turn/start", "step/start", "request/header", "request/context", "assistant/chunk", "assistant/message", "step/end", "turn/end"],
+      "sourceLinks": ["assistant/message<-assistant/chunk"],
+      "closure": { "turnStarts": 1, "stepStarts": 1, "turnEnds": 1, "stepEnds": 1, "terminalKinds": ["aborted"] }
+    }
+  ]
+}

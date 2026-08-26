@@ -65,12 +65,17 @@ actor ISHNativeClientContributionRegistry {
 private struct ISHNativeClientActivation: Sendable {
     let registry: ISHNativeClientContributionRegistry
     let registryToken: ISHNativeClientRegistryToken
+    let slotRegistry: ISHNativeClientSlotRegistry
+    let slotTokens: [ISHNativeClientSlotToken]
     let commandRegistry: SlashCommandRegistry
     let commandRegistrations: [SlashCommandRegistration]
 
     func dispose() async {
         for registration in commandRegistrations.reversed() {
             _ = await commandRegistry.unregister(registration)
+        }
+        for token in slotTokens.reversed() {
+            await slotRegistry.dispose(token)
         }
         await registry.deactivate(registryToken)
     }
@@ -92,6 +97,7 @@ enum ISHNativeClientCordisBridge {
         sessionID: String,
         client: ISHPluginHostClient,
         registry: ISHNativeClientContributionRegistry,
+        slotRegistry: ISHNativeClientSlotRegistry,
         commandRegistry: SlashCommandRegistry
     ) -> CordisPluginDefinition {
         let cordisID = cordisPluginID(for: plugin.pluginId)
@@ -105,6 +111,7 @@ enum ISHNativeClientCordisBridge {
                     sessionID: sessionID,
                     client: client,
                     registry: registry,
+                    slotRegistry: slotRegistry,
                     commandRegistry: commandRegistry
                 )
                 return {
@@ -119,10 +126,13 @@ enum ISHNativeClientCordisBridge {
         sessionID: String,
         client: ISHPluginHostClient,
         registry: ISHNativeClientContributionRegistry,
+        slotRegistry: ISHNativeClientSlotRegistry,
         commandRegistry: SlashCommandRegistry
     ) async throws -> ISHNativeClientActivation {
         let validated = try plugin.validated()
         var registrations: [SlashCommandRegistration] = []
+        var slotTokens: [ISHNativeClientSlotToken] = []
+        var registryToken: ISHNativeClientRegistryToken?
         do {
             for command in validated.contributions.commands {
                 let input = try command.inputHint.map {
@@ -185,15 +195,45 @@ enum ISHNativeClientCordisBridge {
                 )
             }
             let token = try await registry.activate(validated)
+            registryToken = token
+            for settings in validated.contributions.settings {
+                slotTokens.append(try await slotRegistry.register(
+                    plugin: validated,
+                    contributionID: settings.id,
+                    kind: .settingsCard
+                ))
+            }
+            for card in validated.contributions.cards {
+                slotTokens.append(try await slotRegistry.register(
+                    plugin: validated,
+                    contributionID: card.id,
+                    kind: .conversationRenderer
+                ))
+            }
+            for command in validated.contributions.commands {
+                slotTokens.append(try await slotRegistry.register(
+                    plugin: validated,
+                    contributionID: command.name,
+                    kind: .sidebarAction
+                ))
+            }
             return ISHNativeClientActivation(
                 registry: registry,
                 registryToken: token,
+                slotRegistry: slotRegistry,
+                slotTokens: slotTokens,
                 commandRegistry: commandRegistry,
                 commandRegistrations: registrations
             )
         } catch {
             for registration in registrations.reversed() {
                 _ = await commandRegistry.unregister(registration)
+            }
+            for slotToken in slotTokens.reversed() {
+                await slotRegistry.dispose(slotToken)
+            }
+            if let registryToken {
+                await registry.deactivate(registryToken)
             }
             throw error
         }
@@ -286,16 +326,19 @@ actor ISHNativeClientCordisCoordinator {
 
     private let runtime: CordisPluginRuntime
     private let registry: ISHNativeClientContributionRegistry
+    private let slotRegistry: ISHNativeClientSlotRegistry
     private let commandRegistry: SlashCommandRegistry
     private var identities: [CordisPluginID: Identity] = [:]
 
     init(
         runtime: CordisPluginRuntime,
         registry: ISHNativeClientContributionRegistry,
+        slotRegistry: ISHNativeClientSlotRegistry,
         commandRegistry: SlashCommandRegistry
     ) {
         self.runtime = runtime
         self.registry = registry
+        self.slotRegistry = slotRegistry
         self.commandRegistry = commandRegistry
     }
 
@@ -362,6 +405,7 @@ actor ISHNativeClientCordisCoordinator {
                 sessionID: sessionID,
                 client: client,
                 registry: registry,
+                slotRegistry: slotRegistry,
                 commandRegistry: commandRegistry
             )
             do {

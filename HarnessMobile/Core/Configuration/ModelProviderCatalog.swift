@@ -263,6 +263,32 @@ enum ModelProviderCatalog {
         return result
     }
 
+    /// Applies the current built-in provider contract to an already selected
+    /// configuration. This is deliberately narrower than `applying(_:to:)`: it
+    /// preserves a saved endpoint, credential reference, and user choice while
+    /// preventing an old session snapshot from silently lowering a known
+    /// model's API-declared capability. Unknown/custom models retain their
+    /// profile or discovery-provided values.
+    static func applyingKnownModelContract(
+        to configuration: AgentConfiguration
+    ) -> AgentConfiguration {
+        let normalizedModel = configuration.model
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard let model = descriptor(for: configuration.providerID).builtInModels.first(
+            where: { $0.id.lowercased() == normalizedModel }
+        ) else {
+            return configuration
+        }
+
+        var result = configuration
+        if let maxOutputTokens = model.maxOutputTokens {
+            result.maxOutputTokens = maxOutputTokens
+        }
+        result.inputModalities = model.inputModalities
+        return result
+    }
+
     static func builtInSnapshot(for providerID: ModelProviderID) -> ModelCatalogSnapshot {
         let descriptor = descriptor(for: providerID)
         return ModelCatalogSnapshot(

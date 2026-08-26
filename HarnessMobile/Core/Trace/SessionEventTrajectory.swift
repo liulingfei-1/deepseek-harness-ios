@@ -50,6 +50,7 @@ enum SessionEventVocabulary {
         "hook/result",
         "llm/retry",
         "llm/retry-started",
+        "llm/request-audit",
         "permission/preset",
         "plan/mode",
         questionRequested,
@@ -418,6 +419,126 @@ struct SessionRequestContextData: Sendable, Equatable {
     let contextWindow: Int?
 }
 
+/// A bounded, content-free proof that a provider request was assembled only
+/// from durable SessionEvent rows. The request body is deliberately omitted;
+/// source sequence numbers are enough for replay and diagnostics without
+/// copying prompts, tool arguments, or tool output into telemetry.
+struct ModelVisibleEventAuditReport: Sendable, Equatable {
+    let messageSourceEventSeqs: [UInt64]
+    let requestHeaderEventSeq: UInt64
+    let contextSourceEventSeqs: [UInt64]
+
+    var sourceEventSeqs: [UInt64] {
+        var result = [requestHeaderEventSeq]
+        result.append(contentsOf: messageSourceEventSeqs)
+        result.append(contentsOf: contextSourceEventSeqs)
+        return Array(Set(result)).sorted()
+    }
+}
+
+/// Fail-closed model-visible provenance gate. It compares message identity and
+/// request header structure, never message text, so a missing tool response is
+/// rejected without leaking the result into an error or report.
+struct ModelVisibleEventAuditFailure: LocalizedError, Sendable, Equatable {
+    enum Kind: String, Sendable, Equatable {
+        case missingMessageSource = "missing-message-source"
+        case missingToolResultSource = "missing-tool-result-source"
+        case missingRequestHeader = "missing-request-header"
+    }
+
+    let kind: Kind
+    let messageIndex: Int?
+
+    var errorDescription: String? {
+        switch kind {
+        case .missingMessageSource:
+            return "模型请求包含未记录的会话消息，已停止发送。"
+        case .missingToolResultSource:
+            return "模型请求包含未记录的工具响应，已停止发送。"
+        case .missingRequestHeader:
+            return "模型请求的系统提示或工具定义未记录，已停止发送。"
+        }
+    }
+}
+
+enum ModelVisibleEventAuditor {
+    static func validate(
+        request: ModelRequest,
+        requestHeader: JSONValue,
+        events: [SessionEvent]
+    ) throws -> ModelVisibleEventAuditReport {
+        let ordered = events.sorted { $0.seq < $1.seq }
+        guard let headerEvent = ordered.last(where: {
+            $0.type == SessionEventVocabulary.requestHeader
+                && $0.data.objectValue?["header"] == requestHeader
+        }) else {
+            throw ModelVisibleEventAuditFailure(
+                kind: .missingRequestHeader,
+                messageIndex: nil
+            )
+        }
+
+        var messageSources: [UInt64] = []
+        var contextSources: [UInt64] = []
+        for (index, message) in request.messages.enumerated() {
+            if message.role == .tool {
+                guard let callID = message.toolCallID,
+                      let event = ordered.last(where: {
+                          $0.type == SessionEventVocabulary.toolResult
+                              && $0.toolResultData?.callID == callID
+                      }) else {
+                    throw ModelVisibleEventAuditFailure(
+                        kind: .missingToolResultSource,
+                        messageIndex: index
+                    )
+                }
+                messageSources.append(event.seq)
+                contextSources.append(contentsOf: event.sourceEventSeqs ?? [])
+                continue
+            }
+
+            guard let event = ordered.last(where: {
+                guard $0.type == SessionEventVocabulary.userMessage
+                    || $0.type == SessionEventVocabulary.assistantMessage else {
+                    return false
+                }
+                return Self.messageID(in: $0) == message.id
+            }) else {
+                throw ModelVisibleEventAuditFailure(
+                    kind: .missingMessageSource,
+                    messageIndex: index
+                )
+            }
+            messageSources.append(event.seq)
+            if message.source != nil || message.isHiddenContextMessage {
+                contextSources.append(event.seq)
+                contextSources.append(contentsOf: event.sourceEventSeqs ?? [])
+            }
+        }
+
+        return ModelVisibleEventAuditReport(
+            messageSourceEventSeqs: messageSources,
+            requestHeaderEventSeq: headerEvent.seq,
+            contextSourceEventSeqs: Array(Set(contextSources)).sorted()
+        )
+    }
+
+    private static func messageID(in event: SessionEvent) -> UUID? {
+        let value: JSONValue?
+        switch event.type {
+        case SessionEventVocabulary.userMessage:
+            value = event.data.objectValue?["id"]
+        case SessionEventVocabulary.assistantMessage,
+             SessionEventVocabulary.toolResult:
+            value = event.data.objectValue?["message"]?.objectValue?["id"]
+        default:
+            value = nil
+        }
+        guard let raw = value?.stringValue else { return nil }
+        return UUID(uuidString: raw)
+    }
+}
+
 struct SessionTokenUsage: Codable, Sendable, Equatable {
     let inputTokens: Int
     let outputTokens: Int
@@ -443,6 +564,31 @@ struct SessionTokenUsage: Codable, Sendable, Equatable {
         [inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, reasoningTokens]
             .compactMap { $0 }
             .allSatisfy { $0 >= 0 }
+    }
+}
+
+enum CacheHitRateFormat {
+    static let unavailable = "—"
+
+    static func percent(_ rate: Double?) -> String {
+        guard let rate, rate.isFinite, rate >= 0 else { return unavailable }
+        return String(format: "%.1f%%", rate * 100)
+    }
+
+    static func percent(
+        inputTokens: Int,
+        cacheReadTokens: Int?,
+        cacheWriteTokens: Int?
+    ) -> String {
+        guard cacheReadTokens != nil || cacheWriteTokens != nil else {
+            return unavailable
+        }
+        let read = Double(max(0, cacheReadTokens ?? 0))
+        let billed = Double(max(0, inputTokens))
+            + read
+            + Double(max(0, cacheWriteTokens ?? 0))
+        guard billed > 0 else { return unavailable }
+        return percent(read / billed)
     }
 }
 
@@ -478,6 +624,7 @@ struct SessionAssistantMessageData: Sendable, Equatable {
     let message: JSONValue
     let usage: SessionTokenUsage?
     let interrupted: Bool
+    let incompleteReason: AgentMessageIncompleteReason?
 }
 
 struct SessionToolCallData: Sendable, Equatable {
@@ -809,6 +956,7 @@ extension SessionEventDraft {
         message: JSONValue,
         usage: SessionTokenUsage? = nil,
         interrupted: Bool = false,
+        incompleteReason: AgentMessageIncompleteReason? = nil,
         sourceEventSeqs: [UInt64]? = nil,
         surfaceOp: SessionSurfaceOperation = .append,
         time: Int64 = SessionEventTimestamp.nowMilliseconds()
@@ -820,6 +968,9 @@ extension SessionEventDraft {
         ]
         if let usage { data["usage"] = usage.jsonValue }
         if interrupted { data["interrupted"] = .bool(true) }
+        if let incompleteReason {
+            data["incompleteReason"] = .string(incompleteReason.rawValue)
+        }
         return Self(
             type: SessionEventVocabulary.assistantMessage,
             time: time,
@@ -940,6 +1091,7 @@ extension SessionEventDraft {
         name: String,
         args: String? = nil,
         imageAttachments: [AgentImageAttachmentRef] = [],
+        fileAttachments: [AgentFileAttachmentRef] = [],
         sourceKind: String = "user",
         time: Int64 = SessionEventTimestamp.nowMilliseconds()
     ) -> Self {
@@ -956,6 +1108,18 @@ extension SessionEventDraft {
                     "path": .string(attachment.path),
                     "mimeType": .string(attachment.mimeType),
                     "byteCount": .number(Double(attachment.byteCount))
+                ])
+            })
+        }
+        if !fileAttachments.isEmpty {
+            data["fileAttachments"] = .array(fileAttachments.map { attachment in
+                .object([
+                    "id": .string(attachment.id.uuidString.lowercased()),
+                    "path": .string(attachment.path),
+                    "mimeType": .string(attachment.mimeType),
+                    "byteCount": .number(Double(attachment.byteCount)),
+                    "displayName": .string(attachment.displayName),
+                    "expiresAt": .string(ISO8601DateFormatter().string(from: attachment.expiresAt))
                 ])
             })
         }
@@ -1013,6 +1177,31 @@ extension SessionEventDraft {
         ]
         if let contextWindow { data["contextWindow"] = .number(Double(contextWindow)) }
         return Self(type: SessionEventVocabulary.requestContext, time: time, data: .object(data))
+    }
+
+    static func modelRequestAudit(
+        turn: Int,
+        step: Int,
+        report: ModelVisibleEventAuditReport,
+        time: Int64 = SessionEventTimestamp.nowMilliseconds()
+    ) -> Self {
+        Self(
+            type: "llm/request-audit",
+            time: time,
+            data: .object([
+                "turn": .number(Double(turn)),
+                "step": .number(Double(step)),
+                "headerEventSeq": .number(Double(report.requestHeaderEventSeq)),
+                "messageEventSeqs": .array(report.messageSourceEventSeqs.map {
+                    .number(Double($0))
+                }),
+                "contextEventSeqs": .array(report.contextSourceEventSeqs.map {
+                    .number(Double($0))
+                })
+            ]),
+            ignorable: true,
+            sourceEventSeqs: report.sourceEventSeqs
+        )
     }
 
     static func questionRequested(
@@ -1121,12 +1310,19 @@ extension SessionEvent {
               let message = data.objectValue?["message"] else { return nil }
         let usage = data.objectValue?["usage"].flatMap(SessionTokenUsage.init(jsonValue:))
         let interrupted = data.objectValue?["interrupted"] == .bool(true)
+        let incompleteReason: AgentMessageIncompleteReason?
+        if let rawIncompleteReason = data.objectValue?["incompleteReason"]?.stringValue {
+            incompleteReason = AgentMessageIncompleteReason(rawValue: rawIncompleteReason)
+        } else {
+            incompleteReason = nil
+        }
         return SessionAssistantMessageData(
             turn: turn,
             step: step,
             message: message,
             usage: usage,
-            interrupted: interrupted
+            interrupted: interrupted,
+            incompleteReason: incompleteReason
         )
     }
 
@@ -1314,6 +1510,7 @@ enum SessionEventLogError: Error, Sendable, Equatable, LocalizedError {
     case cursorBeyondEnd(cursor: UInt64, end: UInt64)
     case invalidEnvelope(String)
     case corruptLine(line: Int, description: String)
+    case fileHandleUnavailable
     case closed
 
     var errorDescription: String? {
@@ -1330,6 +1527,8 @@ enum SessionEventLogError: Error, Sendable, Equatable, LocalizedError {
             return "Invalid session event envelope: \(message)"
         case let .corruptLine(line, description):
             return "Corrupt session JSONL line \(line): \(description)"
+        case .fileHandleUnavailable:
+            return "Session event file handle is unavailable"
         case .closed:
             return "Session event store is closed"
         }
@@ -1339,6 +1538,11 @@ enum SessionEventLogError: Error, Sendable, Equatable, LocalizedError {
 /// Device-local, append-only JSONL persistence. Actor isolation serializes file
 /// writes, sequence assignment, recovery, and the incremental metrics fold.
 actor SessionEventJSONLStore {
+    private struct PendingBatch {
+        let events: [SessionEvent]
+        let data: Data
+    }
+
     private let fileURL: URL
     private let streamID: String
     private let durability: SessionEventDurability
@@ -1349,6 +1553,8 @@ actor SessionEventJSONLStore {
     private var events: [SessionEvent] = []
     private var metrics = SessionTrajectoryAccumulator()
     private var nextSequence: UInt64 = 0
+    private var durableNextSequence: UInt64 = 0
+    private var pendingBatches: [PendingBatch] = []
     private var fileHandle: FileHandle?
     private var isLoaded = false
     private var isClosed = false
@@ -1429,8 +1635,9 @@ actor SessionEventJSONLStore {
         return try makeSnapshot(after: cursor)
     }
 
-    func allEvents() throws -> [SessionEvent] {
+    func allEvents() async throws -> [SessionEvent] {
         try ensureLoaded()
+        try flush()
         // The live actor deliberately retains only a tail. Read the lossless
         // JSONL stream when an export or forensic caller explicitly asks for it.
         let data = try Data(contentsOf: fileURL, options: [.mappedIfSafe])
@@ -1443,8 +1650,9 @@ actor SessionEventJSONLStore {
     /// JSONL record, which keeps this suitable for compact downstream views.
     func persistedEvents(
         matching shouldRetain: @Sendable (SessionEvent) -> Bool
-    ) throws -> [SessionEvent] {
+    ) async throws -> [SessionEvent] {
         try ensureLoaded()
+        try flush()
         let data = try Data(contentsOf: fileURL, options: [.mappedIfSafe])
         return try decodeLog(data, retaining: shouldRetain).events
     }
@@ -1456,8 +1664,9 @@ actor SessionEventJSONLStore {
         before sequence: UInt64,
         limit: Int,
         matching shouldRetain: @Sendable (SessionEvent) -> Bool
-    ) throws -> [SessionEvent] {
+    ) async throws -> [SessionEvent] {
         try ensureLoaded()
+        try flush()
         guard limit > 0 else { return [] }
         let boundary = min(sequence, nextSequence)
         let data = try Data(contentsOf: fileURL, options: [.mappedIfSafe])
@@ -1472,9 +1681,46 @@ actor SessionEventJSONLStore {
         return metrics.snapshot
     }
 
+    func persistenceRevision() throws -> SessionPersistenceRevision {
+        try ensureLoaded()
+        return SessionPersistenceRevision(
+            streamID: streamID,
+            nextSequence: durableNextSequence,
+            recoveredTornTail: recoveredTornTail
+        )
+    }
+
     func flush() throws {
         try ensureLoaded()
-        try fileHandle?.synchronize()
+        guard !pendingBatches.isEmpty else {
+            guard let fileHandle else {
+                throw SessionEventLogError.fileHandleUnavailable
+            }
+            try fileHandle.synchronize()
+            return
+        }
+        guard let fileHandle else {
+            throw SessionEventLogError.fileHandleUnavailable
+        }
+        let barrierOffset = try fileHandle.offset()
+        let barrierRevision = durableNextSequence
+        do {
+            for batch in pendingBatches {
+                try fileHandle.write(contentsOf: batch.data)
+                durableNextSequence = batch.events.last.map { $0.seq &+ 1 }
+                    ?? durableNextSequence
+            }
+            try fileHandle.synchronize()
+            pendingBatches.removeAll(keepingCapacity: true)
+        } catch {
+            // A write or synchronize failure leaves the barrier uncommitted.
+            // Roll back the complete barrier so retrying the same pending
+            // batches cannot duplicate a partially written suffix.
+            durableNextSequence = barrierRevision
+            try? fileHandle.truncate(atOffset: barrierOffset)
+            _ = try? fileHandle.seekToEnd()
+            throw error
+        }
     }
 
     func close() throws {
@@ -1483,7 +1729,7 @@ actor SessionEventJSONLStore {
             isClosed = true
             return
         }
-        try fileHandle?.synchronize()
+        try flush()
         try fileHandle?.close()
         fileHandle = nil
         isClosed = true
@@ -1500,14 +1746,14 @@ actor SessionEventJSONLStore {
         }
 
         let data = try encodedLines(assignedEvents)
-        try fileHandle?.write(contentsOf: data)
+        pendingBatches.append(PendingBatch(events: assignedEvents, data: data))
         events.append(contentsOf: assignedEvents)
         if events.count > maximumRetainedEvents {
             events.removeFirst(events.count - maximumRetainedEvents)
         }
         nextSequence = expected
         for event in assignedEvents { metrics.apply(event) }
-        if durability == .synchronized { try fileHandle?.synchronize() }
+        if durability == .synchronized { try flush() }
         return assignedEvents
     }
 
@@ -1544,6 +1790,7 @@ actor SessionEventJSONLStore {
             for event in recovery.events { metrics.apply(event) }
             events = Array(recovery.events.suffix(maximumRetainedEvents))
             nextSequence = UInt64(recovery.events.count)
+            durableNextSequence = UInt64(recovery.events.count)
             fileHandle = handle
             isLoaded = true
 
@@ -1554,7 +1801,7 @@ actor SessionEventJSONLStore {
             let closers = try SessionEventRecovery.interruptedTurnClosers(recovery.events)
             if !closers.isEmpty {
                 _ = try appendAssigned(closers)
-                try fileHandle?.synchronize()
+                try flush()
             }
         } catch {
             try? handle.close()
@@ -1784,7 +2031,7 @@ private struct SessionTrajectoryAccumulator {
         }
         let averageTTFT = ttftSamples == 0 ? nil : ttftMilliseconds / Double(ttftSamples)
         let billedInput = usageTotals.billedInputTokens
-        let cacheHitRate = billedInput == 0
+        let cacheHitRate = !usageTotals.hasCacheData || billedInput == 0
             ? nil
             : Double(usageTotals.cacheReadTokens) / Double(billedInput)
         return SessionTrajectoryMetrics(
@@ -1821,6 +2068,11 @@ private struct SessionUsageTotals {
     var outputTokens = 0
     var cacheReadTokens = 0
     var cacheWriteTokens = 0
+    var cacheDataSamples = 0
+
+    var hasCacheData: Bool {
+        cacheDataSamples > 0
+    }
 
     var billedInputTokens: Int {
         saturatingAdd(saturatingAdd(uncachedInputTokens, cacheReadTokens), cacheWriteTokens)
@@ -1831,6 +2083,14 @@ private struct SessionUsageTotals {
         outputTokens = replacing(outputTokens, previous?.outputTokens, next.outputTokens)
         cacheReadTokens = replacing(cacheReadTokens, previous?.cacheReadTokens ?? 0, next.cacheReadTokens ?? 0)
         cacheWriteTokens = replacing(cacheWriteTokens, previous?.cacheWriteTokens ?? 0, next.cacheWriteTokens ?? 0)
+
+        let previousHasCacheData = previous?.cacheReadTokens != nil || previous?.cacheWriteTokens != nil
+        let nextHasCacheData = next.cacheReadTokens != nil || next.cacheWriteTokens != nil
+        if previousHasCacheData && !nextHasCacheData {
+            cacheDataSamples = max(0, cacheDataSamples - 1)
+        } else if !previousHasCacheData && nextHasCacheData {
+            cacheDataSamples = saturatingAdd(cacheDataSamples, 1)
+        }
     }
 
     private func replacing(_ total: Int, _ previous: Int?, _ next: Int) -> Int {

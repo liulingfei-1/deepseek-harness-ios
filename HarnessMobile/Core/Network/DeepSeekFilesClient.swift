@@ -119,7 +119,8 @@ final class DeepSeekFilesClient: @unchecked Sendable {
             systemPrompt: request.systemPrompt,
             messages: request.messages,
             tools: request.tools,
-            imagePayloads: payloads
+            imagePayloads: payloads,
+            route: request.route
         )
     }
 

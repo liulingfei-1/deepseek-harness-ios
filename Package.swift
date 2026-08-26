@@ -19,6 +19,9 @@ let package = Package(
                 "Plugins/AGENTS.md",
                 "Tools/CameraOCRTool.swift",
                 "Tools/ProductionToolCatalog.swift"
+            ],
+            linkerSettings: [
+                .linkedLibrary("sqlite3")
             ]
         ),
         .testTarget(

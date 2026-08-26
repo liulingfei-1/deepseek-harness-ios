@@ -61,7 +61,8 @@ enum SessionTrajectoryConversationProjection {
             if let assistant = event.assistantMessageData,
                let message = decodeAssistantMessage(
                    assistant.message,
-                   interrupted: assistant.interrupted
+                   interrupted: assistant.interrupted,
+                   incompleteReason: assistant.incompleteReason
                ) {
                 for call in message.toolCalls {
                     toolNames[call.id] = call.name
@@ -166,7 +167,8 @@ enum SessionTrajectoryConversationProjection {
 
     private static func decodeAssistantMessage(
         _ value: JSONValue,
-        interrupted: Bool
+        interrupted: Bool,
+        incompleteReason: AgentMessageIncompleteReason?
     ) -> AgentMessage? {
         guard let object = value.objectValue,
               let id = uuid(object["id"]),
@@ -206,6 +208,7 @@ enum SessionTrajectoryConversationProjection {
             reasoning: reasoning,
             toolCalls: calls,
             isIncomplete: interrupted,
+            incompleteReason: incompleteReason,
             source: object["source"]
         )
     }
@@ -249,6 +252,12 @@ enum SessionTrajectoryConversationProjection {
         } else {
             attachmentValues = []
         }
+        let fileAttachmentValues: [JSONValue]
+        if case let .array(values)? = object["fileAttachments"] {
+            fileAttachmentValues = values
+        } else {
+            fileAttachmentValues = []
+        }
         let attachments: [AgentImageAttachmentRef] = attachmentValues
             .compactMap { value in
                 guard let item = value.objectValue,
@@ -270,12 +279,39 @@ enum SessionTrajectoryConversationProjection {
                     byteCount: byteCount
                 )
             }
+        let fileAttachments: [AgentFileAttachmentRef] = fileAttachmentValues
+            .compactMap { value in
+                guard let item = value.objectValue,
+                      let rawID = item["id"]?.stringValue,
+                      let attachmentID = UUID(uuidString: rawID),
+                      let path = item["path"]?.stringValue,
+                      let mimeType = item["mimeType"]?.stringValue,
+                      let displayName = item["displayName"]?.stringValue,
+                      let expiration = item["expiresAt"]?.stringValue,
+                      let expiresAt = ISO8601DateFormatter().date(from: expiration) else { return nil }
+                let byteCount = item["byteCount"].flatMap { value -> Int? in
+                    guard case let .number(number) = value,
+                          number.isFinite,
+                          number >= 0,
+                          number <= Double(Int.max) else { return nil }
+                    return Int(number)
+                } ?? 0
+                return AgentFileAttachmentRef(
+                    id: attachmentID,
+                    path: path,
+                    mimeType: mimeType,
+                    byteCount: byteCount,
+                    displayName: displayName,
+                    expiresAt: expiresAt
+                )
+            }
         return AgentMessage(
             id: id,
             role: role,
             content: text,
             source: source,
-            imageAttachments: attachments
+            imageAttachments: attachments,
+            fileAttachments: fileAttachments
         )
     }
 

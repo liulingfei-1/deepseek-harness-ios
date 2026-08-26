@@ -121,13 +121,23 @@ struct CommunityPluginMarketView: View {
             }
         }
         .task {
-            if model.ishPluginMarketplaceCatalog == nil {
+            if model.ishPluginMarketplaceCatalog == nil, !isUITestingMarketplaceFixtureRequested {
                 await model.refreshISHPluginMarketplace()
             }
         }
         .refreshable {
             await model.refreshISHPluginMarketplace(forceRefresh: true)
         }
+    }
+
+    private var isUITestingMarketplaceFixtureRequested: Bool {
+#if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        return arguments.contains("-present-plugin-market-for-ui-testing")
+            || arguments.contains("-present-plugin-compilation-failure-for-ui-testing")
+#else
+        false
+#endif
     }
 
     @ViewBuilder
@@ -318,7 +328,7 @@ private struct CommunityPluginCompilationTraceSection: View {
                 }
 
                 if !trace.logs.isEmpty {
-                    DisclosureGroup("详细日志", isExpanded: $areLogsExpanded) {
+                    DisclosureGroup(isExpanded: $areLogsExpanded) {
                         LazyVStack(alignment: .leading, spacing: 7) {
                             ForEach(trace.logs) { entry in
                                 HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -335,6 +345,12 @@ private struct CommunityPluginCompilationTraceSection: View {
                             }
                         }
                         .padding(.top, 6)
+                        .accessibilityIdentifier("community-plugin-compilation-logs")
+                    } label: {
+                        HStack {
+                            Text("详细日志")
+                        }
+                        .accessibilityIdentifier("community-plugin-compilation-logs-toggle")
                     }
                     .font(.caption)
                     .padding(.top, 8)
@@ -359,6 +375,7 @@ private struct CommunityPluginCompilationTraceSection: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(.top, 10)
+                    .accessibilityIdentifier("community-plugin-compilation-diagnostic")
                 }
             } label: {
                 HStack(spacing: 10) {
@@ -370,17 +387,18 @@ private struct CommunityPluginCompilationTraceSection: View {
                         Text(trace.outcome ?? currentSummary)
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                            .lineLimit(2)
+                        .lineLimit(2)
                     }
                 }
+                .accessibilityIdentifier("community-plugin-compilation-summary")
             }
-            .accessibilityIdentifier("community-plugin-compilation-trace")
         } header: {
             Text("Agent 原生编译")
         } footer: {
             Text(trace.source)
                 .fontDesign(.monospaced)
                 .textSelection(.enabled)
+                .accessibilityIdentifier("community-plugin-compilation-source")
         }
         .onChange(of: trace.id) {
             isExpanded = true

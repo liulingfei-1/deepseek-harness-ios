@@ -192,6 +192,7 @@ enum CordisPluginRuntimeError: LocalizedError, Sendable, Equatable {
     case eventTypeMismatch(String)
     case eventDispatchFailed(name: String, errors: [String])
     case replacementIDMismatch(expected: CordisPluginID, actual: CordisPluginID)
+    case replacementInProgress(CordisPluginID)
     case replacementRolledBack(plugin: CordisPluginID, error: String)
     case rollbackFailed(plugin: CordisPluginID, replacementError: String, rollbackError: String)
 
@@ -221,6 +222,8 @@ enum CordisPluginRuntimeError: LocalizedError, Sendable, Equatable {
             return "Cordis event \(name) had \(errors.count) listener failure(s): \(errors.joined(separator: " | "))"
         case let .replacementIDMismatch(expected, actual):
             return "Replacement plugin id \(actual.rawValue) does not match \(expected.rawValue)."
+        case let .replacementInProgress(plugin):
+            return "Cordis replacement for \(plugin.rawValue) is already in progress."
         case let .replacementRolledBack(plugin, error):
             return "Cordis replacement for \(plugin.rawValue) failed and was rolled back: \(error)"
         case let .rollbackFailed(plugin, replacementError, rollbackError):
@@ -492,12 +495,39 @@ private struct CordisPluginRecord: Sendable {
     var error: String?
 }
 
+/// Bounded lifecycle inventory used by diagnostics and contract tests. It
+/// exposes counts only; plugin payloads, arguments, and service values never
+/// leave the runtime actor.
+struct CordisPluginRuntimeInventory: Sendable, Equatable {
+    let activePluginCount: Int
+    let stagedPluginCount: Int
+    let serviceCount: Int
+    let eventListenerCount: Int
+    let bailEventListenerCount: Int
+    let interceptorCount: Int
+    let effectCount: Int
+
+    var hasNoRegistrations: Bool {
+        activePluginCount == 0
+            && stagedPluginCount == 0
+            && serviceCount == 0
+            && eventListenerCount == 0
+            && bailEventListenerCount == 0
+            && interceptorCount == 0
+            && effectCount == 0
+    }
+}
+
 /// Actor-owned Cordis-like kernel. It keeps mutable plugin/service/interceptor state
 /// off the main actor and validates every callback against its fiber generation.
 actor CordisPluginRuntime {
     typealias TraceHandler = @Sendable (HarnessTraceDraft) async -> Void
 
     private var plugins: [CordisPluginID: CordisPluginRecord] = [:]
+    /// A replacement candidate is intentionally kept outside `plugins` while
+    /// it activates. The current generation remains dispatchable until the
+    /// candidate has committed every effect.
+    private var stagedPlugins: [CordisPluginID: CordisPluginRecord] = [:]
     private var services: [CordisServiceSlot: CordisServiceRegistration] = [:]
     private var serviceReservations: [CordisServiceSlot: CordisPluginOwner] = [:]
     private var eventListeners: [String: [AnyCordisEventListener]] = [:]
@@ -580,47 +610,104 @@ actor CordisPluginRuntime {
         guard let original = plugins[id] else {
             throw CordisPluginRuntimeError.unknownPlugin(id)
         }
-        let shouldRollback = rollbackOnFailure && original.state == .active && original.isEnabled
-
-        await unload(id, nextState: .pending)
-        guard var candidate = plugins[id] else {
-            throw CordisPluginRuntimeError.unknownPlugin(id)
+        guard stagedPlugins[id] == nil else {
+            throw CordisPluginRuntimeError.replacementInProgress(id)
         }
-        candidate.definition = replacement
-        candidate.state = .pending
-        candidate.error = nil
-        plugins[id] = candidate
-        await reconcile()
-
-        guard shouldRollback,
-              let failed = plugins[id],
-              failed.state == .failed else {
+        // Disabled/pending/failed entries have no live generation to protect.
+        // Preserve the existing state machine for those definitions.
+        guard original.state == .active, original.isEnabled else {
+            var record = original
+            record.definition = replacement
+            record.state = original.isEnabled ? .pending : original.state
+            record.error = nil
+            plugins[id] = record
+            await reconcile()
             return try snapshot(for: id)
         }
 
-        let replacementError = failed.error ?? "unknown activation failure"
-        await unload(id, nextState: .pending)
-        guard var rollback = plugins[id] else {
-            throw CordisPluginRuntimeError.unknownPlugin(id)
-        }
-        rollback.definition = original.definition
-        rollback.state = .pending
-        rollback.error = nil
-        rollback.isEnabled = original.isEnabled
-        plugins[id] = rollback
-        await reconcile()
-
-        if let restored = plugins[id], restored.state == .active {
+        let candidateOwner = CordisPluginOwner(
+            id: id,
+            generation: original.generation &+ 1
+        )
+        var candidate = CordisPluginRecord(
+            definition: replacement,
+            state: .loading,
+            isEnabled: true,
+            generation: candidateOwner.generation,
+            effects: [],
+            boundServices: [:],
+            error: nil
+        )
+        guard missingDependencies(for: candidate).isEmpty else {
             throw CordisPluginRuntimeError.replacementRolledBack(
                 plugin: id,
-                error: replacementError
+                error: "replacement dependencies are unavailable"
             )
         }
-        throw CordisPluginRuntimeError.rollbackFailed(
-            plugin: id,
-            replacementError: replacementError,
-            rollbackError: plugins[id]?.error ?? "rollback did not become active"
-        )
+        candidate.boundServices = resolvedDependencies(for: candidate)
+        stagedPlugins[id] = candidate
+        await emitPluginState(id, from: .active, to: .loading, error: nil)
+
+        do {
+            try await replacement.activate(
+                CordisPluginContext(runtime: self, owner: candidateOwner)
+            )
+            guard var staged = stagedPlugins[id],
+                  staged.generation == candidateOwner.generation,
+                  staged.state == .loading,
+                  staged.isEnabled,
+                  let live = plugins[id],
+                  live.generation == original.generation,
+                  live.state == .active,
+                  live.isEnabled,
+                  missingDependencies(for: staged).isEmpty,
+                  dependenciesMatch(staged.boundServices) else {
+                throw CordisPluginRuntimeError.inactivePluginContext(id)
+            }
+
+            // Commit the candidate while the old generation is still live.
+            // Service replacement is owner-checked, so the subsequent old
+            // generation cleanup cannot remove the newly published service.
+            for index in staged.effects.indices {
+                staged.effects[index].isCommitted = true
+                commit(staged.effects[index], owner: candidateOwner)
+            }
+            staged.state = .active
+            staged.error = nil
+            stagedPlugins.removeValue(forKey: id)
+            let oldEffects = Array(original.effects.reversed())
+            plugins[id] = staged
+            await emitPluginState(id, from: .loading, to: .active, error: nil)
+
+            // Retract the old generation only after the candidate is visible.
+            await emitPluginState(id, from: .active, to: .unloading, error: nil)
+            for effect in oldEffects {
+                removeCommittedContribution(effect, owner: CordisPluginOwner(
+                    id: id,
+                    generation: original.generation
+                ))
+            }
+            for effect in oldEffects {
+                await runCleanup(effect, pluginID: id)
+            }
+            await emitPluginState(id, from: .unloading, to: .active, error: nil)
+            reconcileRequested = true
+            await reconcile()
+            return try snapshot(for: id)
+        } catch {
+            await failStagedActivation(
+                id,
+                owner: candidateOwner,
+                error: error
+            )
+            if rollbackOnFailure {
+                throw CordisPluginRuntimeError.replacementRolledBack(
+                    plugin: id,
+                    error: String(describing: error)
+                )
+            }
+            return try snapshot(for: id)
+        }
     }
 
     @discardableResult
@@ -645,6 +732,21 @@ actor CordisPluginRuntime {
     func snapshots() -> [CordisPluginSnapshot] {
         plugins.map { makeSnapshot(id: $0.key, record: $0.value) }
             .sorted { $0.id.rawValue < $1.id.rawValue }
+    }
+
+    func inventory() -> CordisPluginRuntimeInventory {
+        CordisPluginRuntimeInventory(
+            activePluginCount: plugins.values.reduce(0) { count, record in
+                count + (record.state == .active ? 1 : 0)
+            },
+            stagedPluginCount: stagedPlugins.count,
+            serviceCount: services.count,
+            eventListenerCount: eventListeners.values.reduce(0) { $0 + $1.count },
+            bailEventListenerCount: bailEventListeners.values.reduce(0) { $0 + $1.count },
+            interceptorCount: interceptors.values.reduce(0) { $0 + $1.count },
+            effectCount: plugins.values.reduce(0) { $0 + $1.effects.count }
+                + stagedPlugins.values.reduce(0) { $0 + $1.effects.count }
+        )
     }
 
     /// Resolve a root or explicitly isolated service from host code. Plugin code
@@ -872,7 +974,11 @@ actor CordisPluginRuntime {
         try Self.validateServiceName(key.name)
         let slot = try serviceSlot(owner: owner, name: key.name)
         if let reserved = serviceReservations[slot], reserved != owner {
-            throw CordisPluginRuntimeError.duplicateService(key.name)
+            let replacingLiveProvider = services[slot]?.owner.id == owner.id
+                && owner.generation > (services[slot]?.owner.generation ?? 0)
+            guard replacingLiveProvider else {
+                throw CordisPluginRuntimeError.duplicateService(key.name)
+            }
         }
         if serviceReservations[slot] == owner {
             throw CordisPluginRuntimeError.duplicateService(key.name)
@@ -973,8 +1079,7 @@ actor CordisPluginRuntime {
     ) throws -> Value? {
         try Self.validateServiceName(key.name)
         let slot = try serviceSlot(owner: owner, name: key.name)
-        guard let record = plugins[owner.id],
-              record.generation == owner.generation,
+        guard let record = record(for: owner),
               record.state == .loading || record.state == .active else {
             throw CordisPluginRuntimeError.inactivePluginContext(owner.id)
         }
@@ -1040,8 +1145,7 @@ actor CordisPluginRuntime {
         prependInterceptor: Bool = false,
         prependEvent: Bool = false
     ) throws -> CordisEffectHandle {
-        guard var record = plugins[owner.id],
-              record.generation == owner.generation,
+        guard var record = record(for: owner),
               record.isEnabled,
               record.state == .loading || record.state == .active else {
             throw CordisPluginRuntimeError.inactivePluginContext(owner.id)
@@ -1054,7 +1158,7 @@ actor CordisPluginRuntime {
             kind: kind
         )
         record.effects.append(effect)
-        plugins[owner.id] = record
+        updateRecord(record, owner: owner)
 
         if effect.isCommitted {
             commit(
@@ -1072,13 +1176,12 @@ actor CordisPluginRuntime {
     }
 
     private func disposeEffect(owner: CordisPluginOwner, effectID: UUID) async {
-        guard var record = plugins[owner.id],
-              record.generation == owner.generation,
+        guard var record = record(for: owner),
               let index = record.effects.firstIndex(where: { $0.id == effectID }) else {
             return
         }
         let effect = record.effects.remove(at: index)
-        plugins[owner.id] = record
+        updateRecord(record, owner: owner)
         removeCommittedContribution(effect, owner: owner)
         await runCleanup(effect, pluginID: owner.id)
         await reconcile()
@@ -1189,6 +1292,37 @@ actor CordisPluginRuntime {
         }
         await emitPluginState(id, from: .loading, to: .failed, error: record.error)
         reconcileRequested = true
+    }
+
+    private func failStagedActivation(
+        _ id: CordisPluginID,
+        owner: CordisPluginOwner,
+        error: Error
+    ) async {
+        guard let staged = stagedPlugins[id], staged.generation == owner.generation else {
+            return
+        }
+        stagedPlugins.removeValue(forKey: id)
+        let effects = staged.effects.reversed()
+        for effect in effects {
+            removeCommittedContribution(effect, owner: owner)
+            await runCleanup(effect, pluginID: id)
+        }
+        // A failed replacement may have temporarily borrowed a service slot
+        // reservation from the still-live old generation. Restore that owner
+        // so a third provider cannot overwrite the old service while the
+        // failed candidate is being reported.
+        for effect in effects {
+            guard case let .service(slot, _) = effect.kind,
+                  let registration = services[slot] else { continue }
+            serviceReservations[slot] = registration.owner
+        }
+        await emitPluginState(
+            id,
+            from: .loading,
+            to: .failed,
+            error: String(describing: error)
+        )
     }
 
     private func unload(_ id: CordisPluginID, nextState: CordisPluginState) async {
@@ -1348,8 +1482,7 @@ actor CordisPluginRuntime {
         owner: CordisPluginOwner,
         name: String
     ) throws -> CordisServiceSlot {
-        guard let record = plugins[owner.id],
-              record.generation == owner.generation,
+        guard let record = record(for: owner),
               record.state == .loading || record.state == .active else {
             throw CordisPluginRuntimeError.inactivePluginContext(owner.id)
         }
@@ -1357,6 +1490,24 @@ actor CordisPluginRuntime {
             name: name,
             isolationLabel: record.definition.isolation.label(for: name)
         )
+    }
+
+    private func record(for owner: CordisPluginOwner) -> CordisPluginRecord? {
+        if let staged = stagedPlugins[owner.id], staged.generation == owner.generation {
+            return staged
+        }
+        guard let active = plugins[owner.id], active.generation == owner.generation else {
+            return nil
+        }
+        return active
+    }
+
+    private func updateRecord(_ record: CordisPluginRecord, owner: CordisPluginOwner) {
+        if stagedPlugins[owner.id]?.generation == owner.generation {
+            stagedPlugins[owner.id] = record
+        } else if plugins[owner.id]?.generation == owner.generation {
+            plugins[owner.id] = record
+        }
     }
 
     private func makeSnapshot(

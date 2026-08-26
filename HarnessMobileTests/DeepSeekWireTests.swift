@@ -7,6 +7,28 @@ import XCTest
 #endif
 
 final class DeepSeekWireTests: XCTestCase {
+    func testDeepSeekRequestOmitsAppOutputCapAndLetsProviderResolveIt() throws {
+        let configuration = try ProviderProfile.catalogDefault(
+            for: .deepSeekOfficial
+        ).configuration(
+            model: "deepseek-v4-flash-vision-exp"
+        ).validated()
+        XCTAssertEqual(configuration.maxOutputTokens, 256_000)
+
+        let request = ModelRequest(
+            configuration: configuration,
+            apiKey: "test-only",
+            systemPrompt: "system",
+            messages: [.user("hello")],
+            tools: []
+        )
+
+        let encoded = try OpenAICompatibleClient.encodeOpenAIRequestBody(request)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        XCTAssertNil(object["max_tokens"])
+        XCTAssertNil(object["max_completion_tokens"])
+    }
+
     func testToolTranscriptValidationRejectsMissingResultLocally() {
         let request = ModelRequest(
             configuration: AgentConfiguration(),
@@ -109,7 +131,8 @@ final class DeepSeekWireTests: XCTestCase {
                     ModelToolDefinition(
                         name: "ordered_schema",
                         description: "Tests deterministic request encoding.",
-                        parameters: schema
+                        parameters: schema,
+                        timeoutMs: 12_345
                     )
                 ]
             )
@@ -122,6 +145,10 @@ final class DeepSeekWireTests: XCTestCase {
             request(schema: secondSchema)
         )
         XCTAssertEqual(first, second)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: first) as? [String: Any])
+        let tools = try XCTUnwrap(object["tools"] as? [[String: Any]])
+        let function = try XCTUnwrap(tools.first?["function"] as? [String: Any])
+        XCTAssertNil(function["timeoutMs"])
     }
 
     func testModelSessionAllowsLongFirstTokenLatency() {
@@ -531,5 +558,50 @@ final class DeepSeekWireTests: XCTestCase {
         XCTAssertTrue(OpenAICompatibleClient.isDoneMarker("[DONE]"))
         XCTAssertTrue(OpenAICompatibleClient.isDoneMarker("  [done]\n"))
         XCTAssertFalse(OpenAICompatibleClient.isDoneMarker("[DONE] extra"))
+    }
+
+    func testNonImageAttachmentUsesMetadataMarkerWithoutFileBytes() throws {
+        let attachment = AgentFileAttachmentRef(
+            path: "Attachments/local.pdf",
+            mimeType: "application/pdf",
+            byteCount: 19,
+            displayName: "local.pdf",
+            expiresAt: .distantFuture
+        )
+        let messages = ChatWireSerializer.makeMessages(
+            systemPrompt: "system",
+            messages: [.user("summarize", fileAttachments: [attachment])]
+        )
+        let encoded = String(data: try JSONEncoder().encode(messages), encoding: .utf8) ?? ""
+
+        XCTAssertTrue(encoded.contains("Local attachment metadata"))
+        XCTAssertTrue(encoded.contains("local.pdf"))
+        XCTAssertTrue(encoded.contains("application\\/pdf"))
+        XCTAssertFalse(encoded.contains("data:application/pdf"))
+        XCTAssertFalse(encoded.contains("JVBER"))
+    }
+
+    func testFileAttachmentReferenceRoundTripsAndLegacyMessageDefaultsEmpty() throws {
+        let message = AgentMessage.user(
+            "inspect",
+            fileAttachments: [
+                AgentFileAttachmentRef(
+                    path: "Attachments/clip.mov",
+                    mimeType: "video/quicktime",
+                    byteCount: 7,
+                    displayName: "clip.mov",
+                    expiresAt: .distantFuture
+                )
+            ]
+        )
+        let decoded = try JSONDecoder().decode(AgentMessage.self, from: JSONEncoder().encode(message))
+        XCTAssertEqual(decoded.fileAttachments, message.fileAttachments)
+
+        var legacy = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(message)) as? [String: Any]
+        )
+        legacy.removeValue(forKey: "fileAttachments")
+        let legacyData = try JSONSerialization.data(withJSONObject: legacy)
+        XCTAssertTrue(try JSONDecoder().decode(AgentMessage.self, from: legacyData).fileAttachments.isEmpty)
     }
 }

@@ -53,17 +53,27 @@ scan_files() {
   : > "$audit_hits_file"
   while IFS= read -r swift_path; do
     case "$scan_mode:$swift_path" in
+      # SQLite query projection uses a private helper named `exec` for SQL
+      # statements; it never invokes a process or remote execution primitive.
+      all:*/Core/Trace/SessionQueryReadModel.swift) continue ;;
       outside-network:*/Core/Network/OpenAICompatibleClient.swift) continue ;;
       outside-network:*/Core/Network/DeepSeekFilesClient.swift) continue ;;
       # Provider adapters own request URL/header/body construction, while the
       # client remains the only component that actually performs URLSession I/O.
       outside-network:*/Core/Network/ModelProviderAdapter.swift) continue ;;
+      # This file is the audited connection-pool lifecycle seam. It observes
+      # path interface changes and resets provider-owned URLSession objects; it
+      # does not construct requests or perform model I/O itself.
+      outside-network:*/Core/Network/HarnessLLMSessionRegistry.swift) continue ;;
       outside-network:*/Core/Tools/WebFetchTool.swift) continue ;;
       outside-network:*/Core/Tools/ISH/ISHGuestNetworkMonitor.swift) continue ;;
       # MCP is a byte-framed client over the already audited on-device iSH
       # stdio bridge. It contains protocol names such as MCP and connect(), but
       # owns no URLSession, socket, NWConnection, or host Process primitive.
       outside-network:*/Core/Tools/MCP/*.swift) continue ;;
+      # AVAudioEngine.connect() builds the local audio graph; it is not a
+      # network primitive despite sharing the method name.
+      outside-network:*/Core/Background/BackgroundAudioKeepAlive.swift) continue ;;
       outside-network:*/Core/Agent/MobileHarnessPrompt.swift) continue ;;
       # URLProtocol is used here only to provide an in-process fixture for the
       # native web-fetch tests; it does not create a production network path.
@@ -71,6 +81,7 @@ scan_files() {
       # In-process URLProtocol fixture for provider discovery status/body/size
       # contracts. Production provider networking remains in Core/Network.
       outside-network:*/HarnessMobileTests/ProviderModelDiscoveryTests.swift) continue ;;
+      outside-network:*/HarnessMobileTests/HarnessLLMSessionRegistryTests.swift) continue ;;
       outside-network:*/HarnessMobileTests/MCPClientTests.swift) continue ;;
       inside-provider:*/Core/Network/OpenAICompatibleClient.swift) ;;
       inside-provider:*/Core/Network/DeepSeekFilesClient.swift) ;;

@@ -10,9 +10,11 @@ struct ChatInputBar: View {
     let isSubmitting: Bool
     let submissionStatus: String?
     let hasStagedImage: Bool
+    let hasStagedFile: Bool
     let queuedInputs: [QueuedAgentInput]
     let triggerGroups: [InputTriggerSuggestionGroup]
     let onCamera: () -> Void
+    let onPickFile: () -> Void
     let onShowCommands: () -> Void
     let onSelectSuggestion: (InputTriggerSuggestion) -> Void
     let onSend: (QueuedInputDisposition) -> Void
@@ -24,6 +26,10 @@ struct ChatInputBar: View {
 
     private var hasDraft: Bool {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var canSend: Bool {
+        hasDraft || hasStagedImage || hasStagedFile
     }
 
     var body: some View {
@@ -47,6 +53,13 @@ struct ChatInputBar: View {
 
             if hasStagedImage {
                 Label("图片已就绪，可供本机 OCR 工具读取", systemImage: "text.viewfinder")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            if hasStagedFile {
+                Label("文件已就绪；将只发送类型、名称和大小说明", systemImage: "doc.badge.plus")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -87,17 +100,21 @@ struct ChatInputBar: View {
                     Label("拍照", systemImage: "camera")
                 }
                 .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
+
+                Button(action: onPickFile) {
+                    Label("选择 PDF、音频或视频", systemImage: "doc")
+                }
             } label: {
                 Image(systemName: "plus")
                     .font(.body.weight(.medium))
-                    .frame(width: 32, height: 40)
+                    .frame(width: 44, height: 44)
             }
             .accessibilityLabel("添加内容")
 
             Button(action: onShowCommands) {
                 Text("/")
                     .font(.title3.weight(.medium))
-                    .frame(width: 30, height: 40)
+                    .frame(width: 44, height: 44)
             }
             .accessibilityLabel("命令")
 
@@ -107,9 +124,11 @@ struct ChatInputBar: View {
                 axis: .vertical
             )
             .accessibilityIdentifier("chat-input")
+            .accessibilityLabel(isRunning ? "排队消息" : "任务输入")
             .lineLimit(1...6)
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
+            .frame(minHeight: 44)
             .background(Color(uiColor: .secondarySystemBackground))
             .clipShape(.rect(cornerRadius: 12))
             .overlay {
@@ -118,7 +137,7 @@ struct ChatInputBar: View {
             }
             .submitLabel(.send)
             .onSubmit {
-                guard hasDraft, !isSubmitting else { return }
+                guard canSend, !isSubmitting else { return }
                 onSend(.queued)
             }
 
@@ -127,7 +146,7 @@ struct ChatInputBar: View {
                     onSend(.steer)
                 } label: {
                     Image(systemName: "arrow.triangle.branch")
-                        .frame(width: 34, height: 40)
+                        .frame(width: 44, height: 44)
                 }
                 .disabled(!hasDraft || isSubmitting)
                 .accessibilityLabel("作为 steer 发送")
@@ -148,15 +167,15 @@ struct ChatInputBar: View {
                     }
                 }
                 .foregroundStyle(.white)
-                .frame(width: 38, height: 38)
+                .frame(width: 44, height: 44)
                 .background(
-                    hasDraft && !isSubmitting
+                    canSend && !isSubmitting
                         ? Color.accentColor
                         : Color.secondary.opacity(0.28),
                     in: Circle()
                 )
             }
-            .disabled(!hasDraft || isSubmitting)
+            .disabled(!canSend || isSubmitting)
             .accessibilityLabel(isRunning ? "加入队列" : "发送")
             .accessibilityIdentifier("chat-send-button")
 
@@ -165,7 +184,7 @@ struct ChatInputBar: View {
                     Image(systemName: "stop.fill")
                         .font(.caption.bold())
                         .foregroundStyle(.white)
-                        .frame(width: 38, height: 38)
+                        .frame(width: 44, height: 44)
                         .background(Color.red, in: Circle())
                 }
                 .accessibilityLabel("停止当前运行")

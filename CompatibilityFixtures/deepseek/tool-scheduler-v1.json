@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "project": "deepseek-ai/deepseek-harness",
+    "commit": "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
+    "lockPath": "Dependencies/upstreams.lock.json"
+  },
+  "scenarios": [
+    {
+      "id": "reclassification-before-launch",
+      "expected": {
+        "modeChecks": [true, true, false],
+        "startedIDs": ["1", "2", "3"],
+        "maximumConcurrent": 2,
+        "resultIDs": ["reclass-1", "reclass-2", "reclass-3"],
+        "resultErrorCodes": []
+      }
+    },
+    {
+      "id": "abort-started-vs-skipped",
+      "expected": {
+        "modeChecks": [],
+        "startedIDs": ["1", "2"],
+        "maximumConcurrent": 2,
+        "resultIDs": ["abort-1", "abort-2", "abort-3", "abort-4"],
+        "resultErrorCodes": [
+          "TOOL_INTERRUPTED",
+          "TOOL_INTERRUPTED",
+          "TOOL_ABORTED_BEFORE_DISPATCH",
+          "TOOL_ABORTED_BEFORE_DISPATCH"
+        ]
+      }
+    }
+  ]
+}

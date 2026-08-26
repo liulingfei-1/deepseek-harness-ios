@@ -59,7 +59,7 @@ extension AppModel {
             workspaceStore: workspaceStore,
             workStateCoordinator: workStateCoordinator,
             sessionID: activeSessionID?.uuidString ?? "native-agent",
-            userQuestionService: userQuestionService,
+            userQuestionService: fallbackUserQuestionService,
             planModeState: planModeState,
             pluginMarketplaceExecutor: nil,
             skillRegistry: skillRegistry,
@@ -76,8 +76,7 @@ extension AppModel {
             jobRegistry: jobRegistry,
             scheduleStore: scheduleStore,
             terminalProvider: terminalProvider,
-            trajectoryRepository: trajectoryRepository,
-            mcpRegistry: mcpRegistry
+            trajectoryRepository: trajectoryRepository
         ).filter { NativeAgentPluginPolicy.approvedBaseToolNames.contains($0.definition.name) }
     }
 
@@ -495,6 +494,10 @@ extension AppModel {
                      .reasoningDelta, .toolEventChanged, .messagesCommitted, .usage:
                     break
                 }
+            },
+            providerRequestRouteProvider: { [weak self] configuration in
+                guard let self else { throw ProviderProfileError.missingProfile("runtime") }
+                return try await self.providerRequestRoute(for: configuration)
             },
             permissionMode: .dangerFullAccess
         )

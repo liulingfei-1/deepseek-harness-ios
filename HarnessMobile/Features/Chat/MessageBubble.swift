@@ -10,7 +10,7 @@ struct MessageBubble: View, Equatable {
     let onUpdateFeedbackNote: (UUID, String) -> Void
 
     @State private var feedbackNoteEditor: FeedbackNoteEditor?
-    @State private var showsFullContent = false
+    @State private var visibleToolCallLimit = 4
 
     var body: some View {
         HStack {
@@ -26,20 +26,49 @@ struct MessageBubble: View, Equatable {
                 }
 
                 if let reasoning = message.reasoning, !reasoning.isEmpty {
-                    ReasoningDisclosure(reasoning: reasoning, isStreaming: false)
+                    ReasoningDisclosure(
+                        reasoning: reasoning,
+                        isStreaming: false,
+                        presentationID: .reasoning(messageID: message.id)
+                    )
                 }
 
                 if message.role == .assistant, !message.toolEvents.isEmpty {
                     ToolEventTreeView(events: message.toolEvents, isLive: false)
                 } else if message.role == .assistant, !message.toolCalls.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
-                        ForEach(message.toolCalls) { call in
+                        if hiddenToolCallCount > 0 {
+                            Button {
+                                visibleToolCallLimit = min(
+                                    message.toolCalls.count,
+                                    visibleToolCallLimit + Self.toolCallPageSize
+                                )
+                            } label: {
+                                Label(
+                                    "显示前面的 \(min(hiddenToolCallCount, Self.toolCallPageSize)) 个工具调用",
+                                    systemImage: "arrow.up.circle"
+                                )
+                            }
+                            .font(.caption.weight(.medium))
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("load-earlier-tool-calls")
+                            .accessibilityValue("尚有 \(hiddenToolCallCount) 个较早工具调用")
+                        }
+
+                        ForEach(visibleToolCalls) { call in
                             DisclosureGroup {
-                                Text(call.arguments)
-                                    .font(.caption.monospaced())
-                                    .textSelection(.enabled)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.top, 4)
+                                ConversationMeasuredBlock(
+                                    itemID: .toolCall(messageID: message.id, callID: call.id),
+                                    kind: "tool-arguments",
+                                    content: call.arguments
+                                ) {
+                                    Text(call.arguments)
+                                        .font(.caption.monospaced())
+                                        .textSelection(.enabled)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.top, 4)
+                                }
                             } label: {
                                 Label(call.name, systemImage: "wrench.and.screwdriver")
                                     .font(.footnote.weight(.semibold))
@@ -49,23 +78,14 @@ struct MessageBubble: View, Equatable {
                 }
 
                 if !message.content.isEmpty, message.role != .tool {
-                    VStack(alignment: .leading, spacing: 6) {
-                        NativeMarkdownText(source: presentedContent)
-                        if message.content.count > Self.collapsedContentCharacters {
-                            Button(showsFullContent ? "收起长回复" : "展开完整回复") {
-                                showsFullContent.toggle()
-                            }
-                            .font(.caption.weight(.medium))
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-
-                if message.isIncomplete {
-                    Label("回复因模型输出长度限制而截断", systemImage: "text.badge.xmark")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    // The durable message is the source of truth. Do not cap,
+                    // elide, or append a synthetic end marker to model output.
+                    // Long-chat performance belongs to the list window, not the
+                    // contents of an individual message.
+                    NativeMarkdownText(
+                        source: message.content,
+                        documentID: "message-\(message.id.uuidString)"
+                    )
                 }
 
                 if message.role == .tool {
@@ -93,6 +113,7 @@ struct MessageBubble: View, Equatable {
             }
         }
         .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("message-\(message.role.rawValue)")
         .contextMenu {
             if message.role == .user {
@@ -139,7 +160,7 @@ struct MessageBubble: View, Equatable {
                     feedbackNoteEditor = FeedbackNoteEditor(note: feedback.note ?? "")
                 } label: {
                     Image(systemName: feedback.note == nil ? "note.text.badge.plus" : "note.text")
-                        .frame(width: 30, height: 30)
+                        .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
@@ -151,7 +172,7 @@ struct MessageBubble: View, Equatable {
                 UIPasteboard.general.string = message.content
             } label: {
                 Image(systemName: "doc.on.doc")
-                    .frame(width: 30, height: 30)
+                    .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
@@ -173,7 +194,7 @@ struct MessageBubble: View, Equatable {
             onToggleFeedback(message.id, rating)
         } label: {
             Image(systemName: isSelected ? "\(systemImage).fill" : systemImage)
-                .frame(width: 30, height: 30)
+                .frame(width: 44, height: 44)
         }
         .buttonStyle(.plain)
         .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
@@ -222,18 +243,14 @@ struct MessageBubble: View, Equatable {
         }
     }
 
-    private static let collapsedContentCharacters = 2_400
-    private static let expandedContentCharacters = 16_000
+    private static let toolCallPageSize = 20
 
-    private var presentedContent: String {
-        let limit = showsFullContent
-            ? Self.expandedContentCharacters
-            : Self.collapsedContentCharacters
-        guard message.content.count > limit else { return message.content }
-        return String(message.content.prefix(limit))
-            + (showsFullContent
-                ? "\n\n…（界面显示已达上限，完整结果仍保存在本地会话）"
-                : "\n\n…")
+    private var visibleToolCalls: ArraySlice<AgentToolCall> {
+        message.toolCalls.suffix(visibleToolCallLimit)
+    }
+
+    private var hiddenToolCallCount: Int {
+        max(0, message.toolCalls.count - visibleToolCalls.count)
     }
 
     nonisolated static func == (lhs: MessageBubble, rhs: MessageBubble) -> Bool {
@@ -325,6 +342,7 @@ private struct MessageFeedbackNoteSheet: View {
 }
 
 struct StreamingMessageBubble: View {
+    let runID: String
     let reasoning: String
     let text: String
 
@@ -336,10 +354,15 @@ struct StreamingMessageBubble: View {
                     .foregroundStyle(.secondary)
 
                 if !reasoning.isEmpty {
-                    ReasoningDisclosure(reasoning: reasoning, isStreaming: true)
+                    ReasoningDisclosure(
+                        reasoning: reasoning,
+                        isStreaming: true,
+                        presentationID: .streaming(runID: runID, kind: "reasoning")
+                    )
                 }
                 if !text.isEmpty {
                     Text(text)
+                        .id(ConversationPresentationItemID.streaming(runID: runID, kind: "text"))
                 }
             }
             .frame(maxWidth: 620, alignment: .leading)
@@ -351,6 +374,7 @@ struct StreamingMessageBubble: View {
 private struct ReasoningDisclosure: View {
     let reasoning: String
     let isStreaming: Bool
+    let presentationID: ConversationPresentationItemID
 
     @State private var isExpanded = false
 
@@ -387,14 +411,28 @@ private struct ReasoningDisclosure: View {
             .accessibilityHint(isExpanded ? "折叠完整思考过程" : "展开完整思考过程")
 
             if isExpanded {
-                Text(reasoning)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.leading, 23)
+                if isStreaming {
+                    expandedReasoningText
+                } else {
+                    ConversationMeasuredBlock(
+                        itemID: presentationID,
+                        kind: "reasoning-expanded",
+                        content: reasoning
+                    ) {
+                        expandedReasoningText
+                    }
+                }
             }
         }
+    }
+
+    private var expandedReasoningText: some View {
+        Text(reasoning)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, 23)
     }
 
     private var summary: String {

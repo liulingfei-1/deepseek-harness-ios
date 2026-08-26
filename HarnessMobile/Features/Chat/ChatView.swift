@@ -11,6 +11,7 @@ struct ChatView: View {
     @State private var draft = ""
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var isCameraPresented = false
+    @State private var isFileImporterPresented = false
     @State private var triggerSuggestions: InputTriggerSuggestionSnapshot?
     @State private var editingQueuedInput: QueuedAgentInput?
     @State private var queuedEditText = ""
@@ -84,7 +85,10 @@ struct ChatView: View {
         .sheet(isPresented: $isSessionOptionsPresented) {
             NavigationStack {
                 sessionOptionsPanel
-                    .navigationTitle("会话选项")
+                    // The session controls are deliberately entered through the
+                    // compact top-right ellipsis. Repeating a four-character
+                    // title in the sheet made it look like an in-content button
+                    // on compact iPhone navigation bars.
                     .navigationBarTitleDisplayMode(.inline)
             }
         }
@@ -109,6 +113,30 @@ struct ChatView: View {
             } catch is CancellationError {
                 return
             } catch {
+                model.presentError(error)
+            }
+        }
+        .fileImporter(
+            isPresented: $isFileImporterPresented,
+            allowedContentTypes: [.pdf, .audio, .movie],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case let .success(urls):
+                guard let url = urls.first else {
+                    model.presentError(
+                        NSError(
+                            domain: "HarnessMobile",
+                            code: 400,
+                            userInfo: [
+                                NSLocalizedDescriptionKey: "没有可导入的文件。"
+                            ]
+                        )
+                    )
+                    return
+                }
+                Task { await model.stageFileAttachment(from: url) }
+            case let .failure(error):
                 model.presentError(error)
             }
         }
@@ -241,10 +269,6 @@ struct ChatView: View {
     private var sessionOptionsPanel: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
-                Text("会话选项")
-                    .font(.headline)
-                    .padding(.bottom, 2)
-
                 Button {
                     conversationMode = .chat
                     isSessionOptionsPresented = false
@@ -335,6 +359,7 @@ struct ChatView: View {
         } label: {
             Image(systemName: "ellipsis.circle")
                 .imageScale(.large)
+                .frame(width: 44, height: 44)
         }
         .accessibilityLabel("会话选项")
         .accessibilityHint("打开对话、轨迹、模型和工具权限选项")
@@ -370,10 +395,14 @@ struct ChatView: View {
                     isSubmitting: model.isSubmitting,
                     submissionStatus: model.submissionStatus,
                     hasStagedImage: model.hasStagedImage,
+                    hasStagedFile: model.hasStagedFile,
                     queuedInputs: model.queuedInputs,
                     triggerGroups: triggerSuggestions?.groups ?? [],
                     onCamera: {
                         isCameraPresented = true
+                    },
+                    onPickFile: {
+                        isFileImporterPresented = true
                     },
                     onShowCommands: showCommands,
                     onSelectSuggestion: selectSuggestion,
@@ -713,6 +742,7 @@ private struct ConversationScroller: View {
                     messages: renderedMessages,
                     hiddenMessageCount: hiddenMessageCount,
                     contextInjections: model.activeContextInjections,
+                    activeRunID: model.activeRunID,
                     streamingReasoning: model.streamingReasoning,
                     streamingText: model.streamingText,
                     activeToolStatus: model.activeToolStatus,
@@ -826,6 +856,7 @@ private struct ConversationTimeline: View {
     let messages: [AgentMessage]
     let hiddenMessageCount: Int
     let contextInjections: [AgentContextInjection]
+    let activeRunID: UUID?
     let streamingReasoning: String
     let streamingText: String
     let activeToolStatus: String?
@@ -897,25 +928,35 @@ private struct ConversationTimeline: View {
             }
 
             ForEach(messages) { message in
-                MessageBubble(
-                    message: message,
-                    canRerunUserMessage: !isRunning,
-                    onRetryUserMessage: onRetryUserMessage,
-                    onEditUserMessage: onEditUserMessage,
-                    onToggleFeedback: onToggleFeedback,
-                    onUpdateFeedbackNote: onUpdateFeedbackNote
-                )
-                .equatable()
+                VStack(alignment: .leading, spacing: 14) {
+                    MessageBubble(
+                        message: message,
+                        canRerunUserMessage: !isRunning,
+                        onRetryUserMessage: onRetryUserMessage,
+                        onEditUserMessage: onEditUserMessage,
+                        onToggleFeedback: onToggleFeedback,
+                        onUpdateFeedbackNote: onUpdateFeedbackNote
+                    )
+                    .equatable()
 
-                if message.id == latestUserMessageID, !contextInjections.isEmpty {
-                    ContextInjectionList(injections: contextInjections)
+                    if message.id == latestUserMessageID, !contextInjections.isEmpty {
+                        ContextInjectionList(injections: contextInjections)
+                    }
                 }
+                .id(ConversationPresentationItem.message(message).id)
             }
 
             if !streamingReasoning.isEmpty || !streamingText.isEmpty {
                 StreamingMessageBubble(
+                    runID: activeRunID?.uuidString ?? "session-stream",
                     reasoning: streamingReasoning,
                     text: streamingText
+                )
+                .id(
+                    ConversationPresentationItemID.streaming(
+                        runID: activeRunID?.uuidString ?? "session-stream",
+                        kind: "assistant"
+                    )
                 )
             }
 
@@ -1123,7 +1164,7 @@ private struct ConversationMetricsStrip: View {
                 metric("Tools", duration(metrics.toolDurationMilliseconds))
                 metric("TTFT", metrics.averageTTFTMilliseconds.map(duration) ?? "-")
                 metric("Tok/s", tokensPerSecond)
-                metric("Cache", metrics.cacheHitRate.map(percent) ?? "-")
+                metric("Cache", CacheHitRateFormat.percent(metrics.cacheHitRate))
                 metric("Input", count(metrics.uncachedInputTokens + metrics.cacheReadTokens))
                 metric("Output", count(metrics.outputTokens))
             }
@@ -1160,10 +1201,6 @@ private struct ConversationMetricsStrip: View {
     private func duration(_ milliseconds: Double) -> String {
         if milliseconds < 1_000 { return "\(Int(milliseconds.rounded()))ms" }
         return String(format: "%.1fs", milliseconds / 1_000)
-    }
-
-    private func percent(_ value: Double) -> String {
-        String(format: "%.1f%%", value * 100)
     }
 
     private func count(_ value: Int) -> String {

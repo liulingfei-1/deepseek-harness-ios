@@ -226,6 +226,35 @@ final class ProviderProfileTests: XCTestCase {
         XCTAssertEqual(configuration.inputModalities, [.text, .image])
     }
 
+    func testKnownModelContractOverridesLegacySessionOutputLimit() {
+        let legacySessionConfiguration = AgentConfiguration(
+            providerID: .deepSeekOfficial,
+            model: "deepseek-v4-flash-vision-exp",
+            inputModalities: [.text],
+            maxOutputTokens: 4_096
+        )
+
+        let resolved = ModelProviderCatalog.applyingKnownModelContract(
+            to: legacySessionConfiguration
+        )
+
+        XCTAssertEqual(resolved.maxOutputTokens, 256_000)
+        XCTAssertEqual(resolved.inputModalities, [.text, .image])
+    }
+
+    func testUnknownModelContractKeepsItsProfileOrDiscoveryOutputLimit() {
+        let customConfiguration = AgentConfiguration(
+            providerID: .customOpenAICompatible,
+            model: "gateway-model-2026",
+            maxOutputTokens: 32_768
+        )
+
+        XCTAssertEqual(
+            ModelProviderCatalog.applyingKnownModelContract(to: customConfiguration),
+            customConfiguration
+        )
+    }
+
     func testDiscoveredModelCapacityCanExceedHistoricAppLimit() throws {
         let profile = ProviderProfile(
             id: "large-output-gateway",

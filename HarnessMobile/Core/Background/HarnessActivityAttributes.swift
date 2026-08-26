@@ -106,6 +106,28 @@ struct HarnessLiveActivityState: Codable, Hashable, Sendable {
     }
 }
 
+/// Process-local projection cache used by the ActivityKit adapter. Keeping the
+/// cache value-based makes multi-run isolation testable without requiring an
+/// ActivityKit host or a real device.
+struct HarnessLiveActivityProjectionStore: Sendable, Equatable {
+    private(set) var states: [UUID: HarnessLiveActivityState] = [:]
+
+    var activeRunIDs: Set<UUID> { Set(states.keys) }
+
+    mutating func upsert(_ state: HarnessLiveActivityState, for runID: UUID) {
+        states[runID] = state
+    }
+
+    @discardableResult
+    mutating func remove(runID: UUID) -> HarnessLiveActivityState? {
+        states.removeValue(forKey: runID)
+    }
+
+    mutating func removeAll() {
+        states.removeAll(keepingCapacity: false)
+    }
+}
+
 private extension HarnessLiveActivityPhase {
     var privateDetail: String {
         switch self {

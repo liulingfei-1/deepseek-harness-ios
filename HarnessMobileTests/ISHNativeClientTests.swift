@@ -7,6 +7,127 @@ import XCTest
 #endif
 
 final class ISHNativeClientTests: XCTestCase {
+    func testNativeSlotRegistryProjectsAllowlistedSlotsAndDisposesByToken() async throws {
+        let plugin = makeSlotPlugin()
+        let registry = ISHNativeClientSlotRegistry()
+
+        let settingsToken = try await registry.register(
+            plugin: plugin,
+            contributionID: "settings",
+            kind: .settingsCard
+        )
+        let cardToken = try await registry.register(
+            plugin: plugin,
+            contributionID: "card",
+            kind: .conversationRenderer
+        )
+        let actionToken = try await registry.register(
+            plugin: plugin,
+            contributionID: "open",
+            kind: .sidebarAction
+        )
+
+        let snapshot = await registry.snapshot()
+        XCTAssertEqual(snapshot.settingsCards.map(\.id), ["settings"])
+        XCTAssertEqual(snapshot.conversationRenderers.map(\.id), ["card"])
+        XCTAssertEqual(snapshot.sidebarActions.map(\.id), ["open"])
+        XCTAssertEqual(snapshot.conversationRenderers.first?.renderer, .markdown)
+
+        await registry.dispose(cardToken)
+        await registry.dispose(cardToken)
+        await registry.dispose(settingsToken)
+        await registry.dispose(actionToken)
+        let empty = await registry.snapshot()
+        XCTAssertTrue(empty.settingsCards.isEmpty)
+        XCTAssertTrue(empty.conversationRenderers.isEmpty)
+        XCTAssertTrue(empty.sidebarActions.isEmpty)
+        XCTAssertGreaterThan(empty.revision, snapshot.revision)
+    }
+
+    func testNativeSlotRegistryRejectsUnknownContributionAndStaleGeneration() async throws {
+        let plugin = makeSlotPlugin()
+        let registry = ISHNativeClientSlotRegistry()
+
+        do {
+            _ = try await registry.register(
+                plugin: plugin,
+                contributionID: "missing",
+                kind: .conversationRenderer
+            )
+            XCTFail("Unknown slot contribution must fail closed")
+        } catch let error as ISHNativeClientSlotRegistryError {
+            guard case .invalidContribution = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+        }
+
+        do {
+            _ = try await registry.register(
+                plugin: plugin,
+                contributionID: "settings",
+                kind: .settingsCard,
+                generation: plugin.activationGeneration + 1
+            )
+            XCTFail("Stale generation must fail closed")
+        } catch let error as ISHNativeClientSlotRegistryError {
+            guard case .invalidContribution = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+        }
+    }
+
+    private func makeSlotPlugin() -> ISHNativeClientPlugin {
+        ISHNativeClientPlugin(
+            pluginId: "slot-plugin",
+            packageName: "slot-package",
+            version: "1",
+            scope: .process,
+            activationGeneration: 1,
+            sourceDigest: String(repeating: "a", count: 64),
+            schemaVersion: 2,
+            minimumRuntime: 2,
+            inject: [],
+            immediately: false,
+            contributions: ISHNativeClientContributions(
+                inspectors: [],
+                settings: [
+                    ISHNativeClientSettingsContribution(
+                        id: "settings",
+                        title: "Settings",
+                        namespace: "slot.settings",
+                        order: 1
+                    )
+                ],
+                commands: [
+                    ISHNativeClientCommandContribution(
+                        name: "open",
+                        description: "Open",
+                        inputHint: nil,
+                        order: 2,
+                        action: ISHNativeClientActionDescriptor(
+                            kind: .hostTool,
+                            name: "slot.open",
+                            arguments: [:],
+                            inputKey: nil
+                        )
+                    )
+                ],
+                cards: [
+                    ISHNativeClientCardContribution(
+                        id: "card",
+                        title: "Card",
+                        description: nil,
+                        order: 0,
+                        renderer: .markdown,
+                        value: .string("hello")
+                    )
+                ]
+            ),
+            endpoints: [],
+            permissions: []
+        )
+    }
+
     func testNativeCommandImageCapabilityIsOptionalAndRoundTrips() throws {
         let command = ISHNativeClientCommandContribution(
             name: "vision_status",
@@ -106,10 +227,12 @@ final class ISHNativeClientTests: XCTestCase {
     func testCoordinatorUsesCordisRollbackAndDisposesCommands() async throws {
         let runtime = CordisPluginRuntime()
         let registry = ISHNativeClientContributionRegistry()
+        let slotRegistry = ISHNativeClientSlotRegistry()
         let commands = SlashCommandRegistry(includeBuiltIns: false)
         let coordinator = ISHNativeClientCordisCoordinator(
             runtime: runtime,
             registry: registry,
+            slotRegistry: slotRegistry,
             commandRegistry: commands
         )
         let client = ISHPluginHostClient(transport: NativeClientTestTransport())
@@ -123,8 +246,11 @@ final class ISHNativeClientTests: XCTestCase {
         XCTAssertTrue(failures.isEmpty)
         let initiallyActivePlugin = await registry.plugins().first
         let initiallyActiveCommand = await commands.descriptor(named: "native_status")
+        let initiallyActiveSlots = await slotRegistry.snapshot()
         XCTAssertEqual(initiallyActivePlugin?.activationGeneration, 1)
         XCTAssertNotNil(initiallyActiveCommand)
+        XCTAssertEqual(initiallyActiveSlots.settingsCards.map(\.id), ["settings"])
+        XCTAssertEqual(initiallyActiveSlots.sidebarActions.map(\.id), ["native_status"])
 
         let rejectedReplacement = makePlugin(
             generation: 2,
@@ -152,17 +278,22 @@ final class ISHNativeClientTests: XCTestCase {
         await coordinator.removeAll()
         let pluginsAfterRemoval = await registry.plugins()
         let commandAfterRemoval = await commands.descriptor(named: "native_status")
+        let slotsAfterRemoval = await slotRegistry.snapshot()
         XCTAssertTrue(pluginsAfterRemoval.isEmpty)
         XCTAssertNil(commandAfterRemoval)
+        XCTAssertTrue(slotsAfterRemoval.settingsCards.isEmpty)
+        XCTAssertTrue(slotsAfterRemoval.sidebarActions.isEmpty)
     }
 
     func testCoordinatorRejectsDuplicatePluginIDsWithoutReplacingActiveGeneration() async throws {
         let runtime = CordisPluginRuntime()
         let registry = ISHNativeClientContributionRegistry()
+        let slotRegistry = ISHNativeClientSlotRegistry()
         let commands = SlashCommandRegistry(includeBuiltIns: false)
         let coordinator = ISHNativeClientCordisCoordinator(
             runtime: runtime,
             registry: registry,
+            slotRegistry: slotRegistry,
             commandRegistry: commands
         )
         let client = ISHPluginHostClient(transport: NativeClientTestTransport())

@@ -6,6 +6,8 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
     private let session: URLSession
     private let modelDiscoveryCache: ModelDiscoveryCache
     private let filesClient: DeepSeekFilesClient
+    private let activeStreamLock = NSLock()
+    private var activeStreams: [UUID: AsyncThrowingStream<LLMStreamEvent, Error>.Continuation] = [:]
 
     static func acceptsTerminalMarkers(
         sawSemanticFinish: Bool,
@@ -36,6 +38,9 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
             delegateQueue: nil
         )
         super.init()
+        HarnessLLMSessionRegistry.shared.register(session) { [weak self] reason in
+            self?.failActiveStreamsForNetworkTransition(reason: reason)
+        }
     }
 
     override convenience init() {
@@ -57,14 +62,19 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
     }
 
     deinit {
+        HarnessLLMSessionRegistry.shared.unregister(session)
         session.invalidateAndCancel()
     }
 
     func stream(_ request: ModelRequest) -> AsyncThrowingStream<LLMStreamEvent, Error> {
-        AsyncThrowingStream { continuation in
-            let task = Task {
+        let streamID = UUID()
+        return AsyncThrowingStream { [weak self] continuation in
+            self?.registerActiveStream(continuation, id: streamID)
+            let task = Task { [weak self] in
+                guard let self else { return }
+                defer { self.unregisterActiveStream(id: streamID) }
                 do {
-                    try await perform(request, continuation: continuation)
+                    try await self.perform(request, continuation: continuation)
                     continuation.finish()
                 } catch is CancellationError {
                     continuation.finish(throwing: CancellationError())
@@ -75,10 +85,37 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
                 }
             }
 
-            continuation.onTermination = { @Sendable _ in
+            continuation.onTermination = { @Sendable [weak self] _ in
+                self?.unregisterActiveStream(id: streamID)
                 task.cancel()
             }
         }
+    }
+
+    private func registerActiveStream(
+        _ continuation: AsyncThrowingStream<LLMStreamEvent, Error>.Continuation,
+        id: UUID
+    ) {
+        activeStreamLock.lock()
+        activeStreams[id] = continuation
+        activeStreamLock.unlock()
+    }
+
+    private func unregisterActiveStream(id: UUID) {
+        activeStreamLock.lock()
+        activeStreams.removeValue(forKey: id)
+        activeStreamLock.unlock()
+    }
+
+    private func failActiveStreamsForNetworkTransition(reason: String) {
+        activeStreamLock.lock()
+        let streams = Array(activeStreams.values)
+        activeStreams.removeAll()
+        activeStreamLock.unlock()
+        for stream in streams {
+            stream.finish(throwing: ModelClientError.networkPathChanged(reason))
+        }
+        session.reset(completionHandler: {})
     }
 
     func discoverModels(_ request: ModelDiscoveryRequest) async throws -> ModelCatalogSnapshot {
@@ -723,6 +760,7 @@ enum ModelClientError: LocalizedError, Sendable {
     case malformedEvent
     case invalidUsage
     case incompleteStream
+    case networkPathChanged(String)
     case streamError(String)
     case providerStreamFailure(code: String?, message: String)
     case invalidToolTranscript(String)
@@ -759,6 +797,8 @@ enum ModelClientError: LocalizedError, Sendable {
             return "模型服务返回了无效的 Token 用量。"
         case .incompleteStream:
             return "模型响应在完成前中断。"
+        case let .networkPathChanged(reason):
+            return "网络路径已变化，当前模型流已终止：\(reason)"
         case let .streamError(message):
             return "模型流式响应失败：\(message)"
         case let .providerStreamFailure(code, message):

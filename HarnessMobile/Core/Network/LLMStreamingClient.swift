@@ -4,6 +4,43 @@ struct ModelToolDefinition: Codable, Sendable, Equatable {
     let name: String
     let description: String
     let parameters: JSONValue
+    /// Tool-owned local execution budget. It is deliberately omitted from
+    /// provider wire payloads; the native timeout-policy reads it from the
+    /// local registry before dispatch.
+    let timeoutMs: Int?
+
+    init(
+        name: String,
+        description: String,
+        parameters: JSONValue,
+        timeoutMs: Int? = nil
+    ) {
+        self.name = name
+        self.description = description
+        self.parameters = parameters
+        self.timeoutMs = timeoutMs
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case description
+        case parameters
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        description = try container.decode(String.self, forKey: .description)
+        parameters = try container.decode(JSONValue.self, forKey: .parameters)
+        timeoutMs = nil
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(name, forKey: .name)
+        try container.encode(description, forKey: .description)
+        try container.encode(parameters, forKey: .parameters)
+    }
 }
 
 struct ModelRequest: Sendable, Equatable {
@@ -16,6 +53,10 @@ struct ModelRequest: Sendable, Equatable {
     /// the session or trace. Keeping them request-local avoids data URLs in
     /// durable conversation state.
     let imagePayloads: [ModelImagePayload]
+    /// Immutable profile/endpoint identity captured before this request starts.
+    /// It contains no credential material and is never inferred from mutable UI
+    /// state during adapter dispatch.
+    let route: ProviderRequestRoute?
 
     init(
         configuration: AgentConfiguration,
@@ -23,7 +64,8 @@ struct ModelRequest: Sendable, Equatable {
         systemPrompt: String,
         messages: [AgentMessage],
         tools: [ModelToolDefinition],
-        imagePayloads: [ModelImagePayload] = []
+        imagePayloads: [ModelImagePayload] = [],
+        route: ProviderRequestRoute? = nil
     ) {
         self.configuration = configuration
         self.apiKey = apiKey
@@ -31,6 +73,7 @@ struct ModelRequest: Sendable, Equatable {
         self.messages = messages
         self.tools = tools
         self.imagePayloads = imagePayloads
+        self.route = route
     }
 }
 

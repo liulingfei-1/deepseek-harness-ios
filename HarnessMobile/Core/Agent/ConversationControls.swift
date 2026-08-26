@@ -199,18 +199,22 @@ struct ConversationControlState: Codable, Sendable, Equatable {
         _ text: String,
         disposition: QueuedInputDisposition = .queued
     ) throws -> QueuedAgentInput {
+        let input = try QueuedAgentInput(text: text, disposition: disposition)
+        try enqueue(input)
+        return input
+    }
+
+    mutating func enqueue(_ input: QueuedAgentInput) throws {
         guard queuedInputs.count < Self.maximumQueuedInputs else {
             throw ConversationControlError.queueFull
         }
-        let input = try QueuedAgentInput(text: text, disposition: disposition)
-        if disposition == .steer {
+        if input.disposition == .steer {
             let firstNormalIndex = queuedInputs.firstIndex { $0.disposition == .queued }
                 ?? queuedInputs.endIndex
             queuedInputs.insert(input, at: firstNormalIndex)
         } else {
             queuedInputs.append(input)
         }
-        return input
     }
 
     mutating func update(id: UUID, text: String) throws {
@@ -268,6 +272,10 @@ struct ConversationControlState: Codable, Sendable, Equatable {
 
     mutating func removeAllQueuedInputs() {
         queuedInputs.removeAll(keepingCapacity: false)
+    }
+
+    mutating func replaceQueuedInputs(_ inputs: [QueuedAgentInput]) {
+        queuedInputs = Array(inputs.prefix(Self.maximumQueuedInputs))
     }
 }
 

@@ -49,6 +49,61 @@ final class NativeAgentPluginTests: XCTestCase {
         XCTAssertFalse(NativeAgentPluginError.alreadyInstalled("native-agent.demo").shouldFallbackToISH)
     }
 
+    func testSkillRadarManifestWithLocalizedToolGuardMaterializes() throws {
+        let manifest = Data("""
+        {
+          "adaptable": true,
+          "name": "dsh-skillradar",
+          "description": "Read-only local skill relevance scanner.",
+          "prompt_sections": [{"order": 1, "text": "Use skill_radar when a matching skill might help.", "complete": true}],
+          "prompt_contexts": [{"name": "recent-conversation", "order": 1, "source": "conversation", "maximum_characters": 8000, "prefix": "Recent conversation: \\n", "suffix": ""}],
+          "tools": [{
+            "name": "skill_radar",
+            "description": "Score skills against the current conversation.",
+            "parameters": {"type": "object", "additionalProperties": false, "properties": {"limit": {"type": "integer"}, "session_id": {"type": "string"}}, "required": []},
+            "risk": "pure",
+            "instructions": "Read the current session skill catalog and score results locally without network or writes.",
+            "allowed_tools": []
+          }],
+          "tool_guards": [{"label": "skill_radar 只读扫描", "tool_names": ["skill_radar"], "risks": ["pure"], "decision": "allow", "reason": "只读扫描，无网络、无写入、无外部命令。"}],
+          "settings": {"schema": {"type": "object", "additionalProperties": false, "properties": {"limit": {"type": "integer", "default": 15}}}, "defaults": {"limit": 15}},
+          "compatibility_notes": ["Desktop client panel is intentionally replaced by native mobile UI."]
+        }
+        """.utf8)
+        let draft = try JSONDecoder().decode(NativeAgentPluginManifestDraft.self, from: manifest)
+        let source = NativeAgentPluginSourceSnapshot(
+            schemaVersion: 1,
+            failureReason: "missing-entrypoint",
+            sourceDigest: String(repeating: "a", count: 64),
+            source: ISHMarketplacePluginSource(
+                kind: .github,
+                location: "https://github.com/hellosky983/dsh-skillradar"
+            ),
+            packageName: "dsh-skillradar",
+            version: "0.1.0",
+            description: "Skill Radar",
+            files: [
+                NativeAgentPluginSourceFile(
+                    path: "index.js",
+                    content: "export default {}",
+                    truncated: false
+                )
+            ]
+        )
+
+        let plugin = try NativeAgentPluginCompiler.materialize(
+            source: source,
+            draft: draft,
+            compilerProviderID: "deepseek-official",
+            compilerModel: "deepseek-v4-flash-vision-exp",
+            allowedBaseTools: []
+        )
+
+        XCTAssertEqual(plugin.tools.map(\.name), ["skill_radar"])
+        XCTAssertEqual(plugin.toolGuards.first?.label, "skill_radar 只读扫描")
+        XCTAssertEqual(plugin.toolGuards.first?.decision, .allow)
+    }
+
     func testCompilerBuildsValidatedNativeManifestFromToolCall() async throws {
         let arguments = JSONValue.object([
             "adaptable": .bool(true),
@@ -375,6 +430,57 @@ final class NativeAgentPluginTests: XCTestCase {
         )
 
         XCTAssertEqual(plugin.toolGuards.first?.label, "skill_radar 只读扫描")
+    }
+
+    func testSkillRadarPureAllowGuardFromReportedManifestValidates() throws {
+        let plugin = try makePlugin(
+            toolGuards: [
+                NativeAgentToolGuard(
+                    label: "skill_radar 只读扫描",
+                    toolNames: ["skill_radar"],
+                    risks: [.pure],
+                    decision: .allow,
+                    reason: "只读：枚举会话可见技能并做本地相关性打分。"
+                )
+            ]
+        )
+        let skillRadar = NativeAgentCompiledTool(
+            name: "skill_radar",
+            description: "Scan visible skills without side effects.",
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([:]),
+                "additionalProperties": .bool(false)
+            ]),
+            risk: .pure,
+            instructions: "Score skills from the current session locally.",
+            allowedTools: []
+        )
+        let reportedManifest = NativeAgentCompiledPlugin(
+            schemaVersion: plugin.schemaVersion,
+            id: plugin.id,
+            name: plugin.name,
+            version: plugin.version,
+            description: plugin.description,
+            source: plugin.source,
+            sourceDigest: plugin.sourceDigest,
+            compiledAt: plugin.compiledAt,
+            compilerProviderID: plugin.compilerProviderID,
+            compilerModel: plugin.compilerModel,
+            enabled: plugin.enabled,
+            promptSections: plugin.promptSections,
+            promptContexts: plugin.promptContexts,
+            settings: plugin.settings,
+            tools: [skillRadar],
+            toolGuards: plugin.toolGuards,
+            compatibilityNotes: plugin.compatibilityNotes
+        )
+
+        XCTAssertNoThrow(
+            try reportedManifest.validated(
+                allowedBaseTools: NativeAgentPluginPolicy.approvedBaseToolNames
+            )
+        )
     }
 
     func testNativeToolGuardReportsTheInvalidField() {

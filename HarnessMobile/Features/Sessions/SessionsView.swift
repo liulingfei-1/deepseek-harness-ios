@@ -5,9 +5,8 @@ struct SessionsView: View {
 
     private let onConversationOpened: () -> Void
     private let onOpenSettings: () -> Void
-    private let onOpenTerminal: () -> Void
-    private let onOpenWorkspace: () -> Void
     private let onOpenTools: () -> Void
+    private let onOpenBackgroundSettings: () -> Void
 
     @State private var sessionToRename: ConversationSessionSummary?
     @State private var sessionToDelete: ConversationSessionSummary?
@@ -18,20 +17,17 @@ struct SessionsView: View {
     @State private var isSearching = false
     @State private var collectionScope = SessionCollectionScope.active
     @State private var sortOrder = SessionSortOrder.updatedNewest
-    @State private var isWorkspaceExpanded = true
 
     init(
         onConversationOpened: @escaping () -> Void = {},
         onOpenSettings: @escaping () -> Void = {},
-        onOpenTerminal: @escaping () -> Void = {},
-        onOpenWorkspace: @escaping () -> Void = {},
-        onOpenTools: @escaping () -> Void = {}
+        onOpenTools: @escaping () -> Void = {},
+        onOpenBackgroundSettings: @escaping () -> Void = {}
     ) {
         self.onConversationOpened = onConversationOpened
         self.onOpenSettings = onOpenSettings
-        self.onOpenTerminal = onOpenTerminal
-        self.onOpenWorkspace = onOpenWorkspace
         self.onOpenTools = onOpenTools
+        self.onOpenBackgroundSettings = onOpenBackgroundSettings
     }
 
     var body: some View {
@@ -41,15 +37,22 @@ struct SessionsView: View {
                     SessionErrorSection(message: errorMessage)
                 }
 
-                WorkspaceHierarchySection(
-                    isExpanded: $isWorkspaceExpanded,
-                    files: model.workspaceFiles,
-                    mounts: model.workspaceMounts,
-                    activeSessionTitle: model.sessions.first(where: {
-                        $0.id == model.activeSessionID
-                    })?.title,
-                    isRunning: model.isRunning,
-                    onOpenWorkspace: onOpenWorkspace
+                HomeContinueSection(
+                    activeSession: activeSession,
+                    status: activeSession.map(status(for:)),
+                    onContinue: {
+                        if let activeSession {
+                            openConversation(activeSession)
+                        } else {
+                            createConversation()
+                        }
+                    },
+                    onCreate: createConversation
+                )
+
+                BackgroundSystemStatusSection(
+                    projection: model.backgroundSystemProjection,
+                    onOpenSettings: onOpenBackgroundSettings
                 )
 
                 if visibleSessions.isEmpty {
@@ -64,7 +67,7 @@ struct SessionsView: View {
                             sessionSection("已归档", sessions: archivedSessions)
                         }
                     } else {
-                        sessionSection(collectionScope.sectionTitle, sessions: visibleSessions)
+                        sessionSection(collectionScope == .active ? "最近会话" : collectionScope.sectionTitle, sessions: visibleSessions)
                     }
                 }
             }
@@ -89,6 +92,7 @@ struct SessionsView: View {
             ToolbarItem(placement: .topBarLeading) {
                 Button(action: onOpenSettings) {
                     Image(systemName: "gearshape")
+                        .frame(width: 44, height: 44)
                 }
                 .accessibilityLabel("设置")
             }
@@ -110,15 +114,17 @@ struct SessionsView: View {
                     }
                 } label: {
                     Image(systemName: "line.3.horizontal.decrease.circle")
+                        .frame(width: 44, height: 44)
                 }
                 .accessibilityLabel("筛选与排序")
             }
 
             ToolbarItem(placement: .topBarTrailing) {
-                Button(action: onOpenTerminal) {
-                    Image(systemName: "terminal")
+                Button(action: onOpenTools) {
+                    Image(systemName: "square.grid.2x2")
+                        .frame(width: 44, height: 44)
                 }
-                .accessibilityLabel("iSH 终端")
+                .accessibilityLabel("工具")
             }
         }
         .task(id: searchTaskID) {
@@ -150,16 +156,6 @@ struct SessionsView: View {
 
     private var floatingControls: some View {
         HStack(spacing: 10) {
-            Button(action: onOpenTools) {
-                Image(systemName: "square.grid.2x2")
-                    .font(.body.weight(.semibold))
-                    .frame(width: 46, height: 46)
-                    .background(.regularMaterial, in: Circle())
-                    .overlay(Circle().stroke(.quaternary, lineWidth: 0.5))
-            }
-            .foregroundStyle(.primary)
-            .accessibilityLabel("工具")
-
             Button(action: createConversation) {
                 Image(systemName: "bubble.left.and.text.bubble.right.fill")
                     .font(.body.weight(.semibold))
@@ -177,6 +173,11 @@ struct SessionsView: View {
 
     private var normalizedSearchText: String {
         searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var activeSession: ConversationSessionSummary? {
+        guard let activeSessionID = model.activeSessionID else { return nil }
+        return model.sessions.first { $0.id == activeSessionID }
     }
 
     private var searchTaskID: SessionSearchTaskID {
@@ -522,8 +523,15 @@ struct SessionsView: View {
         if session.isArchived {
             return .archived
         }
-        if session.id == model.activeSessionID, model.isRunning {
-            return .running
+        if let run = model.sessionRunSnapshots[session.id] {
+            switch run.phase {
+            case .idle, .maintenance, .running, .cancelling:
+                return .running
+            case .terminal:
+                if !run.presentation.queuedInputs.isEmpty {
+                    return .waiting(run.presentation.queuedInputs.count)
+                }
+            }
         }
         if session.queuedInputCount > 0 {
             return .waiting(session.queuedInputCount)
@@ -542,6 +550,91 @@ struct SessionsView: View {
             return "恢复并打开此会话"
         }
         return session.id == model.activeSessionID ? "当前会话" : "切换到此会话"
+    }
+}
+
+private struct HomeContinueSection: View {
+    let activeSession: ConversationSessionSummary?
+    let status: SessionDisplayStatus?
+    let onContinue: () -> Void
+    let onCreate: () -> Void
+
+    var body: some View {
+        Section {
+            Button(action: onContinue) {
+                Label(
+                    activeSession == nil ? "开始任务" : "继续当前任务",
+                    systemImage: activeSession == nil ? "play.fill" : "arrow.forward.circle.fill"
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .accessibilityIdentifier("home-continue-task")
+
+            Button(action: onCreate) {
+                Label("新建会话", systemImage: "plus.bubble")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .accessibilityIdentifier("home-new-session")
+        } header: {
+            Text("任务")
+        } footer: {
+            if let activeSession, let status {
+                Text("当前：\(activeSession.title) · \(status.title)")
+            } else {
+                Text("从本机保存的会话继续，或开始一个新的任务。")
+            }
+        }
+    }
+}
+
+private struct BackgroundSystemStatusSection: View {
+    let projection: BackgroundSystemProjection
+    let onOpenSettings: () -> Void
+
+    var body: some View {
+        Section {
+            HStack {
+                Label("后台任务", systemImage: "bolt.horizontal.circle")
+                Spacer()
+                Text("\(projection.activeRunCount) 个 · \(tierLabel)")
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            if !projection.degradedReasons.isEmpty {
+                Text("降级：" + projection.degradedReasons.map(degradedLabel).sorted().joined(separator: "、"))
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+            }
+            Button(action: onOpenSettings) {
+                Label("查看后台状态与恢复设置", systemImage: "arrow.up.forward.app")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .accessibilityIdentifier("home-background-status")
+        } header: {
+            Text("系统状态")
+        } footer: {
+            Text("这里汇总所有并行任务的真实状态；详细权限、通知和恢复设置在后台任务页。")
+        }
+    }
+
+    private var tierLabel: String {
+        switch projection.survivalTier {
+        case .foreground: "前台"
+        case .finiteBackgroundTask: "短时后台"
+        case .continuedProcessing: "Continued Processing"
+        case .extendedAudio: "音频延展"
+        case .extendedLocation: "定位延展"
+        case .degraded: "降级"
+        }
+    }
+
+    private func degradedLabel(_ reason: BackgroundKeepAliveDegradedReason) -> String {
+        switch reason {
+        case .lowPowerMode: "低电量模式"
+        case .thermalPressure: "温度压力"
+        case .audioUnavailable: "音频不可用"
+        case .locationUnavailable: "定位不可用"
+        }
     }
 }
 

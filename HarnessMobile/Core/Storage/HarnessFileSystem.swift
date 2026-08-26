@@ -277,7 +277,7 @@ struct WorkspaceFileSystemProvider: HarnessFileSystem {
                 return HarnessFsError(code: .notFound, message: workspaceError.localizedDescription)
             case .bookmarkCreationFailed, .mountStoreCorrupted, .mountStoreUnavailable:
                 return HarnessFsError(code: .ioError, message: workspaceError.localizedDescription)
-            case .unsupportedFileType, .noStagedImage, .tooManyConflicts, .mountLimitReached:
+            case .unsupportedFileType, .noStagedImage, .attachmentExpired, .tooManyConflicts, .mountLimitReached:
                 return HarnessFsError(code: .ioError, message: workspaceError.localizedDescription)
             }
         }

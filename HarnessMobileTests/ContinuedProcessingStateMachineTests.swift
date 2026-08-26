@@ -7,6 +7,69 @@ import XCTest
 #endif
 
 final class ContinuedProcessingStateMachineTests: XCTestCase {
+    func testRunBookKeepsTwoIdentitiesIndependent() throws {
+        let first = try makeFixture(identity: RunIdentity(sessionID: UUID(), runID: UUID(), generation: 1))
+        let second = try makeFixture(identity: RunIdentity(sessionID: UUID(), runID: UUID(), generation: 4))
+        var book = ContinuedProcessingRunBook()
+
+        XCTAssertTrue(book.begin(first.descriptor))
+        XCTAssertTrue(book.begin(second.descriptor))
+        XCTAssertTrue(book.hasActiveRun)
+
+        let firstEffects = book.attachSystemTask(identifier: first.descriptor.requestIdentifier)
+        let secondEffects = book.attachSystemTask(identifier: second.descriptor.requestIdentifier)
+        XCTAssertEqual(firstEffects?.runID, first.descriptor.id)
+        XCTAssertEqual(secondEffects?.runID, second.descriptor.id)
+        XCTAssertEqual(firstEffects?.effects, [.updateSystemTask(first.descriptor.status), .startWorker])
+        XCTAssertEqual(secondEffects?.effects, [.updateSystemTask(second.descriptor.status), .startWorker])
+    }
+
+    func testRunBookDoesNotRouteUnknownRequestOrRemoveAnotherRun() throws {
+        let first = try makeFixture(identity: RunIdentity(sessionID: UUID(), runID: UUID(), generation: 1))
+        let second = try makeFixture(identity: RunIdentity(sessionID: UUID(), runID: UUID(), generation: 2))
+        var book = ContinuedProcessingRunBook()
+
+        XCTAssertTrue(book.begin(first.descriptor))
+        XCTAssertTrue(book.begin(second.descriptor))
+        XCTAssertNil(book.attachSystemTask(identifier: "com.example.unknown"))
+        book.remove(first.descriptor.id)
+        XCTAssertNotNil(book.currentRun(for: second.descriptor.id))
+        XCTAssertNil(book.currentRun(for: first.descriptor.id))
+    }
+
+    func testRunBookRejectsStaleGenerationForTheSameRunID() throws {
+        let identity = RunIdentity(sessionID: UUID(), runID: UUID(), generation: 8)
+        let fixture = try makeFixture(identity: identity)
+        var book = ContinuedProcessingRunBook()
+        XCTAssertTrue(book.begin(fixture.descriptor))
+
+        let stale = RunIdentity(
+            sessionID: identity.sessionID,
+            runID: identity.runID,
+            generation: identity.generation - 1
+        )
+        XCTAssertFalse(book.accepts(stale, for: identity.runID))
+        XCTAssertTrue(book.accepts(identity, for: identity.runID))
+    }
+
+    func testRunCompletionResolvesWaitersAndLateResolutionCannotReplaceOutcome() async {
+        let completion = ContinuedProcessingRunCompletion()
+        let waiter = Task { await completion.wait() }
+
+        await completion.resolve(
+            .operationFinished(cancellationReason: .systemExpiration)
+        )
+        await completion.resolve(.cancelledBeforeStart(.user))
+
+        let first = await waiter.value
+        let second = await completion.wait()
+        XCTAssertEqual(
+            first,
+            .operationFinished(cancellationReason: .systemExpiration)
+        )
+        XCTAssertEqual(second, first)
+    }
+
     func testIdentifiersNormalizeWildcardAndCreateUniqueRequestSuffixes() throws {
         let identifiers = try ContinuedProcessingIdentifiers(
             prefix: "com.example.HarnessMobile.continued-processing.*"
@@ -168,6 +231,24 @@ final class ContinuedProcessingStateMachineTests: XCTestCase {
             ContinuedProcessingRunDescriptor(
                 id: id,
                 requestIdentifier: prefix + "." + id.uuidString.lowercased(),
+                status: status
+            ),
+            prefix
+        )
+    }
+
+    private func makeFixture(identity: RunIdentity) throws -> (descriptor: ContinuedProcessingRunDescriptor, prefix: String) {
+        let prefix = "com.example.HarnessMobile.continued-processing"
+        let status = try ContinuedProcessingStatus(
+            title: "Processing \(identity.runID.uuidString.prefix(4))",
+            subtitle: "0 of 20 files",
+            completedUnitCount: 0,
+            totalUnitCount: 20
+        )
+        return (
+            ContinuedProcessingRunDescriptor(
+                identity: identity,
+                requestIdentifier: prefix + "." + identity.runID.uuidString.lowercased(),
                 status: status
             ),
             prefix

@@ -8,7 +8,9 @@ struct ChatCompletionsRequest: Encodable, Sendable {
     let streamOptions = StreamOptions(includeUsage: true)
     let thinking: Thinking?
     let reasoningEffort: String?
-    let maxTokens: Int
+    /// OpenAI-compatible routes treat this as an optional caller override.
+    /// Omitting it lets the selected provider/model apply its own output policy.
+    let maxTokens: Int?
 
     enum CodingKeys: String, CodingKey {
         case model
@@ -296,7 +298,10 @@ enum ChatWireSerializer {
             },
             thinking: makeThinking(configuration.reasoningMode),
             reasoningEffort: makeReasoningEffort(configuration.reasoningMode),
-            maxTokens: configuration.maxOutputTokens
+            // `maxOutputTokens` records a provider/model capacity for UI and
+            // adapters that require a value (for example Anthropic). It is not
+            // an App-owned throttle for OpenAI-compatible APIs.
+            maxTokens: nil
         )
     }
 
@@ -329,8 +334,13 @@ enum ChatWireSerializer {
                     return .image(url: "data:\(payload.mimeType);base64,\(payload.data.base64EncodedString())")
                 }
                 let omittedCount = max(0, message.imageAttachments.count - attachments.count)
+                let fileMetadata = message.fileAttachments.map { attachment in
+                    ChatRequestMessage.ImagePart.text(
+                        "[Local attachment metadata: name=\(attachment.displayName); type=\(attachment.mimeType); size=\(attachment.byteCount) bytes. File bytes were not sent because this provider has no declared non-image file-input contract.]"
+                    )
+                }
                 let parts: [ChatRequestMessage.ImagePart]?
-                if message.imageAttachments.isEmpty {
+                if message.imageAttachments.isEmpty, message.fileAttachments.isEmpty {
                     parts = nil
                 } else {
                     parts = [.text(message.content)]
@@ -338,6 +348,7 @@ enum ChatWireSerializer {
                         + (omittedCount > 0
                             ? [.text("[\(omittedCount) earlier image(s) omitted because the request image limit was reached.]")]
                             : [])
+                        + fileMetadata
                 }
                 result.append(
                     ChatRequestMessage(

@@ -10,6 +10,16 @@ struct WorkspaceAdmittedImage: Sendable, Equatable {
     let originalHeight: Int?
 }
 
+/// The result of admitting one complete Share handoff. It is persisted as a
+/// small manifest keyed by the handoff ID so a force-closed app can retry the
+/// same claim without creating duplicate attachment objects.
+struct WorkspaceShareAdmission: Codable, Sendable, Equatable {
+    let handoffID: UUID
+    let inlineText: String?
+    let imageAttachments: [AgentImageAttachmentRef]
+    let fileAttachments: [AgentFileAttachmentRef]
+}
+
 enum ImageAdmissionError: LocalizedError, Sendable, Equatable {
     case empty
     case inputTooLarge(Int)
@@ -44,6 +54,8 @@ enum ImageAdmissionError: LocalizedError, Sendable, Equatable {
 
 actor WorkspaceStore {
     static let maximumModelRequestImageBytes = 1 * 1_024 * 1_024
+    static let maximumFileAttachmentBytes = 64 * 1_024 * 1_024
+    static let fileAttachmentTTL: TimeInterval = 7 * 24 * 60 * 60
     struct FileEntry: Codable, Sendable, Equatable {
         let path: String
         let size: Int64
@@ -585,6 +597,188 @@ actor WorkspaceStore {
 
     func stageImage(_ data: Data) throws -> AgentImageAttachmentRef {
         try stageImageWithMetadata(data).reference
+    }
+
+    /// Acquires a picked file only long enough to copy an admitted, immutable
+    /// local object. The original security-scoped URL is never persisted.
+    func stageFileAttachment(from externalURL: URL) throws -> AgentFileAttachmentRef {
+        try ensureRoot()
+        let didAccess = externalURL.startAccessingSecurityScopedResource()
+        defer {
+            if didAccess {
+                externalURL.stopAccessingSecurityScopedResource()
+            }
+        }
+        let values = try externalURL.resourceValues(
+            forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]
+        )
+        guard values.isRegularFile == true, values.isSymbolicLink != true else {
+            throw WorkspaceError.notAFile
+        }
+        guard let size = values.fileSize,
+              size > 0,
+              size <= Self.maximumFileAttachmentBytes else {
+            throw WorkspaceError.fileTooLarge(Self.maximumFileAttachmentBytes)
+        }
+        let data = try Data(contentsOf: externalURL, options: [.mappedIfSafe])
+        let admitted = try FileAttachmentAdmission.admit(
+            data,
+            filename: externalURL.lastPathComponent
+        )
+        let attachments = root.appendingPathComponent("Attachments", isDirectory: true)
+        try fileManager.createDirectory(at: attachments, withIntermediateDirectories: true)
+        let id = UUID()
+        let filename = "\(id.uuidString.lowercased()).\(admitted.filenameExtension)"
+        let destination = attachments.appendingPathComponent(filename)
+        try admitted.data.write(to: destination, options: Self.protectedWritingOptions)
+        return AgentFileAttachmentRef(
+            id: id,
+            path: "Attachments/\(filename)",
+            mimeType: admitted.mimeType,
+            byteCount: admitted.data.count,
+            displayName: admitted.displayName,
+            expiresAt: .now.addingTimeInterval(Self.fileAttachmentTTL)
+        )
+    }
+
+    func readFileAttachment(_ ref: AgentFileAttachmentRef, now: Date = .now) throws -> Data {
+        try ensureRoot()
+        guard ref.expiresAt > now else { throw WorkspaceError.attachmentExpired }
+        guard ref.path.hasPrefix("Attachments/"),
+              !ref.path.contains(".."),
+              !ref.path.unicodeScalars.contains(where: { $0.value == 0 }) else {
+            throw WorkspaceError.invalidPath
+        }
+        let url = root.appendingPathComponent(ref.path).standardizedFileURL
+        guard Self.isContained(url, in: root),
+              fileManager.fileExists(atPath: url.path) else {
+            throw WorkspaceError.notAFile
+        }
+        let values = try url.resourceValues(
+            forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]
+        )
+        guard values.isRegularFile == true, values.isSymbolicLink != true,
+              values.fileSize == ref.byteCount,
+              ref.byteCount > 0,
+              ref.byteCount <= Self.maximumFileAttachmentBytes else {
+            throw WorkspaceError.notAFile
+        }
+        let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+        _ = try FileAttachmentAdmission.admit(
+            data,
+            filename: ref.displayName,
+            expectedMimeType: ref.mimeType
+        )
+        return data
+    }
+
+    /// Admits a complete Share handoff as one workspace transaction. Every
+    /// payload is validated before the manifest is published; a later failure
+    /// removes the transaction directory so the composer can never observe a
+    /// half-admitted batch.
+    func admitShareHandoff(
+        _ claim: ShareHandoffClaim,
+        now: Date = .now
+    ) throws -> WorkspaceShareAdmission {
+        try ensureRoot()
+        let shares = root
+            .appendingPathComponent("Attachments", isDirectory: true)
+            .appendingPathComponent("ShareHandoffs", isDirectory: true)
+        try fileManager.createDirectory(at: shares, withIntermediateDirectories: true)
+        let transaction = shares.appendingPathComponent(
+            claim.envelope.id.uuidString.lowercased(),
+            isDirectory: true
+        )
+        let manifestURL = transaction.appendingPathComponent("manifest.json")
+        if fileManager.fileExists(atPath: manifestURL.path) {
+            return try JSONDecoder().decode(
+                WorkspaceShareAdmission.self,
+                from: Data(contentsOf: manifestURL)
+            )
+        }
+        if fileManager.fileExists(atPath: transaction.path) {
+            try fileManager.removeItem(at: transaction)
+        }
+        try fileManager.createDirectory(at: transaction, withIntermediateDirectories: true)
+
+        do {
+            var textParts: [String] = []
+            var images: [AgentImageAttachmentRef] = []
+            var files: [AgentFileAttachmentRef] = []
+            for item in claim.envelope.items {
+                switch item.kind {
+                case .text, .url:
+                    guard let value = item.inlineValue else { throw ShareHandoffError.invalidEnvelope }
+                    textParts.append(value)
+                case .image:
+                    guard let data = claim.payloads[item.id],
+                          let mimeType = item.mimeType else {
+                        throw ShareHandoffError.invalidEnvelope
+                    }
+                    let admitted = try ImageAttachmentAdmission.admit(
+                        data,
+                        declaredMimeType: mimeType
+                    )
+                    let filename = "\(item.id.uuidString.lowercased()).\(admitted.filenameExtension)"
+                    let path = "Attachments/ShareHandoffs/\(claim.envelope.id.uuidString.lowercased())/\(filename)"
+                    try admitted.data.write(
+                        to: transaction.appendingPathComponent(filename),
+                        options: Self.protectedWritingOptions
+                    )
+                    images.append(
+                        AgentImageAttachmentRef(
+                            id: item.id,
+                            path: path,
+                            mimeType: admitted.mimeType,
+                            byteCount: admitted.data.count
+                        )
+                    )
+                case .file:
+                    guard let data = claim.payloads[item.id],
+                          let mimeType = item.mimeType,
+                          let displayName = item.displayName else {
+                        throw ShareHandoffError.invalidEnvelope
+                    }
+                    let admitted = try FileAttachmentAdmission.admit(
+                        data,
+                        filename: displayName,
+                        expectedMimeType: mimeType
+                    )
+                    let filename = "\(item.id.uuidString.lowercased()).\(admitted.filenameExtension)"
+                    let path = "Attachments/ShareHandoffs/\(claim.envelope.id.uuidString.lowercased())/\(filename)"
+                    try admitted.data.write(
+                        to: transaction.appendingPathComponent(filename),
+                        options: Self.protectedWritingOptions
+                    )
+                    files.append(
+                        AgentFileAttachmentRef(
+                            id: item.id,
+                            path: path,
+                            mimeType: admitted.mimeType,
+                            byteCount: admitted.data.count,
+                            displayName: admitted.displayName,
+                            expiresAt: now.addingTimeInterval(Self.fileAttachmentTTL)
+                        )
+                    )
+                }
+            }
+            let admission = WorkspaceShareAdmission(
+                handoffID: claim.envelope.id,
+                inlineText: textParts.isEmpty ? nil : textParts.joined(separator: "\n\n"),
+                imageAttachments: images,
+                fileAttachments: files
+            )
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            try encoder.encode(admission).write(
+                to: manifestURL,
+                options: Self.protectedWritingOptions
+            )
+            return admission
+        } catch {
+            try? fileManager.removeItem(at: transaction)
+            throw error
+        }
     }
 
     /// Runs one shared image-admission path for camera/photo input and
@@ -2202,6 +2396,87 @@ private enum ImageAttachmentAdmission {
     }
 }
 
+private enum FileAttachmentAdmission {
+    struct Admitted: Sendable, Equatable {
+        let data: Data
+        let mimeType: String
+        let filenameExtension: String
+        let displayName: String
+    }
+
+    static func admit(
+        _ data: Data,
+        filename: String,
+        expectedMimeType: String? = nil
+    ) throws -> Admitted {
+        guard !data.isEmpty, data.count <= WorkspaceStore.maximumFileAttachmentBytes else {
+            throw WorkspaceError.fileTooLarge(WorkspaceStore.maximumFileAttachmentBytes)
+        }
+        let sanitized = sanitizedDisplayName(filename)
+        let fileExtension = URL(fileURLWithPath: sanitized).pathExtension.lowercased()
+        let mimeType: String
+        switch fileExtension {
+        case "pdf":
+            guard data.starts(with: Data("%PDF-".utf8)) else {
+                throw WorkspaceError.unsupportedFileType
+            }
+            mimeType = "application/pdf"
+        case "mp3":
+            guard hasMP3Signature(data) else { throw WorkspaceError.unsupportedFileType }
+            mimeType = "audio/mpeg"
+        case "wav":
+            guard data.count >= 12,
+                  data.prefix(4) == Data("RIFF".utf8),
+                  data.dropFirst(8).prefix(4) == Data("WAVE".utf8) else {
+                throw WorkspaceError.unsupportedFileType
+            }
+            mimeType = "audio/wav"
+        case "m4a":
+            guard hasISOBMFFSignature(data) else { throw WorkspaceError.unsupportedFileType }
+            mimeType = "audio/mp4"
+        case "mp4":
+            guard hasISOBMFFSignature(data) else { throw WorkspaceError.unsupportedFileType }
+            mimeType = "video/mp4"
+        case "mov":
+            guard hasISOBMFFSignature(data) else { throw WorkspaceError.unsupportedFileType }
+            mimeType = "video/quicktime"
+        default:
+            throw WorkspaceError.unsupportedFileType
+        }
+        guard expectedMimeType == nil || expectedMimeType == mimeType else {
+            throw WorkspaceError.unsupportedFileType
+        }
+        return Admitted(
+            data: data,
+            mimeType: mimeType,
+            filenameExtension: fileExtension,
+            displayName: sanitized
+        )
+    }
+
+    private static func hasMP3Signature(_ data: Data) -> Bool {
+        guard data.count >= 3 else { return false }
+        if data.prefix(3) == Data("ID3".utf8) { return true }
+        let bytes = [UInt8](data.prefix(2))
+        return bytes[0] == 0xFF && (bytes[1] & 0xE0) == 0xE0
+    }
+
+    private static func hasISOBMFFSignature(_ data: Data) -> Bool {
+        data.count >= 12 && data.dropFirst(4).prefix(4) == Data("ftyp".utf8)
+    }
+
+    private static func sanitizedDisplayName(_ filename: String) -> String {
+        let leaf = URL(fileURLWithPath: filename).lastPathComponent
+        let cleaned = leaf
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: "\\", with: "-")
+            .replacingOccurrences(of: "\0", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallback = cleaned.isEmpty ? "attachment" : cleaned
+        return String(fallback.prefix(120))
+    }
+}
+
 enum WorkspaceError: LocalizedError, Sendable {
     case invalidPath
     case pathEscapesWorkspace
@@ -2211,6 +2486,7 @@ enum WorkspaceError: LocalizedError, Sendable {
     case notUTF8
     case unsupportedFileType
     case noStagedImage
+    case attachmentExpired
     case tooManyConflicts
     case mountLimitReached(Int)
     case mountNotFound
@@ -2238,6 +2514,8 @@ enum WorkspaceError: LocalizedError, Sendable {
             return "当前版本只允许写入文本类文件。"
         case .noStagedImage:
             return "请先在对话页拍照或选择一张图片。"
+        case .attachmentExpired:
+            return "附件已过期，请重新选择文件后重试。"
         case .tooManyConflicts:
             return "同名导入文件过多。"
         case let .mountLimitReached(limit):

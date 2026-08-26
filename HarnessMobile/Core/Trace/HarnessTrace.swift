@@ -60,6 +60,9 @@ struct HarnessTraceModelRequest: Codable, Sendable, Equatable {
     let model: String
     let reasoningMode: String
     let maximumOutputTokens: Int
+    let profileID: String?
+    let routeGeneration: UInt64?
+    let finalRoute: String?
     let systemPrompt: String
     let messages: [HarnessTraceMessage]
     let toolNames: [String]
@@ -70,6 +73,11 @@ struct HarnessTraceModelRequest: Codable, Sendable, Equatable {
         model = HarnessTraceRedactor.string(request.configuration.model, maximumUTF8Bytes: 512)
         reasoningMode = request.configuration.reasoningMode.rawValue
         maximumOutputTokens = request.configuration.maxOutputTokens
+        profileID = request.route?.profileID
+        routeGeneration = request.route?.generation
+        finalRoute = request.route.map { route in
+            HarnessTraceRedactor.string(route.endpoint.absoluteString, maximumUTF8Bytes: 2_048)
+        }
         systemPrompt = HarnessTraceRedactor.string(request.systemPrompt, maximumUTF8Bytes: 32 * 1_024)
         messages = request.messages.suffix(128).map(HarnessTraceMessage.init)
         toolNames = request.tools.prefix(128).map(\.name)
@@ -381,8 +389,9 @@ actor HarnessTraceStore {
         var firstTokenDurations: [Double] = []
         var modelDuration = 0.0
         var toolDuration = 0.0
-        var promptTokens = 0
+        var cachePromptTokens = 0
         var cachedTokens = 0
+        var hasCacheData = false
         var turns = Set<Int>()
         var steps = Set<TraceStepKey>()
         var calls = 0
@@ -411,8 +420,15 @@ actor HarnessTraceStore {
                 if case let .modelResponse(response) = event.payload,
                    let usage = response.usage,
                    usage.promptTokens > 0 {
-                    promptTokens += usage.promptTokens
-                    cachedTokens += min(usage.promptTokens, max(0, usage.cachedPromptTokens ?? 0))
+                    if usage.cachedPromptTokens != nil || usage.uncachedPromptTokens != nil {
+                        hasCacheData = true
+                        cachePromptTokens += usage.promptTokens
+                        let cached = usage.cachedPromptTokens ?? max(
+                            0,
+                            usage.promptTokens - (usage.uncachedPromptTokens ?? usage.promptTokens)
+                        )
+                        cachedTokens += min(usage.promptTokens, max(0, cached))
+                    }
                 }
             case .toolStarted:
                 guard let callID = event.callID else { break }
@@ -431,7 +447,9 @@ actor HarnessTraceStore {
         let averageTTFT = firstTokenDurations.isEmpty
             ? nil
             : firstTokenDurations.reduce(0, +) / Double(firstTokenDurations.count)
-        let cacheHitRate = promptTokens == 0 ? nil : Double(cachedTokens) / Double(promptTokens)
+        let cacheHitRate = hasCacheData && cachePromptTokens > 0
+            ? Double(cachedTokens) / Double(cachePromptTokens)
+            : nil
         return HarnessTraceSummary(
             durationMilliseconds: duration,
             turns: turns.count,

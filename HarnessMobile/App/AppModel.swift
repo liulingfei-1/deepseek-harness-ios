@@ -148,29 +148,20 @@ struct NativePluginCompilationTrace: Identifiable, Sendable, Equatable {
     var isFinished: Bool { finishedAt != nil }
 }
 
-private struct PendingActiveToolPresentation: Sendable {
-    var replacement: AgentToolEvent?
-    var outputByCallID: [String: [AgentToolOutputChunk]] = [:]
-
-    mutating func replace(with event: AgentToolEvent) {
-        replacement = event
-        outputByCallID = outputByCallID.filter { callID, _ in
-            !event.containsRecursively(callID: callID)
-        }
-    }
-
-    mutating func append(callID: String, chunk: AgentToolOutputChunk) {
-        var output = outputByCallID[callID, default: []]
-        AgentToolEvent.appendOutput(chunk, to: &output)
-        outputByCallID[callID] = output
-    }
-}
-
 @MainActor
 @Observable
 final class AppModel {
-    private static let maximumPresentedStreamingCharacters = 8_000
-    private static let maximumPresentedReasoningCharacters = 4_000
+    private static let maximumConcurrentRootRuns = 2
+
+    private struct RunExecutionSnapshot: Sendable {
+        let controlState: ConversationControlState
+        let agentPreset: AgentPresetRuntimeProjection?
+        let contextWindowTokens: Int?
+
+        var interactionMode: ConversationInteractionMode { controlState.interactionMode }
+        var permissionMode: ToolPermissionMode { controlState.permissionMode }
+        var contextLimitUTF8Bytes: Int { controlState.contextLimitUTF8Bytes ?? 384 * 1_024 }
+    }
 
     private static let creativeModeLifecycleTools: Set<String> = [
         "cordis_inspect_list",
@@ -204,39 +195,77 @@ final class AppModel {
         }
     }
     private(set) var messagesRevision = 0
-    var streamingText = ""
-    var streamingReasoning = ""
-    /// Monotonic, O(1) signal for presentation flushes. The chat observes this
-    /// instead of evaluating `String.count` on every SwiftUI invalidation; it
-    /// also keeps changing after the bounded streaming tail reaches its cap.
-    private(set) var streamingPresentationRevision = 0
+    var selectedRunPresentation: SessionRunPresentation?
+    var streamingText: String { selectedRunPresentation?.streamingText ?? "" }
+    var streamingReasoning: String { selectedRunPresentation?.streamingReasoning ?? "" }
+    var streamingPresentationRevision: UInt64 {
+        selectedRunPresentation?.streamingPresentationRevision ?? 0
+    }
     var isSubmitting = false
     var submissionStatus: String?
-    var isRunning = false
-    var runStartedAt: Date?
-    var currentStep = 0
-    var activeContextInjections: [AgentContextInjection] = []
-    var activeToolStatus: String?
-    var activeToolEvents: [AgentToolEvent] = []
-    var pendingApproval: ToolApprovalRequest?
+    var isRunning: Bool {
+        guard let selectedRunPresentation else { return false }
+        switch selectedRunPresentation.phase {
+        case .idle, .maintenance, .running, .cancelling:
+            return true
+        case .terminal:
+            return false
+        }
+    }
+    var runStartedAt: Date? { selectedRunPresentation?.runStartedAt }
+    var currentStep: Int { selectedRunPresentation?.currentStep ?? 0 }
+    var activeContextInjections: [AgentContextInjection] {
+        selectedRunPresentation?.activeContextInjections ?? []
+    }
+    var activeToolStatus: String? { selectedRunPresentation?.activeToolStatus }
+    var activeToolEvents: [AgentToolEvent] { selectedRunPresentation?.activeToolEvents ?? [] }
+    var pendingApproval: ToolApprovalRequest? { selectedRunPresentation?.pendingApproval }
     var trustedToolApprovals: [ToolApprovalGrant] = []
-    var pendingUserQuestion: ContinuationUserQuestionProvider.Pending?
+    var pendingUserQuestion: ContinuationUserQuestionProvider.Pending? {
+        selectedRunPresentation?.pendingUserQuestion
+    }
     var errorMessage: String?
-    var latestUsage: ModelTokenUsage?
+    var latestUsage: ModelTokenUsage? { selectedRunPresentation?.latestUsage }
     var workspaceFiles: [WorkspaceStore.FileEntry] = []
     var workspaceMounts: [WorkspaceStore.MountSnapshot] = []
     var hasStagedImage = false
     private var stagedImageReference: AgentImageAttachmentRef?
+    var hasStagedFile = false
+    private var stagedFileReference: AgentFileAttachmentRef?
+    private var stagedShareAdmission: WorkspaceShareAdmission?
     var sessions: [ConversationSessionSummary] = []
     var activeSessionID: UUID?
+    /// Read-only projection of every live root. Durable session summaries do
+    /// not contain transient run state for non-selected sessions.
+    private(set) var sessionRunSnapshots: [UUID: SessionRunSnapshot] = [:]
     var workState = ConversationWorkState()
     var controlState = ConversationControlState()
     var omittedContextMessages = 0
     var hasResumableRun = false
-    var continuedProcessingSubmission: ContinuedProcessingSubmission?
-    var lastBackgroundEvent = "idle"
+    var continuedProcessingSubmission: ContinuedProcessingSubmission? {
+        selectedRunPresentation?.continuedProcessingSubmission
+    }
+    private var scheduleBackgroundEvent = "idle"
+    var lastBackgroundEvent: String {
+        selectedRunPresentation?.lastBackgroundEvent ?? scheduleBackgroundEvent
+    }
     var pendingDraft: String?
-    var backgroundRuntimeStatus: BackgroundRuntimeStatus = .idle
+    private var allStagedImageReferences: [AgentImageAttachmentRef] {
+        (stagedImageReference.map { [$0] } ?? [])
+            + (stagedShareAdmission?.imageAttachments ?? [])
+    }
+    private var allStagedFileReferences: [AgentFileAttachmentRef] {
+        (stagedFileReference.map { [$0] } ?? [])
+            + (stagedShareAdmission?.fileAttachments ?? [])
+    }
+    var backgroundRuntimeStatus: BackgroundRuntimeStatus {
+        selectedRunPresentation?.backgroundRuntimeStatus ?? .idle
+    }
+    /// Unified, privacy-safe projection consumed by home/settings/system
+    /// surfaces. It is refreshed from the durable run registry and the
+    /// process-level keep-alive coordinator rather than from the selected UI
+    /// session.
+    private(set) var backgroundSystemProjection = BackgroundSystemProjection.empty
     var directCommandOutput: DirectCommandOutput?
     var pendingSlashCommandInteraction: PendingSlashCommandInteraction?
     var isSessionModelPickerRequested = false
@@ -288,8 +317,11 @@ final class AppModel {
     /// Root-to-current address path for the active conversation. Unlike the
     /// flattened child tree this remains useful after navigating into a child.
     var visibleSessionPath: [HarnessSessionPathNode] = []
+    var memoryRecords: [MemoryRecord] = []
+    var isMemoryEnabledForActiveSession = true
 
     let workspaceStore: WorkspaceStore
+    let memoryStore: MemoryStore
     let backgroundPreferences: BackgroundPreferencesModel
     let pluginRuntime: CordisPluginRuntime
     let agentServices: CordisAgentServices
@@ -307,11 +339,16 @@ final class AppModel {
     }
 
     var effectiveConfiguration: AgentConfiguration {
-        controlState.modelConfiguration ?? configuration
+        // A session may have been saved before the provider catalog learned a
+        // model's actual capacity. Resolve that snapshot again at use time so
+        // an old 4K/8K UI value cannot become an app-imposed API limit.
+        ModelProviderCatalog.applyingKnownModelContract(
+            to: controlState.modelConfiguration ?? configuration
+        )
     }
 
     var queuedInputs: [QueuedAgentInput] {
-        controlState.queuedInputs
+        selectedRunPresentation?.queuedInputs ?? controlState.queuedInputs
     }
 
     var interactionMode: ConversationInteractionMode {
@@ -420,10 +457,6 @@ final class AppModel {
 
     func openVisibleSessionPathNode(_ node: HarnessSessionPathNode) async {
         guard !node.isCurrent else { return }
-        guard !isRunning else {
-            presentError(AppCommandError.invalidState("当前会话仍在运行；请先等待或停止当前回合，再切换会话。"))
-            return
-        }
         guard let sessionID = UUID(uuidString: node.id) else {
             presentError(HarnessJobError.unknownSubagent(node.id))
             return
@@ -433,10 +466,6 @@ final class AppModel {
     }
 
     func openVisibleSubagent(_ subagent: HarnessSubagentSnapshot) async {
-        guard !isRunning else {
-            presentError(AppCommandError.invalidState("父会话仍在运行；请先等待或停止当前回合，再打开子 Agent。"))
-            return
-        }
         guard let sessionID = UUID(uuidString: subagent.id) else {
             presentError(HarnessJobError.unknownSubagent(subagent.id))
             return
@@ -488,6 +517,8 @@ final class AppModel {
     @ObservationIgnored private let agentPresetStore: AgentPresetRegistryStore
     @ObservationIgnored private let credentialStore: CredentialStore
     @ObservationIgnored private let sessionStore: SessionStore
+    @ObservationIgnored private let appIntentInboxStore: AppIntentInboxStore
+    @ObservationIgnored private let sessionQueryReadModel: SessionQueryReadModel
     @ObservationIgnored private let feedbackSidecarStore: MessageFeedbackSidecarStore
     // Narrow internal seams for the focused native-plugin and marketplace
     // extensions. The implementations remain AppModel-owned UI coordination.
@@ -497,7 +528,7 @@ final class AppModel {
     @ObservationIgnored let pluginInstallCoordinator: PluginInstallCoordinator
     @ObservationIgnored let modelCatalogDiscoverer: any ModelCatalogDiscovering
     @ObservationIgnored let traceStore: HarnessTraceStore
-    @ObservationIgnored let trajectoryRepository: SessionTrajectoryRepository
+    @ObservationIgnored let trajectoryRepository: any SessionPersistence
     @ObservationIgnored private let slashCommandRegistry: SlashCommandRegistry
     @ObservationIgnored let skillRegistry: MobileSkillRegistry
     @ObservationIgnored private let workspaceInstructionTransitions: WorkspaceInstructionTransitionEngine
@@ -505,67 +536,54 @@ final class AppModel {
         persistenceURL: HarnessJobRegistry.applicationPersistenceURL()
     )
     @ObservationIgnored let scheduleStore: any HarnessScheduleManaging = HarnessScheduleStore()
+    @ObservationIgnored let sessionRunRegistry = SessionRunRegistry()
+    @ObservationIgnored private let backgroundResumeCoordinator = SessionBackgroundResumeCoordinator()
     @ObservationIgnored let terminalProvider: any ISHTerminalProviding
     @ObservationIgnored let mcpRegistry: MCPClientRegistry
+    @ObservationIgnored let mcpConfigurationStore: MCPConfigurationStore
     @ObservationIgnored private let ishNativeClientRegistry: ISHNativeClientContributionRegistry
+    @ObservationIgnored private let ishNativeClientSlotRegistry: ISHNativeClientSlotRegistry
     @ObservationIgnored private let ishNativeClientCoordinator: ISHNativeClientCordisCoordinator
     @ObservationIgnored var ishPluginHostClient: ISHPluginHostClient?
     @ObservationIgnored private var ishPluginHostLifecycleTask: Task<Bool, Never>?
     @ObservationIgnored private var ishPluginHostRefreshTask: Task<Void, Never>?
     @ObservationIgnored var activeISHPluginMarketplaceRetry: ISHPluginMarketplaceRetry?
     @ObservationIgnored var pendingAgentPluginPreparation: PendingAgentPluginPreparation?
-    @ObservationIgnored private let userQuestionProvider: ContinuationUserQuestionProvider
-    @ObservationIgnored let userQuestionService: UserQuestionService
+    @ObservationIgnored private let fallbackUserQuestionProvider: ContinuationUserQuestionProvider
+    @ObservationIgnored let fallbackUserQuestionService: UserQuestionService
     @ObservationIgnored let planModeState = PlanModeStateStore()
     @ObservationIgnored let workStateCoordinator = WorkStateCoordinator()
     @ObservationIgnored private let continuedProcessingController = try! ContinuedProcessingController(
         identifierPrefix: "com.llf.harnessmobile.continued-processing"
     )
+    @ObservationIgnored private let legacyBackgroundTaskLease = LegacyBackgroundTaskLease()
+    @ObservationIgnored private let backgroundKeepAliveCoordinator = BackgroundKeepAliveCoordinator()
+    @ObservationIgnored private let backgroundRunJournal: BackgroundRunJournal
+    @ObservationIgnored private var appIsBackgrounded = false
+    @ObservationIgnored private var appIsActive = true
+    @ObservationIgnored private var finiteBackgroundLeaseTokens: [RunIdentity: SessionRunBackgroundLeaseToken] = [:]
 #if os(iOS) && canImport(BackgroundTasks)
     @ObservationIgnored private let scheduleBackgroundController = ScheduleBackgroundController()
     @ObservationIgnored private var scheduleMutationObserver: NSObjectProtocol?
     @ObservationIgnored private var scheduleBackgroundTasksRegistered = false
 #endif
     @ObservationIgnored private let completionNotifier = BackgroundCompletionNotifier()
-    @ObservationIgnored private var runTask: Task<Void, Never>?
-    @ObservationIgnored var activeRunID: UUID?
-    @ObservationIgnored private var approvalWaiter: ApprovalWaiter?
-    @ObservationIgnored private var questionMonitorTask: Task<Void, Never>?
+    var activeRunID: UUID? { selectedRunPresentation?.identity.runID }
     @ObservationIgnored private var pendingLegacyConfiguration: AgentConfiguration?
-    @ObservationIgnored private var activePromptStateSummary: String?
+    /// In-memory routing revisions distinguish requests made before and after
+    /// an accepted profile change without persisting any secret.
+    @ObservationIgnored private var providerRouteGenerations: [String: UInt64] = [:]
     @ObservationIgnored private var trajectorySessionID: UUID?
     @ObservationIgnored private var trajectoryCursor: SessionTrajectoryCursor?
     @ObservationIgnored private var trajectoryLoadedFromSequence: UInt64?
     @ObservationIgnored private var trajectoryRefreshTask: Task<Void, Never>?
-    @ObservationIgnored private var harnessTraceSessionID: UUID?
-    @ObservationIgnored private var harnessTraceRunID: UUID?
-    @ObservationIgnored private var harnessTraceStartSequence: UInt64 = 0
-    @ObservationIgnored private var harnessTraceCursor: UInt64 = 0
-    @ObservationIgnored private var harnessTraceRefreshTask: Task<Void, Never>?
-    @ObservationIgnored private var pendingStreamingText = ""
-    @ObservationIgnored private var pendingStreamingReasoning = ""
-    @ObservationIgnored private var streamingPresentationByteCount = 0
-    @ObservationIgnored private var streamingPresentationTask: Task<Void, Never>?
-    @ObservationIgnored private var pendingActiveToolPresentations: [String: PendingActiveToolPresentation] = [:]
-    @ObservationIgnored private var activeToolPresentationTask: Task<Void, Never>?
     @ObservationIgnored private var inputSkillCatalogCache: (loadedAt: Date, skills: [MobileSkillSummary])?
-    @ObservationIgnored private var backgroundAutoResumeGate = BackgroundAutoResumeGate()
-    @ObservationIgnored private var backgroundAutoResumeTask: Task<Void, Never>?
     @ObservationIgnored var providerBundleInstallTasks: [
         AgentProviderBundleID: Task<Void, Never>
     ] = [:]
 #if DEBUG
     @ObservationIgnored private var didResetPersistentStateForUITesting = false
 #endif
-
-    private struct ApprovalWaiter {
-        /// The top-level AppModel run that owns this nested operation.
-        let ownerRunID: UUID
-        /// The runtime that issued the request (main, child, or plugin Agent).
-        let requestRunID: UUID
-        let request: ToolApprovalRequest
-        let continuation: CheckedContinuation<Bool, Never>
-    }
 
     init(
         settingsStore: SettingsStore = SettingsStore(),
@@ -574,13 +592,18 @@ final class AppModel {
         agentPresetStore: AgentPresetRegistryStore = AgentPresetRegistryStore(),
         credentialStore: CredentialStore = CredentialStore(),
         sessionStore: SessionStore = SessionStore(),
+        appIntentInboxStore: AppIntentInboxStore = AppIntentInboxStore(),
+        sessionQueryReadModel: SessionQueryReadModel? = nil,
         feedbackSidecarStore: MessageFeedbackSidecarStore = MessageFeedbackSidecarStore(),
         workspaceStore: WorkspaceStore = WorkspaceStore(),
+        memoryStore: MemoryStore = MemoryStore(),
         modelClient: OpenAICompatibleClient = OpenAICompatibleClient(),
         modelCatalogDiscoverer: (any ModelCatalogDiscovering)? = nil,
-        trajectoryRepository: SessionTrajectoryRepository = SessionTrajectoryRepository(),
+        trajectoryRepository: any SessionPersistence = SessionTrajectoryRepository(),
         slashCommandRegistry: SlashCommandRegistry = SlashCommandRegistry(),
         backgroundPreferences: BackgroundPreferencesModel = BackgroundPreferencesModel(),
+        backgroundRunJournal: BackgroundRunJournal = BackgroundRunJournal(),
+        mcpConfigurationStore: MCPConfigurationStore = MCPConfigurationStore(),
         nativeAgentPluginStore: NativeAgentPluginStore = NativeAgentPluginStore(),
         pluginInstallCoordinator: PluginInstallCoordinator = PluginInstallCoordinator()
     ) {
@@ -590,11 +613,15 @@ final class AppModel {
         self.agentPresetStore = agentPresetStore
         self.credentialStore = credentialStore
         self.sessionStore = sessionStore
+        self.appIntentInboxStore = appIntentInboxStore
+        self.sessionQueryReadModel = sessionQueryReadModel ?? SessionQueryReadModel()
         self.feedbackSidecarStore = feedbackSidecarStore
         self.workspaceStore = workspaceStore
+        self.memoryStore = memoryStore
         self.mcpRegistry = MCPClientRegistry(
             workspaceURLProvider: { try await workspaceStore.rootURL() }
         )
+        self.mcpConfigurationStore = mcpConfigurationStore
         self.terminalProvider = ISHTerminalSessionProvider(
             factories: [
                 "ish-shell": ISHTerminalBackendFactoryBuilder.make(
@@ -617,6 +644,7 @@ final class AppModel {
             workspaceStore: workspaceStore
         )
         self.backgroundPreferences = backgroundPreferences
+        self.backgroundRunJournal = backgroundRunJournal
         let traceStore = HarnessTraceStore()
         self.traceStore = traceStore
         agentServices = CordisAgentServices()
@@ -625,13 +653,19 @@ final class AppModel {
         }
         let nativeClientRegistry = ISHNativeClientContributionRegistry()
         ishNativeClientRegistry = nativeClientRegistry
+        let nativeClientSlotRegistry = ISHNativeClientSlotRegistry()
+        ishNativeClientSlotRegistry = nativeClientSlotRegistry
         ishNativeClientCoordinator = ISHNativeClientCordisCoordinator(
             runtime: pluginRuntime,
             registry: nativeClientRegistry,
+            slotRegistry: nativeClientSlotRegistry,
             commandRegistry: slashCommandRegistry
         )
         let loadedProviderDirectory = settingsStore.loadProviderDirectory()
         providerDirectory = loadedProviderDirectory.directory
+        providerRouteGenerations = Dictionary(
+            uniqueKeysWithValues: loadedProviderDirectory.directory.profiles.map { ($0.id, 0) }
+        )
         compactionSummaryRoute = settingsStore.loadCompactionSummaryRoute(
             in: loadedProviderDirectory.directory
         )
@@ -644,8 +678,11 @@ final class AppModel {
         trustedToolApprovals = settingsStore.loadToolApprovalGrants()
         pendingLegacyConfiguration = loadedProviderDirectory.legacyConfiguration
         let userQuestionProvider = ContinuationUserQuestionProvider()
-        self.userQuestionProvider = userQuestionProvider
-        userQuestionService = UserQuestionService(provider: userQuestionProvider)
+        fallbackUserQuestionProvider = userQuestionProvider
+        fallbackUserQuestionService = UserQuestionService(provider: userQuestionProvider)
+        backgroundKeepAliveCoordinator.onStateChange = { [weak self] _ in
+            self?.refreshBackgroundSystemProjection()
+        }
     }
 
 #if DEBUG
@@ -664,6 +701,9 @@ final class AppModel {
         backgroundPreferences.reset()
 
         providerDirectory = .initial()
+        providerRouteGenerations = Dictionary(
+            uniqueKeysWithValues: providerDirectory.profiles.map { ($0.id, 0) }
+        )
         compactionSummaryRoute = nil
         timeContextSettings = TimeContextSettings()
         sessionTitleSettings = SessionTitleSettings()
@@ -678,7 +718,7 @@ final class AppModel {
         credentialStatuses = [:]
         pendingLegacyConfiguration = nil
         messages = []
-        resetActiveToolPresentation()
+        selectedRunPresentation = nil
         sessions = []
         activeSessionID = nil
         resetTrajectoryProjection()
@@ -694,6 +734,7 @@ final class AppModel {
 
     func bootstrap() async {
         guard !isReady else { return }
+        await auditBackgroundRunJournalOnLaunch()
         do {
             agentPresets = try await agentPresetStore.load()
             if !agentPresets.contains(where: {
@@ -726,6 +767,11 @@ final class AppModel {
             await recordStartupIssue(error, source: "core_plugins")
         }
         do {
+            try await installConfiguredMCPPlugins()
+        } catch {
+            await recordStartupIssue(error, source: "mcp_plugins")
+        }
+        do {
             try await loadNativeAgentPlugins()
         } catch {
             nativeAgentPlugins = []
@@ -745,8 +791,12 @@ final class AppModel {
         // are only admitted through `stageImage(_:)` in the active session.
         hasStagedImage = false
         stagedImageReference = nil
+        hasStagedFile = false
+        stagedFileReference = nil
+        stagedShareAdmission = nil
         await refreshPluginInventory()
         isReady = true
+        await refreshAppIntentRunningSessionProjection()
         if let activeSessionID {
             await deliverPendingJobCompletions(for: activeSessionID)
         }
@@ -944,6 +994,7 @@ final class AppModel {
         }
 
         providerDirectory = nextDirectory
+        advanceProviderRouteGeneration(for: validated.id)
         compactionSummaryRoute = nextCompactionSummaryRoute
         sessionTitleSettings = nextSessionTitleSettings
         pendingLegacyConfiguration = nil
@@ -1061,6 +1112,7 @@ final class AppModel {
             throw error
         }
         providerDirectory = nextDirectory
+        advanceProviderRouteGeneration(for: id)
         compactionSummaryRoute = nextCompactionSummaryRoute
         sessionTitleSettings = nextSessionTitleSettings
         credentialStatuses[id] = nil
@@ -1480,7 +1532,7 @@ final class AppModel {
         switch preparation {
         case .notACommand:
             submissionStatus = isRunning ? "正在加入运行队列" : "正在启动 Agent"
-            return send(text, disposition: disposition)
+            return await send(text, disposition: disposition)
         case let .invalidSyntax(error):
             presentCommandOutput(
                 title: "命令格式错误",
@@ -1494,7 +1546,7 @@ final class AppModel {
                 // It remains visible in the conversation while AgentRuntime
                 // adds the matching local instruction block at this turn.
                 submissionStatus = isRunning ? "正在加入运行队列" : "正在启动 Agent"
-                return send(text, disposition: disposition)
+                return await send(text, disposition: disposition)
             }
             let suggestions = await slashCommandRegistry.search(
                 command.name,
@@ -1520,7 +1572,7 @@ final class AppModel {
                 try await appendCommandRun(
                     prepared.invocation,
                     sessionID: commandSessionID,
-                    imageAttachments: stagedImageReference.map { [$0] } ?? []
+                    imageAttachments: allStagedImageReferences
                 )
             } catch {
                 presentCommandOutput(
@@ -1533,7 +1585,7 @@ final class AppModel {
 
             let execution = await slashCommandRegistry.execute(
                 prepared,
-                imageAttachments: stagedImageReference.map { [$0] } ?? []
+                imageAttachments: allStagedImageReferences
             )
             return await finishSlashCommandExecution(
                 execution,
@@ -1621,6 +1673,14 @@ final class AppModel {
                execution.descriptor.imagePolicy == .accepted {
                 stagedImageReference = nil
                 hasStagedImage = false
+                stagedShareAdmission = stagedShareAdmission.map {
+                    WorkspaceShareAdmission(
+                        handoffID: $0.handoffID,
+                        inlineText: $0.inlineText,
+                        imageAttachments: [],
+                        fileAttachments: $0.fileAttachments
+                    )
+                }
             }
             if !text.isEmpty {
                 presentCommandOutput(
@@ -1655,6 +1715,13 @@ final class AppModel {
             return false
         }
         do {
+            let questionService: UserQuestionService
+            if let identity = selectedRunPresentation?.identity,
+               let scoped = try? await sessionRunRegistry.questionService(for: identity) {
+                questionService = scoped
+            } else {
+                questionService = fallbackUserQuestionService
+            }
             let child = try await jobRegistry.subagent(
                 id: input.address,
                 requesterSession: parentSessionID
@@ -1673,7 +1740,8 @@ final class AppModel {
                 do {
                     let result = try await self.executeLocalSubagent(
                         request,
-                        parentSessionID: parentSessionID
+                        parentSessionID: parentSessionID,
+                        userQuestionService: questionService
                     ) { chunk in
                         await emit(chunk.text)
                     }
@@ -1725,28 +1793,35 @@ final class AppModel {
     func send(
         _ text: String,
         disposition: QueuedInputDisposition = .queued
-    ) -> Bool {
+    ) async -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return false }
+        guard !trimmed.isEmpty || hasStagedImage || hasStagedFile else { return false }
         if isRunning {
-            if hasStagedImage {
+            if hasStagedImage || hasStagedFile {
                 presentError(
                     NSError(
                         domain: "HarnessMobile",
                         code: 409,
-                        userInfo: [NSLocalizedDescriptionKey: "当前任务仍在运行，请等待完成后再发送图片。"]
+                        userInfo: [NSLocalizedDescriptionKey: "当前任务仍在运行，请等待完成后再发送附件。"]
                     )
                 )
                 return false
             }
+            guard let identity = selectedRunPresentation?.identity else { return false }
             do {
-                let queued = try controlState.enqueue(trimmed, disposition: disposition)
+                let queued = try await sessionRunRegistry.enqueue(
+                    text: trimmed,
+                    disposition: disposition,
+                    for: identity
+                )
                 publishInboxInserted(
                     queued,
                     source: "user",
-                    boundary: disposition == .steer ? .nextStep : .turnStopping
+                    boundary: disposition == .steer ? .nextStep : .turnStopping,
+                    identity: identity
                 )
-                Task { await persistSession() }
+                await persistSelectedRunInbox(identity: identity)
+                await persistSession()
             } catch {
                 presentError(error)
                 return false
@@ -1756,20 +1831,24 @@ final class AppModel {
 
         let message = AgentMessage.user(
             trimmed,
-            imageAttachments: stagedImageReference.map { [$0] } ?? []
+            imageAttachments: allStagedImageReferences,
+            fileAttachments: allStagedFileReferences
         )
         // The immutable attachment remains on disk for history/retry; only
         // clear the composer slot so a later message cannot reuse it.
         stagedImageReference = nil
         hasStagedImage = false
+        stagedFileReference = nil
+        hasStagedFile = false
+        stagedShareAdmission = nil
         let shouldRename = messages.isEmpty
         messages.append(message)
         let history = messages
         let runWorkState = workState
-        startRun(
+        await startRun(
             history: history,
             workState: runWorkState,
-            automaticTitle: shouldRename ? String(trimmed.prefix(40)) : nil,
+            automaticTitle: shouldRename ? String((trimmed.isEmpty ? "附件" : trimmed).prefix(40)) : nil,
             shouldCheckpointBeforeRun: true,
             initialUserMessage: message
         )
@@ -1786,53 +1865,87 @@ final class AppModel {
 
     private func rerunFromUserMessage(id: UUID, replacementText: String?) {
         guard !isRunning, !isSubmitting else { return }
-        do {
-            let preparation = try ConversationRerunPlanner.prepare(
-                messages: messages,
-                messageID: id,
-                replacementText: replacementText
-            )
-            messages = preparation.messages
-            controlState.removeAllQueuedInputs()
-            hasResumableRun = false
-            startRun(
-                history: preparation.messages,
-                workState: workState,
-                shouldCheckpointBeforeRun: true,
-                initialUserMessage: preparation.initialUserMessage
-            )
-        } catch {
-            presentError(error)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let preparation = try ConversationRerunPlanner.prepare(
+                    messages: self.messages,
+                    messageID: id,
+                    replacementText: replacementText
+                )
+                self.messages = preparation.messages
+                self.controlState.removeAllQueuedInputs()
+                self.hasResumableRun = false
+                await self.startRun(
+                    history: preparation.messages,
+                    workState: self.workState,
+                    shouldCheckpointBeforeRun: true,
+                    initialUserMessage: preparation.initialUserMessage
+                )
+            } catch {
+                self.presentError(error)
+            }
         }
     }
 
     func updateQueuedInput(id: UUID, text: String) {
-        do {
-            try controlState.update(id: id, text: text)
-            Task { await persistSession() }
-        } catch {
-            presentError(error)
+        guard let identity = selectedRunPresentation?.identity else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                _ = try await self.sessionRunRegistry.updateQueuedInput(
+                    id: id,
+                    text: text,
+                    for: identity
+                )
+                await self.persistSelectedRunInbox(identity: identity)
+                await self.persistSession()
+            } catch {
+                self.presentError(error)
+            }
         }
     }
 
     func removeQueuedInput(id: UUID) {
-        guard controlState.remove(id: id) else { return }
-        Task { await persistSession() }
+        guard let identity = selectedRunPresentation?.identity else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard (try? await self.sessionRunRegistry.removeQueuedInput(
+                id: id,
+                for: identity
+            )) == true else { return }
+            await self.persistSelectedRunInbox(identity: identity)
+            await self.persistSession()
+        }
     }
 
     func steerQueuedInput(id: UUID) {
-        do {
-            try controlState.setDisposition(id: id, disposition: .steer)
-            Task { await persistSession() }
-        } catch {
-            presentError(error)
+        guard let identity = selectedRunPresentation?.identity else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                _ = try await self.sessionRunRegistry.steerQueuedInput(
+                    id: id,
+                    for: identity
+                )
+                await self.persistSelectedRunInbox(identity: identity)
+                await self.persistSession()
+            } catch {
+                self.presentError(error)
+            }
         }
     }
 
     func steerAllQueuedInputs() {
-        guard !controlState.queuedInputs.isEmpty else { return }
-        controlState.steerAll()
-        Task { await persistSession() }
+        guard let identity = selectedRunPresentation?.identity else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard (try? await self.sessionRunRegistry.steerAllQueuedInputs(
+                for: identity
+            )) == true else { return }
+            await self.persistSelectedRunInbox(identity: identity)
+            await self.persistSession()
+        }
     }
 
     func setInteractionMode(_ mode: ConversationInteractionMode) {
@@ -1923,7 +2036,10 @@ final class AppModel {
     }
 
     func setSessionModelConfiguration(_ configuration: AgentConfiguration?) async throws {
-        let validated = try configuration?.validated()
+        let resolved = configuration.map {
+            ModelProviderCatalog.applyingKnownModelContract(to: $0)
+        }
+        let validated = try resolved?.validated()
         if let validated {
             guard try await apiKey(for: validated) != nil else {
                 throw CredentialStoreError.emptyCredential
@@ -1934,51 +2050,22 @@ final class AppModel {
     }
 
     func cancelRun() {
-        let cancelledRunID = activeRunID
-        let cancelledQuestion = pendingUserQuestion
-        backgroundAutoResumeTask?.cancel()
-        backgroundAutoResumeTask = nil
-        backgroundAutoResumeGate.reset()
-        finishActiveToolEvents(
-            status: .interrupted,
-            message: "用户取消了本次任务。"
-        )
-        activeRunID = nil
-        runTask?.cancel()
-        runTask = nil
-        questionMonitorTask?.cancel()
-        questionMonitorTask = nil
-        pendingUserQuestion = nil
-        if let cancelledQuestion {
-            Task {
-                await recordQuestionLifecycle(
+        guard let presentation = selectedRunPresentation, isRunning else { return }
+        let identity = presentation.identity
+        let cancelledQuestion = presentation.pendingUserQuestion
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            _ = try? await self.sessionRunRegistry.cancel(identity)
+            if let cancelledQuestion {
+                await self.recordQuestionLifecycle(
                     .questionResolved(
                         requestID: cancelledQuestion.id,
                         outcome: "cancelled"
-                    )
+                    ),
+                    identity: identity
                 )
             }
         }
-        if let cancelledRunID {
-            continuedProcessingController.cancel(runID: cancelledRunID)
-            resolveApproval(for: cancelledRunID, approved: false)
-#if os(iOS)
-            Task {
-                await HarnessLiveActivityManager.shared.finish(
-                    runID: cancelledRunID,
-                    phase: .interrupted,
-                    privacyModeEnabled: backgroundPreferences.isPrivacyModeEnabled
-                )
-            }
-#endif
-        }
-        isRunning = false
-        runStartedAt = nil
-        resetStreamingPresentation()
-        activeToolStatus = nil
-        hasResumableRun = Self.canResume(messages)
-        continuedProcessingSubmission = nil
-        backgroundRuntimeStatus = .idle
     }
 
     /// User cancellation is a normal terminal state, not an error to surface
@@ -2006,45 +2093,54 @@ final class AppModel {
     }
 
     func answerPendingUserQuestion(_ answer: AskUserQuestionAnswer) {
-        guard let pendingUserQuestion else { return }
-        self.pendingUserQuestion = nil
-        Task {
+        guard let identity = selectedRunPresentation?.identity,
+              let pendingUserQuestion else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
             do {
-                await recordQuestionLifecycle(
+                _ = try await self.sessionRunRegistry.setPendingQuestion(nil, for: identity)
+                await self.recordQuestionLifecycle(
                     .questionResolved(
                         requestID: pendingUserQuestion.id,
                         outcome: "answered",
                         answer: answer
-                    )
+                    ),
+                    identity: identity
                 )
-                try await userQuestionProvider.submit(
+                let provider = try await self.sessionRunRegistry.questionProvider(for: identity)
+                try await provider.submit(
                     answer,
                     requestID: pendingUserQuestion.id
                 )
             } catch {
-                presentError(error)
+                self.presentError(error)
             }
         }
     }
 
     func cancelPendingUserQuestion() {
-        guard let pendingUserQuestion else { return }
-        self.pendingUserQuestion = nil
-        Task {
-            await recordQuestionLifecycle(
+        guard let identity = selectedRunPresentation?.identity,
+              let pendingUserQuestion else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            _ = try? await self.sessionRunRegistry.setPendingQuestion(nil, for: identity)
+            await self.recordQuestionLifecycle(
                 .questionResolved(
                     requestID: pendingUserQuestion.id,
                     outcome: "cancelled"
-                )
+                ),
+                identity: identity
             )
-            try? await userQuestionProvider.cancel(requestID: pendingUserQuestion.id)
+            guard let provider = try? await self.sessionRunRegistry.questionProvider(for: identity) else {
+                return
+            }
+            try? await provider.cancel(requestID: pendingUserQuestion.id)
         }
     }
 
     func resolveApproval(_ resolution: ToolApprovalResolution) {
-        guard let waiter = approvalWaiter else { return }
-        approvalWaiter = nil
-        pendingApproval = nil
+        guard let identity = selectedRunPresentation?.identity,
+              let request = pendingApproval else { return }
 
         let approved: Bool
         switch resolution {
@@ -2054,7 +2150,7 @@ final class AppModel {
             approved = true
         case .trustScope:
             do {
-                try rememberToolApproval(waiter.request)
+                try rememberToolApproval(request)
                 approved = true
             } catch {
                 presentError(error)
@@ -2062,14 +2158,20 @@ final class AppModel {
             }
         case .trustDevice:
             do {
-                try rememberDeviceToolApproval(for: waiter.request)
+                try rememberDeviceToolApproval(for: request)
                 approved = true
             } catch {
                 presentError(error)
                 approved = false
             }
         }
-        waiter.continuation.resume(returning: approved)
+        Task { [sessionRunRegistry] in
+            _ = try? await sessionRunRegistry.resolveApproval(
+                requestID: request.id,
+                approved: approved,
+                for: identity
+            )
+        }
     }
 
     func resolveApproval(approved: Bool) {
@@ -2187,14 +2289,15 @@ final class AppModel {
 
     func resetConversation(preserveTrajectory: Bool = false) async {
         cancelRun()
-        resetActiveToolPresentation()
+        selectedRunPresentation = nil
         hasStagedImage = false
         stagedImageReference = nil
+        hasStagedFile = false
+        stagedFileReference = nil
+        stagedShareAdmission = nil
         messages = []
         controlState.unlockAgentPresetForBlankConversation()
         controlState.removeAllQueuedInputs()
-        currentStep = 0
-        latestUsage = nil
         omittedContextMessages = 0
         hasResumableRun = false
         if !preserveTrajectory, let activeSessionID {
@@ -2211,15 +2314,18 @@ final class AppModel {
     }
 
     func createConversation(title: String = "新会话") async {
-        cancelRun()
         hasStagedImage = false
         stagedImageReference = nil
+        hasStagedFile = false
+        stagedFileReference = nil
+        stagedShareAdmission = nil
         do {
             let session = try await sessionStore.createSession(
                 title: title,
                 controlState: defaultConversationControlState()
             )
             apply(session: session)
+            await restoreRunPresentation(for: session.id)
             await projectFeedbackSidecar()
             await workStateCoordinator.replace(with: session.workState)
             await refreshSessionSummaries()
@@ -2233,14 +2339,62 @@ final class AppModel {
         }
     }
 
+    /// Admits persisted system-entry requests only after the normal app
+    /// bootstrap/configuration path is ready. The actual work intentionally
+    /// delegates to the same session and run methods used by the chat UI.
+    @discardableResult
+    func consumeAppIntentInbox() async -> Bool {
+        guard isReady, isConfigured else { return false }
+        var shouldOpenChat = false
+        do {
+            while let request = try await appIntentInboxStore.consumeNext() {
+                switch request.action {
+                case .openSession:
+                    guard let sessionID = request.sessionID else { continue }
+                    await switchConversation(to: sessionID)
+                    shouldOpenChat = activeSessionID == sessionID
+
+                case .retryLatestUserMessage:
+                    guard let sessionID = request.sessionID else { continue }
+                    await switchConversation(to: sessionID)
+                    guard activeSessionID == sessionID,
+                          let message = messages.last(where: { $0.role == .user }) else {
+                        continue
+                    }
+                    retryFromUserMessage(id: message.id)
+                    shouldOpenChat = true
+
+                case .sendPrompt:
+                    guard let prompt = request.prompt else { continue }
+                    if let sessionID = request.sessionID {
+                        await switchConversation(to: sessionID)
+                        guard activeSessionID == sessionID else { continue }
+                    } else {
+                        let previousSessionID = activeSessionID
+                        await createConversation(title: String(prompt.prefix(40)))
+                        guard activeSessionID != previousSessionID else { continue }
+                    }
+                    _ = await send(prompt)
+                    shouldOpenChat = true
+                }
+            }
+        } catch {
+            presentError(error)
+        }
+        return shouldOpenChat
+    }
+
     func switchConversation(to id: UUID) async {
         guard id != activeSessionID else { return }
-        cancelRun()
         hasStagedImage = false
         stagedImageReference = nil
+        hasStagedFile = false
+        stagedFileReference = nil
+        stagedShareAdmission = nil
         do {
             let session = try await sessionStore.switchActiveSession(to: id)
             apply(session: session)
+            await restoreRunPresentation(for: session.id)
             await projectFeedbackSidecar()
             await workStateCoordinator.replace(with: session.workState)
             await refreshSessionSummaries()
@@ -2255,7 +2409,10 @@ final class AppModel {
     }
 
     func deleteConversation(id: UUID) async {
-        cancelRun()
+        if let identity = await sessionRunRegistry.lookup(sessionID: id)?.identity {
+            _ = try? await sessionRunRegistry.cancel(identity)
+            _ = try? await sessionRunRegistry.awaitQuiescence(for: identity)
+        }
         do {
             _ = try await sessionStore.deleteSession(id: id)
             let trajectoryDeletionError: Error?
@@ -2326,6 +2483,22 @@ final class AppModel {
 
     func searchConversations(query: String) async -> [ConversationSessionSearchResult] {
         do {
+            _ = try await sessionQueryReadModel.rebuild(persistence: trajectoryRepository)
+            let indexedHits = try await sessionQueryReadModel.searchSessions(query: query)
+            let summaries = Dictionary(
+                uniqueKeysWithValues: try await sessionStore.listSessions().map { ($0.id, $0) }
+            )
+            let projected = indexedHits.compactMap { hit -> ConversationSessionSearchResult? in
+                guard let summary = summaries[hit.session.id] else { return nil }
+                let titleMatched = summary.title.localizedCaseInsensitiveContains(query)
+                return ConversationSessionSearchResult(
+                    session: summary,
+                    matchSnippet: hit.snippet.isEmpty ? nil : hit.snippet,
+                    matchedMessageID: nil,
+                    titleMatched: titleMatched
+                )
+            }
+            if !projected.isEmpty { return projected }
             return try await sessionStore.searchSessions(query: query)
         } catch {
             presentError(error)
@@ -2395,12 +2568,43 @@ final class AppModel {
     }
 
     func resumePendingRun() {
-        guard hasResumableRun, !messages.isEmpty, !isRunning else { return }
-        startRun(history: messages, workState: workState)
+        Task { @MainActor [weak self] in
+            await self?.resumePendingRunNow()
+        }
     }
 
-    func updateApplicationActivity(isActive: Bool) {
-        backgroundAutoResumeGate.updateApplicationActivity(isActive: isActive)
+    private func resumePendingRunNow() async {
+        guard hasResumableRun, !messages.isEmpty, !isRunning else { return }
+        await startRun(history: messages, workState: workState)
+    }
+
+    func updateApplicationActivity(isActive: Bool, isBackgrounded: Bool = false) {
+        appIsActive = isActive
+        appIsBackgrounded = isBackgrounded
+        Task { [weak self, sessionRunRegistry] in
+            let aggregate = await sessionRunRegistry.aggregate()
+            await self?.refreshSessionRunProjection()
+            for run in aggregate.runs {
+                _ = await sessionRunRegistry.setPresentationUpdatesEnabled(
+                    isActive,
+                    for: run.identity
+                )
+            }
+            if isActive {
+                await self?.refreshTrajectory()
+            }
+        }
+        if isActive {
+            Task { [weak self] in
+                await self?.auditBackgroundRunJournalOnForeground()
+            }
+        }
+        Task { [backgroundResumeCoordinator] in
+            await backgroundResumeCoordinator.updateApplicationActivity(isActive: isActive)
+        }
+        refreshBackgroundAudioKeepAlive()
+        refreshBackgroundLocationKeepAlive()
+        refreshBackgroundSystemProjection()
 #if os(iOS) && canImport(BackgroundTasks)
         if isActive {
             Task { [weak self] in
@@ -2409,14 +2613,151 @@ final class AppModel {
         }
 #endif
         guard isActive else { return }
-        scheduleSystemExpirationResume()
         Task { [weak self] in
             guard let self else { return }
+            await self.backgroundResumeCoordinator.updateApplicationActivity(isActive: true)
+            if let activeSessionID = self.activeSessionID {
+                await self.scheduleSystemExpirationResume(for: activeSessionID)
+            }
             await self.refreshWorkspace(forceMountRefresh: true)
             if let activeSessionID = self.activeSessionID {
                 await self.deliverPendingJobCompletions(for: activeSessionID)
             }
         }
+    }
+
+    /// Reconcile the audio survival leg against the durable run registry. The
+    /// audio engine never infers liveness from the selected UI session, so
+    /// switching sessions cannot accidentally stop another live root run.
+    func refreshBackgroundAudioKeepAlive() {
+        refreshBackgroundKeepAliveCoordinator()
+    }
+
+    /// Location survival has its own explicit opt-in and never infers authority
+    /// from the foreground one-shot location tool.
+    func refreshBackgroundLocationKeepAlive() {
+        refreshBackgroundKeepAliveCoordinator()
+    }
+
+    private func refreshBackgroundKeepAliveCoordinator() {
+        let isBackgrounded = appIsBackgrounded
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let liveRootCount = await sessionRunRegistry.aggregate().liveRootCount
+            let processInfo = ProcessInfo.processInfo
+            backgroundKeepAliveCoordinator.update(
+                BackgroundKeepAliveInputs(
+                isBackgrounded: isBackgrounded,
+                hasLiveRoot: liveRootCount > 0,
+                enhancedAudioRequested: backgroundPreferences.isEnhancedBackgroundEnabled,
+                locationRequested: backgroundPreferences.isBackgroundLocationKeepAliveEnabled,
+                hasFiniteBackgroundLease: legacyBackgroundTaskLease.activeTokenCount > 0,
+                hasContinuedProcessing: continuedProcessingController.hasActiveRun,
+                isLowPowerMode: processInfo.isLowPowerModeEnabled,
+                isThermallyConstrained: processInfo.thermalState == .serious
+                    || processInfo.thermalState == .critical
+                )
+            )
+            self.refreshBackgroundSystemProjection()
+        }
+    }
+
+    /// Rebuilds the single system-status projection. The projection only
+    /// contains counts, capability flags and redacted status labels.
+    func refreshBackgroundSystemProjection() {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let aggregate = await sessionRunRegistry.aggregate()
+            let notification = await completionNotifier.authorizationStatus()
+            let location = backgroundKeepAliveCoordinator.locationSnapshot.authorization
+            let liveActivitySupported: Bool = {
+#if os(iOS) && canImport(ActivityKit)
+                HarnessLiveActivityManager.isSystemSupported
+#else
+                false
+#endif
+            }()
+            let nextProjection = BackgroundSystemProjection.make(
+                activeRunCount: aggregate.liveRootCount,
+                keepAliveState: backgroundKeepAliveCoordinator.state,
+                isBackgrounded: appIsBackgrounded,
+                liveActivitySupported: liveActivitySupported,
+                liveActivityEnabled: backgroundPreferences.isLiveActivityEnabled,
+                notificationAuthorization: Self.backgroundNotificationLabel(notification),
+                locationAuthorization: Self.backgroundLocationLabel(location),
+                privacyModeEnabled: backgroundPreferences.isPrivacyModeEnabled
+            )
+            guard nextProjection != backgroundSystemProjection else { return }
+            backgroundSystemProjection = nextProjection
+            await traceStore.record(
+                HarnessTraceDraft(
+                    kind: .backgroundTask,
+                    name: "background_projection_changed",
+                    attributes: [
+                        "active_run_count": .number(Double(nextProjection.activeRunCount)),
+                        "survival_tier": .string(nextProjection.survivalTier.rawValue),
+                        "is_backgrounded": .bool(nextProjection.isBackgrounded),
+                        "degraded_reasons": .array(
+                            nextProjection.degradedReasons.map { .string(Self.backgroundDegradedLabel($0)) }
+                        ),
+                        "degraded_details": .array(
+                            nextProjection.degradedDetails.map { .string($0) }
+                        )
+                    ]
+                )
+            )
+        }
+    }
+
+    private static func backgroundNotificationLabel(
+        _ authorization: BackgroundNotificationAuthorization
+    ) -> String {
+        switch authorization {
+        case .notDetermined: "尚未请求"
+        case .denied: "已拒绝"
+        case .authorized: "已允许"
+        case .unavailable: "不可用"
+        }
+    }
+
+    private static func backgroundLocationLabel(
+        _ authorization: BackgroundLocationAuthorization
+    ) -> String {
+        switch authorization {
+        case .notDetermined: "尚未请求"
+        case .whenInUse: "仅使用期间"
+        case .always: "始终允许"
+        case .denied: "已拒绝"
+        case .restricted: "受系统限制"
+        case .unavailable: "不可用"
+        }
+    }
+
+    private static func backgroundDegradedLabel(
+        _ reason: BackgroundKeepAliveDegradedReason
+    ) -> String {
+        switch reason {
+        case .lowPowerMode: "low_power_mode"
+        case .thermalPressure: "thermal_pressure"
+        case .audioUnavailable: "audio_unavailable"
+        case .locationUnavailable: "location_unavailable"
+        }
+    }
+
+    func requestBackgroundLocationAuthorization() {
+        backgroundKeepAliveCoordinator.requestLocationAuthorizationIfEnabled()
+    }
+
+    var backgroundLocationKeepAliveSnapshot: BackgroundLocationKeepAliveSnapshot {
+        backgroundKeepAliveCoordinator.locationSnapshot
+    }
+
+    func suspendBackgroundAudioForMedia() {
+        backgroundKeepAliveCoordinator.suspendAudioForMedia()
+    }
+
+    func resumeBackgroundAudioForMedia() {
+        backgroundKeepAliveCoordinator.resumeAudioForMedia()
     }
 
     func importDocument(_ url: URL) async {
@@ -2472,11 +2813,72 @@ final class AppModel {
     }
 
     func stageImage(_ data: Data) async {
+        guard !isRunning else {
+            presentError(
+                NSError(
+                    domain: "HarnessMobile",
+                    code: 409,
+                    userInfo: [NSLocalizedDescriptionKey: "当前任务仍在运行，请等待完成后再添加附件。"]
+                )
+            )
+            return
+        }
         do {
             stagedImageReference = try await workspaceStore.stageImage(data)
             hasStagedImage = true
         } catch {
             presentError(error)
+        }
+    }
+
+    func stageFileAttachment(from url: URL) async {
+        guard !isRunning else {
+            presentError(
+                NSError(
+                    domain: "HarnessMobile",
+                    code: 409,
+                    userInfo: [NSLocalizedDescriptionKey: "当前任务仍在运行，请等待完成后再添加附件。"]
+                )
+            )
+            return
+        }
+        do {
+            stagedFileReference = try await workspaceStore.stageFileAttachment(from: url)
+            hasStagedFile = true
+        } catch {
+            presentError(error)
+        }
+    }
+
+    func installShareAdmission(_ admission: WorkspaceShareAdmission) {
+        if let existing = stagedShareAdmission {
+            var seenImageIDs: Set<UUID> = []
+            let images = (existing.imageAttachments + admission.imageAttachments).filter {
+                seenImageIDs.insert($0.id).inserted
+            }
+            var seenFileIDs: Set<UUID> = []
+            let files = (existing.fileAttachments + admission.fileAttachments).filter {
+                seenFileIDs.insert($0.id).inserted
+            }
+            stagedShareAdmission = WorkspaceShareAdmission(
+                handoffID: admission.handoffID,
+                inlineText: nil,
+                imageAttachments: images,
+                fileAttachments: files
+            )
+        } else {
+            stagedShareAdmission = admission
+        }
+        hasStagedImage = !allStagedImageReferences.isEmpty
+        hasStagedFile = !allStagedFileReferences.isEmpty
+        if let inlineText = admission.inlineText, !inlineText.isEmpty {
+            let existing = pendingDraft?.trimmingCharacters(in: .whitespacesAndNewlines)
+            pendingDraft = [existing, inlineText]
+                .compactMap { value in
+                    guard let value, !value.isEmpty else { return nil }
+                    return value
+                }
+                .joined(separator: "\n\n")
         }
     }
 
@@ -2958,7 +3360,8 @@ final class AppModel {
 
     private func synchronizeISHMobileContext(
         client: ISHPluginHostClient,
-        sessionID: String
+        sessionID: String,
+        runID: UUID? = nil
     ) async throws {
         guard let nativeSessionID = UUID(uuidString: sessionID) else {
             throw ISHPluginHostError.invalidState("The active session ID is not a UUID.")
@@ -2984,7 +3387,8 @@ final class AppModel {
             await traceStore.record(
                 HarnessTraceDraft(
                     kind: .error,
-                    runID: activeRunID,
+                    sessionID: nativeSessionID,
+                    runID: runID ?? activeRunID,
                     pluginID: "ish.plugin-host",
                     name: ISHPluginHostRPCMethod.contextSync.rawValue,
                     error: HarnessTraceRedactor.string(
@@ -3129,8 +3533,8 @@ final class AppModel {
                 }
             )
         )
-        if let activeRunID {
-            scheduleHarnessTraceRefresh(for: activeRunID)
+        if let identity = selectedRunPresentation?.identity {
+            await scheduleHarnessTraceRefresh(for: identity)
         }
     }
 
@@ -3813,6 +4217,11 @@ final class AppModel {
                 WorkspaceFileSystemCordisPlugin.definition(store: workspaceStore)
             )
         }
+        if !installed.contains(DefaultMemoryCordisPlugin.pluginID) {
+            _ = try await pluginRuntime.install(
+                DefaultMemoryCordisPlugin.definition(store: memoryStore)
+            )
+        }
         if !installed.contains("core.fs-observation-policy") {
             _ = try await pluginRuntime.install(
                 HarnessFsObservationPolicy().pluginDefinition()
@@ -3825,6 +4234,49 @@ final class AppModel {
         }
         if !installed.contains("core.mobile-runtime-guidance") {
             _ = try await pluginRuntime.install(runtimeGuidancePluginDefinition())
+        }
+        if !installed.contains(RepeatToolReminder.pluginID) {
+            _ = try await pluginRuntime.install(
+                RepeatToolReminder.pluginDefinition()
+            )
+        }
+        if !installed.contains(TimeoutPolicy.pluginID) {
+            _ = try await pluginRuntime.install(
+                TimeoutPolicy.pluginDefinition()
+            )
+        }
+    }
+
+    /// Settings/admin code owns the server list; agent turns only see tools
+    /// already discovered from those configurations.
+    func replaceMCPConfigurations(_ configurations: [MCPConfiguredServer]) async {
+        do {
+            try await mcpConfigurationStore.replace(configurations)
+            try await installConfiguredMCPPlugins()
+            await refreshPluginInventory()
+        } catch {
+            presentError(error)
+        }
+    }
+
+    private func installConfiguredMCPPlugins() async throws {
+        let configuredServers = (try await mcpConfigurationStore.load())
+            .filter(\.isEnabled)
+        let definitions = configuredServers.map {
+            MCPServerCordisPlugin.definition(configuration: $0, registry: mcpRegistry)
+        }
+        let desiredIDs = Set(definitions.map(\.id))
+        let installed = await pluginRuntime.snapshots()
+        for snapshot in installed where snapshot.id.rawValue.hasPrefix("mcp.") && !desiredIDs.contains(snapshot.id) {
+            _ = try await pluginRuntime.uninstall(snapshot.id)
+        }
+        let remaining = Set(await pluginRuntime.snapshots().map(\.id))
+        for definition in definitions {
+            if remaining.contains(definition.id) {
+                _ = try await pluginRuntime.replace(definition.id, with: definition)
+            } else {
+                _ = try await pluginRuntime.install(definition)
+            }
         }
     }
 
@@ -3864,7 +4316,10 @@ final class AppModel {
         }
     }
 
-    private func activateMobileToolsPlugin(sessionID: String) async throws {
+    private func activateMobileToolsPlugin(
+        sessionID: String,
+        userQuestionService: UserQuestionService
+    ) async throws {
         let subagentRunner: LocalSubagentRunner = { [weak self] request, emit in
             guard let self else {
                 throw LocalToolError.pluginDenied("手机子 Agent 宿主已退出。")
@@ -3872,6 +4327,7 @@ final class AppModel {
             return try await self.executeLocalSubagent(
                 request,
                 parentSessionID: sessionID,
+                userQuestionService: userQuestionService,
                 onOutput: emit
             )
         }
@@ -3913,8 +4369,7 @@ final class AppModel {
                     // leaves a legal prefix and must not abort local children.
                 }
             },
-            trajectoryRepository: trajectoryRepository,
-            mcpRegistry: mcpRegistry
+            trajectoryRepository: trajectoryRepository
         )
         let installed = await pluginRuntime.snapshots().contains { $0.id == definition.id }
         if installed {
@@ -3948,9 +4403,21 @@ final class AppModel {
             ? "后台子 Agent \(childAddress) 报告：\n\(trimmed)"
             : "后台子 Agent \(childAddress) 已结束：\n\(trimmed)"
 
-        if activeSessionID == parentID, isRunning {
-            let queued = try controlState.enqueue(framed, disposition: .queued)
-            publishInboxInserted(queued, source: sourceKind, boundary: .turnStopping)
+        if activeSessionID == parentID,
+           let identity = selectedRunPresentation?.identity,
+           isRunning {
+            let queued = try await sessionRunRegistry.enqueue(
+                text: framed,
+                disposition: .queued,
+                for: identity
+            )
+            publishInboxInserted(
+                queued,
+                source: sourceKind,
+                boundary: .turnStopping,
+                identity: identity
+            )
+            await persistSelectedRunInbox(identity: identity)
             await persistSession()
             return messageID.uuidString.lowercased()
         }
@@ -3986,7 +4453,7 @@ final class AppModel {
         guard delivery == .wakeup, !isRunning else {
             return messageID.uuidString.lowercased()
         }
-        startRun(
+        await startRun(
             history: parent.messages,
             workState: parent.workState,
             shouldCheckpointBeforeRun: true,
@@ -4030,9 +4497,21 @@ final class AppModel {
                 "messageId": .string(messageID.uuidString.lowercased())
             ])
         )
-        if activeSessionID == parentID, isRunning {
-            let queued = try controlState.enqueue(content, disposition: .queued)
-            publishInboxInserted(queued, source: "job-completion", boundary: .turnStopping)
+        if activeSessionID == parentID,
+           let identity = selectedRunPresentation?.identity,
+           isRunning {
+            let queued = try await sessionRunRegistry.enqueue(
+                text: content,
+                disposition: .queued,
+                for: identity
+            )
+            publishInboxInserted(
+                queued,
+                source: "job-completion",
+                boundary: .turnStopping,
+                identity: identity
+            )
+            await persistSelectedRunInbox(identity: identity)
             await persistSession()
             return
         }
@@ -4051,7 +4530,7 @@ final class AppModel {
         workState = parent.workState
         controlState = parent.controlState
         guard delivery == .wakeup, !isRunning else { return }
-        startRun(
+        await startRun(
             history: parent.messages,
             workState: parent.workState,
             shouldCheckpointBeforeRun: true,
@@ -4065,6 +4544,7 @@ final class AppModel {
     private func executeLocalSubagent(
         _ request: LocalSubagentRequest,
         parentSessionID: String,
+        userQuestionService: UserQuestionService,
         onOutput: @escaping LocalSubagentOutputEmitter
     ) async throws -> String {
         guard let childID = UUID(uuidString: request.childAddress) else {
@@ -4201,6 +4681,7 @@ final class AppModel {
             return try await self.executeLocalSubagent(
                 nestedRequest,
                 parentSessionID: childSessionID,
+                userQuestionService: userQuestionService,
                 onOutput: nestedEmit
             )
         }
@@ -4234,8 +4715,7 @@ final class AppModel {
             subagentRunner: childSubagentRunner,
             subagentPolicy: childComposition,
             terminalProvider: terminalProvider,
-            trajectoryRepository: trajectoryRepository,
-            mcpRegistry: mcpRegistry
+            trajectoryRepository: trajectoryRepository
         )
 
         let childReportTool = SubagentToolSuite.makeReportTool(
@@ -4382,6 +4862,10 @@ final class AppModel {
                     )
                 }
             },
+            providerRequestRouteProvider: { [weak self] configuration in
+                guard let self else { throw ProviderProfileError.missingProfile("runtime") }
+                return try await self.providerRequestRoute(for: configuration)
+            },
             toolResultOutputPolicy: ToolResultOutputPolicy(
                 fileSystem: WorkspaceFileSystemProvider(store: workspaceStore)
             ),
@@ -4393,6 +4877,9 @@ final class AppModel {
             },
             sessionEventHandler: { [trajectoryRepository] draft in
                 try await trajectoryRepository.append(draft, sessionID: childID)
+            },
+            sessionEventSnapshotProvider: { [trajectoryRepository, childID] in
+                try await trajectoryRepository.allEvents(sessionID: childID)
             },
             checkpointHandler: { [trajectoryRepository] in
                 try await trajectoryRepository.flush(sessionID: childID)
@@ -4679,20 +5166,38 @@ final class AppModel {
         case succeeded
         case failed
         case cancelled
+        case interrupted
+
+        var terminalOutcome: MobileAgentTerminalOutcome {
+            switch self {
+            case .succeeded: .succeeded
+            case .failed: .failed
+            case .cancelled: .cancelled
+            case .interrupted: .interrupted
+            }
+        }
+    }
+
+    private enum ContinuedRunExecutionError: Error {
+        case failed
     }
 
     private func performRun(
-        runID: UUID,
+        registration: SessionRunRegistration,
         history: [AgentMessage],
         workState: ConversationWorkState,
         configuration: AgentConfiguration,
+        executionSnapshot: RunExecutionSnapshot,
         continuedContext: ContinuedProcessingContext,
         initialUserMessage: AgentMessage?
     ) async -> RunOutcome {
+        let identity = registration.identity
+        let runID = identity.runID
+        let state = registration.state
         let outcome: RunOutcome
-        let sessionID = activeSessionID ?? runID
+        let sessionID = identity.sessionID
         do {
-            await planModeState.setActive(controlState.interactionMode == .plan)
+            await planModeState.setActive(executionSnapshot.interactionMode == .plan)
             guard let apiKey = try await self.apiKey(for: configuration) else {
                 throw CredentialStoreError.emptyCredential
             }
@@ -4705,7 +5210,7 @@ final class AppModel {
                 sessionID: sessionID,
                 replacing: trajectorySessionID != sessionID
             )
-            await prepareHarnessTrace(runID: runID, sessionID: sessionID)
+            await prepareHarnessTrace(for: identity)
 
             // The append-only trajectory is the durable source of truth at a
             // crash boundary. SessionStore may lag the last committed tool
@@ -4727,24 +5232,25 @@ final class AppModel {
             let projection = try ConversationCompactor.project(
                 messages: durableHistory,
                 workState: workState,
-                maximumUTF8Bytes: controlState.contextLimitUTF8Bytes ?? 384 * 1_024
+                maximumUTF8Bytes: executionSnapshot.contextLimitUTF8Bytes
             )
             omittedContextMessages = projection.omittedMessageCount
             let stateSummary = projection.stateSummary
-            activePromptStateSummary = stateSummary
-            if activeAgentPreset?.id == "cordis" {
+            _ = await state.setPromptStateSummary(stateSummary, for: identity)
+            if executionSnapshot.agentPreset?.id == "cordis" {
                 // The creative preset needs the official Cordis lifecycle
                 // tools mounted before the first model request. The Host is
                 // still lazy and remains entirely inside this iSH guest.
                 try await prepareCreativeMode()
             }
             try await activateMobileToolsPlugin(
-                sessionID: activeSessionID?.uuidString ?? runID.uuidString
+                sessionID: sessionID.uuidString,
+                userQuestionService: state.userQuestionService
             )
             let initialSystemPrompt = await Self.systemPrompt(
                 stateSummary: stateSummary,
-                interactionMode: controlState.interactionMode,
-                permissionMode: controlState.permissionMode
+                interactionMode: executionSnapshot.interactionMode,
+                permissionMode: executionSnapshot.permissionMode
             )
             let traceStore = self.traceStore
             let trajectoryRepository = self.trajectoryRepository
@@ -4757,33 +5263,43 @@ final class AppModel {
                 systemPrompt: initialSystemPrompt,
                 approvalHandler: { [weak self] request in
                     guard let self else { return false }
-                    return await self.requestApproval(request, runID: runID)
+                    return await self.requestApproval(
+                        request,
+                        identity: identity
+                    )
                 },
                 eventHandler: { [weak self] event in
                     await self?.handle(
                         event,
-                        runID: runID,
+                        identity: identity,
+                        state: state,
                         continuedContext: continuedContext
                     )
                 },
-                queuedInputProvider: { [weak self] boundary in
-                    guard let self else { return nil }
-                    return await self.nextQueuedInput(
+                queuedInputProvider: { boundary in
+                    await state.nextQueuedInput(
                         at: boundary,
-                        runID: runID
+                        for: identity
                     )
                 },
                 queuedInputCommitter: { [weak self] messageID in
-                    guard let self else { return false }
-                    return await self.claimQueuedInput(
+                    let claimed = await state.claimQueuedInput(
                         id: messageID,
-                        runID: runID
+                        for: identity
                     )
+                    if claimed {
+                        await self?.persistRunInbox(state: state, identity: identity)
+                    }
+                    return claimed
                 },
                 workspaceBoundary: workspaceURL.standardizedFileURL.path,
                 systemPromptProvider: { [weak self] in
                     guard let self else { return initialSystemPrompt }
-                    return await self.currentSystemPrompt(stateSummary: stateSummary)
+                    return await self.runSystemPrompt(
+                        stateSummary: stateSummary,
+                        interactionMode: executionSnapshot.interactionMode,
+                        permissionMode: executionSnapshot.permissionMode
+                    )
                 },
                 apiKeyProvider: { [weak self] configuration in
                     guard let self else { throw CredentialStoreError.emptyCredential }
@@ -4791,6 +5307,10 @@ final class AppModel {
                         throw CredentialStoreError.emptyCredential
                     }
                     return key
+                },
+                providerRequestRouteProvider: { [weak self] configuration in
+                    guard let self else { throw ProviderProfileError.missingProfile("runtime") }
+                    return try await self.providerRequestRoute(for: configuration)
                 },
                 compactionConfigurationProvider: { [weak self] _ in
                     guard let self else { return nil }
@@ -4808,7 +5328,10 @@ final class AppModel {
                 },
                 userMessageInjectionProvider: { [weak self] message in
                     guard let self else { return [] }
-                    return await self.skillInstructionInjections(for: message)
+                    return await self.skillInstructionInjections(
+                        for: message,
+                        sessionID: sessionID
+                    )
                 },
                 preStepInstructionProvider: { [weak self] visibleMessages in
                     guard let self else { return [] }
@@ -4856,8 +5379,8 @@ final class AppModel {
                 toolResultOutputPolicy: ToolResultOutputPolicy(
                     fileSystem: WorkspaceFileSystemProvider(store: workspaceStore)
                 ),
-                permissionMode: controlState.permissionMode,
-                agentPreset: activeAgentPreset?.runtimeProjection,
+                permissionMode: executionSnapshot.permissionMode,
+                agentPreset: executionSnapshot.agentPreset,
                 traceHandler: { [weak self, traceStore] draft in
                     // A run ID is not a sufficient ownership key when parent
                     // and child Agents execute concurrently. Stamp the
@@ -4867,19 +5390,22 @@ final class AppModel {
                     var ownedDraft = draft
                     ownedDraft.sessionID = ownedDraft.sessionID ?? sessionID
                     await traceStore.record(ownedDraft)
-                    await self?.scheduleHarnessTraceRefresh(for: runID)
+                    await self?.scheduleHarnessTraceRefresh(for: identity)
                 },
-                sessionEventHandler: { [weak self, trajectoryRepository] draft in
-                    let event = try await trajectoryRepository.append(
-                        draft,
-                        sessionID: sessionID
-                    )
-                    await self?.scheduleTrajectoryRefresh(for: sessionID)
-                    return event
-                },
-                checkpointHandler: { [trajectoryRepository] in
-                    try await trajectoryRepository.flush(sessionID: sessionID)
-                }
+            sessionEventHandler: { [weak self, trajectoryRepository] draft in
+                let event = try await trajectoryRepository.append(
+                    draft,
+                    sessionID: sessionID
+                )
+                await self?.scheduleTrajectoryRefresh(for: sessionID)
+                return event
+            },
+            sessionEventSnapshotProvider: { [trajectoryRepository, sessionID] in
+                try await trajectoryRepository.allEvents(sessionID: sessionID)
+            },
+            checkpointHandler: { [trajectoryRepository] in
+                try await trajectoryRepository.flush(sessionID: sessionID)
+            }
             )
             try await runtime.run(
                 history: projection.messages,
@@ -4887,97 +5413,50 @@ final class AppModel {
                 apiKey: apiKey,
                 initialUserMessage: initialUserMessage,
                 requestHeaderReason: trajectoryPreparation.requestHeaderReason,
-                contextWindow: contextWindowTokens,
+                contextWindow: executionSnapshot.contextWindowTokens,
                 startingTurn: trajectoryPreparation.nextTurn
             )
             outcome = .succeeded
         } catch is CancellationError {
             // Cancellation is a normal user action.
-            outcome = .cancelled
+            outcome = await state.terminalOutcomeProposal(for: identity) == .interrupted
+                ? .interrupted
+                : .cancelled
         } catch {
-            if activeRunID == runID {
+            if selectedRunPresentation?.identity == identity {
                 presentError(error)
             }
             outcome = .failed
         }
-        try? await trajectoryRepository.flush(sessionID: sessionID)
-        await refreshTrajectory(for: sessionID)
-        if let client = ishPluginHostClient {
-            try? await synchronizeISHMobileContext(
-                client: client,
-                sessionID: sessionID.uuidString
-            )
-        }
-        await refreshHarnessTrace(for: runID)
-        activePromptStateSummary = nil
-
-        guard activeRunID == runID else { return outcome }
-        activeRunID = nil
-        isRunning = false
-        runStartedAt = nil
-        runTask = nil
-        questionMonitorTask?.cancel()
-        questionMonitorTask = nil
-        pendingUserQuestion = nil
-        activeToolStatus = nil
-        resetStreamingPresentation()
-        if case .failed = outcome {
-            finishActiveToolEvents(
-                status: .failed,
-                message: errorMessage ?? "任务在工具事务完成前失败。"
-            )
-        }
-        hasResumableRun = Self.canResume(messages)
         switch outcome {
         case .succeeded:
-            backgroundRuntimeStatus = .completed(success: true)
-            continuedProcessingSubmission = nil
-            lastBackgroundEvent = "completed"
+            _ = await state.updateBackground(
+                status: .completed(success: true),
+                submission: nil,
+                event: "completed",
+                for: identity
+            )
         case .failed:
-            backgroundRuntimeStatus = .completed(success: false)
-            continuedProcessingSubmission = nil
-            lastBackgroundEvent = "failed"
+            _ = await state.updateBackground(
+                status: .completed(success: false),
+                submission: nil,
+                event: "failed",
+                for: identity
+            )
         case .cancelled:
-            continuedProcessingSubmission = nil
-            lastBackgroundEvent = "cancelled"
-        }
-#if os(iOS)
-        let liveActivityPhase: HarnessLiveActivityPhase
-        switch outcome {
-        case .succeeded:
-            liveActivityPhase = .completed
-        case .failed:
-            liveActivityPhase = .failed
-        case .cancelled:
-            liveActivityPhase = .interrupted
-        }
-        await HarnessLiveActivityManager.shared.finish(
-            runID: runID,
-            phase: liveActivityPhase,
-            privacyModeEnabled: backgroundPreferences.isPrivacyModeEnabled
-        )
-#endif
-        await persistSession()
-        if case .succeeded = outcome {
-            do {
-                try await refreshConversationTitleIfNeeded(
-                    id: sessionID,
-                    force: false,
-                    fallbackConfiguration: configuration
-                )
-            } catch {
-                await traceStore.record(
-                    HarnessTraceDraft(
-                        kind: .error,
-                        runID: runID,
-                        name: "session-title/generation-failed",
-                        error: error.localizedDescription
-                    )
-                )
-            }
-        }
-        if case .cancelled = outcome {
-            scheduleSystemExpirationResume()
+            _ = await state.updateBackground(
+                status: .interrupted,
+                submission: nil,
+                event: "cancelled",
+                for: identity
+            )
+        case .interrupted:
+            _ = await state.updateBackground(
+                status: .interrupted,
+                submission: nil,
+                event: "system_expiration",
+                for: identity
+            )
         }
         return outcome
     }
@@ -5109,33 +5588,12 @@ final class AppModel {
 
     private func requestApproval(
         _ request: ToolApprovalRequest,
-        runID: UUID
+        identity: RunIdentity
     ) async -> Bool {
-        guard activeRunID == runID else { return false }
         if trustedToolApprovals.contains(where: { $0.allows(request) }) {
             return true
         }
-        // The first call remains pending until the user answers. Cancellation
-        // and run replacement resolve it as a denial. A durable scope/device
-        // grant is created only by the matching explicit UI action above.
-        if approvalWaiter != nil {
-            resolveApproval(.deny)
-        }
-        pendingApproval = request
-        return await withTaskCancellationHandler {
-            await withCheckedContinuation { continuation in
-                approvalWaiter = ApprovalWaiter(
-                    ownerRunID: runID,
-                    requestRunID: request.runID,
-                    request: request,
-                    continuation: continuation
-                )
-            }
-        } onCancel: {
-            Task { @MainActor [weak self] in
-                self?.resolveApproval(for: request.runID, approved: false)
-            }
-        }
+        return (try? await sessionRunRegistry.requestApproval(request, for: identity)) ?? false
     }
 
     /// Child and compiled-plugin Agents share the parent's approval surface.
@@ -5143,8 +5601,8 @@ final class AppModel {
     /// risk/resource scope, while cancelling the parent resolves every nested
     /// waiter fail-closed.
     func requestNestedApproval(_ request: ToolApprovalRequest) async -> Bool {
-        guard let ownerRunID = activeRunID else { return false }
-        return await requestApproval(request, runID: ownerRunID)
+        guard let identity = selectedRunPresentation?.identity else { return false }
+        return await requestApproval(request, identity: identity)
     }
 
     private func rememberToolApproval(_ request: ToolApprovalRequest) throws {
@@ -5173,54 +5631,96 @@ final class AppModel {
         trustedToolApprovals = updated
     }
 
-    private func nextQueuedInput(
-        at boundary: QueuedInputBoundary,
-        runID: UUID
-    ) -> QueuedAgentInput? {
-        guard activeRunID == runID else { return nil }
-        switch boundary {
-        case .nextStep:
-            return controlState.queuedInputs.first { $0.disposition == .steer }
-        case .turnStopping:
-            return controlState.queuedInputs.first
-        }
-    }
-
     private func publishInboxInserted(
         _ message: QueuedAgentInput,
         source: String,
-        boundary: QueuedInputBoundary
+        boundary: QueuedInputBoundary,
+        identity: RunIdentity
     ) {
-        guard let runID = activeRunID else { return }
         Task {
             await pluginRuntime.emit(
                 CordisAgentLoopEvents.agentInboxInserted,
                 input: CordisAgentInboxInsertedContext(
-                    agentID: activeSessionID ?? runID,
-                    runID: runID,
+                    agentID: identity.sessionID,
+                    runID: identity.runID,
                     message: message,
                     source: source,
                     boundary: boundary
                 ),
-                target: .agent(activeSessionID ?? runID)
+                target: .agent(identity.sessionID)
             )
         }
     }
 
-    /// Claims the exact queue occurrence observed by AgentRuntime and requests
-    /// the normal session checkpoint before the runtime exposes the next turn.
-    private func claimQueuedInput(id: UUID, runID: UUID) async -> Bool {
-        guard activeRunID == runID, controlState.remove(id: id) else { return false }
-        await persistSession()
-        return true
+    private func persistRunInbox(
+        state: SessionRunState,
+        identity: RunIdentity
+    ) async {
+        guard activeSessionID == identity.sessionID,
+              selectedRunPresentation?.identity == identity else { return }
+        let snapshot = await state.snapshot()
+        guard snapshot.identity == identity else { return }
+        controlState.replaceQueuedInputs(snapshot.queuedInputs)
+    }
+
+    private func persistSelectedRunInbox(identity: RunIdentity) async {
+        guard activeSessionID == identity.sessionID,
+              selectedRunPresentation?.identity == identity,
+              let presentation = await sessionRunRegistry.presentation(for: identity) else {
+            return
+        }
+        controlState.replaceQueuedInputs(presentation.queuedInputs)
+    }
+
+    private func projectRunPresentation(_ snapshot: SessionRunPresentation) async {
+        if case .terminal = snapshot.phase {
+            sessionRunSnapshots.removeValue(forKey: snapshot.identity.sessionID)
+            await refreshAppIntentRunningSessionProjection()
+            guard activeSessionID == snapshot.identity.sessionID else { return }
+            selectedRunPresentation = snapshot
+            return
+        }
+        if let current = sessionRunSnapshots[snapshot.identity.sessionID],
+           current.identity == snapshot.identity,
+           current.presentation.revision >= snapshot.revision {
+            return
+        }
+        if let current = selectedRunPresentation,
+           current.identity == snapshot.identity,
+           current.revision >= snapshot.revision {
+            return
+        }
+
+        let registered = await sessionRunRegistry.snapshot(for: snapshot.identity)
+        guard let registered else {
+            return
+        }
+        sessionRunSnapshots[snapshot.identity.sessionID] = registered
+        await refreshAppIntentRunningSessionProjection()
+        guard activeSessionID == snapshot.identity.sessionID else { return }
+        selectedRunPresentation = snapshot
+        controlState.replaceQueuedInputs(snapshot.queuedInputs)
+        refreshBackgroundSystemProjection()
     }
 
     private func currentSystemPrompt(stateSummary: String?) async -> String {
         await commitPendingPlanExitIfNeeded()
-        let prompt = await Self.systemPrompt(
+        return await runSystemPrompt(
             stateSummary: stateSummary,
             interactionMode: controlState.interactionMode,
             permissionMode: controlState.permissionMode
+        )
+    }
+
+    private func runSystemPrompt(
+        stateSummary: String?,
+        interactionMode: ConversationInteractionMode,
+        permissionMode: ToolPermissionMode
+    ) async -> String {
+        let prompt = await Self.systemPrompt(
+            stateSummary: stateSummary,
+            interactionMode: interactionMode,
+            permissionMode: permissionMode
         )
         let skills = await skillRegistry.modelCatalogPrompt()
         return [prompt, skills].filter { !$0.isEmpty }.joined(separator: "\n\n")
@@ -5231,7 +5731,8 @@ final class AppModel {
     /// instruction context; all other conversation text remains ordinary user
     /// content and cannot manufacture a privileged injection.
     private func skillInstructionInjections(
-        for message: AgentMessage
+        for message: AgentMessage,
+        sessionID: UUID? = nil
     ) async -> [AgentRuntimeInstructionInjection] {
         guard message.role == .user else { return [] }
         var result: [AgentRuntimeInstructionInjection] = []
@@ -5248,7 +5749,10 @@ final class AppModel {
                 )
             )
         }
-        result.append(contentsOf: await referenceInjections(for: message.content))
+        result.append(contentsOf: await referenceInjections(
+            for: message.content,
+            sessionID: sessionID ?? activeSessionID
+        ))
         return result
     }
 
@@ -5256,13 +5760,14 @@ final class AppModel {
     /// File mentions deliberately do not inject file contents: like desktop
     /// Harness, they remain paths that the Agent must inspect with file tools.
     private func referenceInjections(
-        for text: String
+        for text: String,
+        sessionID: UUID? = nil
     ) async -> [AgentRuntimeInstructionInjection] {
         do {
             let parsed = try HarnessReferenceSyntax.parseSessionReferences(in: text)
             let references = try HarnessReferenceSyntax.normalizeSessionReferences(
                 parsed.references,
-                currentSessionID: activeSessionID
+                currentSessionID: sessionID
             )
             guard !references.isEmpty else { return [] }
 
@@ -5302,8 +5807,14 @@ final class AppModel {
 
     private func currentCordisRuntimeContext() async -> String {
         await commitPendingPlanExitIfNeeded()
+        let stateSummary: String?
+        if let identity = selectedRunPresentation?.identity {
+            stateSummary = try? await sessionRunRegistry.promptStateSummary(for: identity)
+        } else {
+            stateSummary = nil
+        }
         return Self.runtimePromptContext(
-            stateSummary: activePromptStateSummary,
+            stateSummary: stateSummary,
             interactionMode: controlState.interactionMode,
             permissionMode: controlState.permissionMode
         )
@@ -5348,7 +5859,7 @@ final class AppModel {
                 let prompt = goalText.map {
                     "请结合附图完善当前目标：\($0)"
                 } ?? "请结合附图确定当前会话目标，并说明目标与依据。"
-                guard send(prompt, disposition: .queued) else {
+                guard await send(prompt, disposition: .queued) else {
                     throw AppCommandError.invalidState("附图目标请求未能加入 Agent 队列。")
                 }
             }
@@ -5438,9 +5949,9 @@ final class AppModel {
         case let .plan(mode, message):
             setInteractionMode(mode == .on ? .plan : .agent)
             if let message, !message.isEmpty {
-                _ = send(message, disposition: .steer)
+                _ = await send(message, disposition: .steer)
             } else if mode == .on, hasStagedImage {
-                guard send("请结合附图制定当前任务计划。", disposition: .steer) else {
+                guard await send("请结合附图制定当前任务计划。", disposition: .steer) else {
                     throw AppCommandError.invalidState("附图计划请求未能加入 Agent 队列。")
                 }
             }
@@ -5472,17 +5983,27 @@ final class AppModel {
                 isSessionModelPickerRequested = true
                 return nil
             }
-            var draft = effectiveConfiguration
+            let selectedReasoning = selection.reasoning.flatMap(ReasoningMode.init(rawValue:))
+            let selectedProfile: ProviderProfile?
             if let provider = selection.provider {
                 guard let profile = providerProfile(named: provider) else {
                     throw AppCommandError.unknownProvider(provider)
                 }
-                draft = profile.configuration()
+                selectedProfile = profile
+            } else {
+                selectedProfile = providerDirectory.profile(matching: effectiveConfiguration)
             }
-            draft.model = selection.model
-            if let reasoning = selection.reasoning,
-               let mode = ReasoningMode(rawValue: reasoning) {
-                draft.reasoningMode = mode
+            var draft = effectiveConfiguration
+            if let selectedProfile {
+                draft = selectedProfile.configuration(
+                    model: selection.model,
+                    reasoningMode: selectedReasoning
+                )
+            } else {
+                draft.model = selection.model
+                if let selectedReasoning {
+                    draft.reasoningMode = selectedReasoning
+                }
             }
             try await setSessionModelConfiguration(draft)
             let profile = providerDirectory.profile(matching: draft)
@@ -5603,35 +6124,31 @@ final class AppModel {
         return providerDirectory.profiles.first { $0.providerID == providerID }
     }
 
-    private func resolveApproval(for runID: UUID, approved: Bool) {
-        guard let waiter = approvalWaiter,
-              waiter.ownerRunID == runID || waiter.requestRunID == runID else { return }
-        resolveApproval(approved: approved)
-    }
-
     private func handle(
         _ event: AgentRuntimeEvent,
-        runID: UUID,
+        identity: RunIdentity,
+        state: SessionRunState,
         continuedContext: ContinuedProcessingContext
     ) async {
-        guard activeRunID == runID else { return }
+        guard await state.apply(event, for: identity) else { return }
+        let runID = identity.runID
+        let sessionID = identity.sessionID
+        let snapshot = await state.snapshot()
         switch event {
         case let .stepStarted(step):
-            currentStep = step
-            resetStreamingPresentation()
             if let status = try? ContinuedProcessingStatus(
                 title: "Harness 正在执行",
                 subtitle: "第 \(step) 步 · 持续执行",
                 completedUnitCount: Int64(clamping: max(0, step - 1)),
                 totalUnitCount: max(1, Int64(clamping: step))
             ) {
-                backgroundRuntimeStatus = .running(status)
                 await continuedContext.report(status)
 #if os(iOS)
                 await HarnessLiveActivityManager.shared.update(
                     runID: runID,
-                    sessionID: activeSessionID,
-                    sessionTitle: activeSessionTitle,
+                    sessionID: sessionID,
+                    sessionTitle: sessions.first(where: { $0.id == sessionID })?.title
+                        ?? "Harness 任务",
                     phase: .working,
                     status: status,
                     privacyModeEnabled: backgroundPreferences.isPrivacyModeEnabled,
@@ -5639,59 +6156,33 @@ final class AppModel {
                 )
 #endif
             }
-        case let .contextInjected(injection):
-            if let index = activeContextInjections.firstIndex(where: {
-                $0.sourceLabel == injection.sourceLabel && $0.form == injection.form
-            }) {
-                let existingID = activeContextInjections[index].id
-                activeContextInjections[index] = AgentContextInjection(
-                    id: existingID,
-                    sourceLabel: injection.sourceLabel,
-                    content: injection.content,
-                    form: injection.form,
-                    turn: injection.turn,
-                    step: injection.step
-                )
-            } else {
-                activeContextInjections.append(injection)
-                if activeContextInjections.count > 16 {
-                    activeContextInjections.removeFirst(activeContextInjections.count - 16)
-                }
-            }
-        case let .textDelta(delta):
-            queueStreamingText(delta)
-        case let .reasoningDelta(delta):
-            queueStreamingReasoning(delta)
+        case .contextInjected, .textDelta, .reasoningDelta:
+            break
         case let .messagesCommitted(committedMessages):
-            for message in committedMessages where message.role == .user {
-                _ = controlState.remove(id: message.id)
+            if activeSessionID == sessionID {
+                messages.append(contentsOf: committedMessages)
+                workState = await workStateCoordinator.snapshot()
+                await persistRunInbox(state: state, identity: identity)
+                await persistSession()
             }
-            messages.append(contentsOf: committedMessages)
-            workState = await workStateCoordinator.snapshot()
-            resetStreamingPresentation()
-            activeToolStatus = nil
-            resetActiveToolPresentation()
-            await persistSession()
             if committedMessages.contains(where: { $0.role == .tool }) {
                 await refreshWorkspace()
             }
-        case let .toolEventChanged(toolEvent):
-            upsertActiveToolEvent(toolEvent)
-        case let .toolOutput(callID, chunk):
-            appendActiveToolOutput(callID: callID, chunk: chunk)
+        case .toolEventChanged, .toolOutput:
+            break
         case let .toolStarted(call, summary):
-            activeToolStatus = "\(call.name)：\(summary)"
 #if os(iOS)
             if let status = try? ContinuedProcessingStatus(
                 title: "Harness 正在执行",
                 subtitle: "正在使用本机工具",
-                completedUnitCount: Int64(clamping: max(0, currentStep - 1)),
-                totalUnitCount: max(1, Int64(clamping: currentStep))
+                completedUnitCount: Int64(clamping: max(0, snapshot.currentStep - 1)),
+                totalUnitCount: max(1, Int64(clamping: snapshot.currentStep))
             ) {
                 await HarnessLiveActivityManager.shared.update(
                     runID: runID,
-                    sessionID: activeSessionID,
-                    sessionTitle: activeSessionTitle,
+                    sessionID: sessionID,
+                    sessionTitle: sessions.first(where: { $0.id == sessionID })?.title
+                        ?? "Harness 任务",
                     phase: .usingTool,
                     status: status,
                     toolName: call.name,
@@ -5702,7 +6193,6 @@ final class AppModel {
             }
 #endif
         case let .toolFinished(call, _, isError):
-            activeToolStatus = nil
             if !isError,
                ["read", "write", "edit", "workspace_read_text", "workspace_write_text"]
                 .contains(call.name),
@@ -5711,25 +6201,24 @@ final class AppModel {
                     .contains(call.name)
                     ? .observed
                     : .replaced
-                if let sessionID = activeSessionID {
-                    await workspaceInstructionTransitions.noteTouchedPath(
-                        sessionID: sessionID,
-                        path: path,
-                        mutation: mutation
-                    )
-                }
+                await workspaceInstructionTransitions.noteTouchedPath(
+                    sessionID: sessionID,
+                    path: path,
+                    mutation: mutation
+                )
             }
 #if os(iOS)
             if let status = try? ContinuedProcessingStatus(
                 title: "Harness 正在执行",
                 subtitle: "继续模型步骤",
-                completedUnitCount: Int64(clamping: max(0, currentStep - 1)),
-                totalUnitCount: max(1, Int64(clamping: currentStep))
+                completedUnitCount: Int64(clamping: max(0, snapshot.currentStep - 1)),
+                totalUnitCount: max(1, Int64(clamping: snapshot.currentStep))
             ) {
                 await HarnessLiveActivityManager.shared.update(
                     runID: runID,
-                    sessionID: activeSessionID,
-                    sessionTitle: activeSessionTitle,
+                    sessionID: sessionID,
+                    sessionTitle: sessions.first(where: { $0.id == sessionID })?.title
+                        ?? "Harness 任务",
                     phase: .working,
                     status: status,
                     privacyModeEnabled: backgroundPreferences.isPrivacyModeEnabled,
@@ -5737,18 +6226,9 @@ final class AppModel {
                 )
             }
 #endif
-        case let .usage(usage):
-            latestUsage = usage
+        case .usage:
+            break
         }
-    }
-
-    /// Model providers can emit character-sized deltas. Coalescing them keeps
-    /// the chat hierarchy from being invalidated for every network frame while
-    /// preserving the complete response in the runtime and session log.
-    private func queueStreamingText(_ delta: String) {
-        guard !delta.isEmpty else { return }
-        pendingStreamingText += delta
-        scheduleStreamingPresentation()
     }
 
     private static func fileTouchPath(from arguments: String) -> String? {
@@ -5761,81 +6241,6 @@ final class AppModel {
         return path
     }
 
-    private func queueStreamingReasoning(_ delta: String) {
-        guard !delta.isEmpty else { return }
-        pendingStreamingReasoning += delta
-        scheduleStreamingPresentation()
-    }
-
-    private func scheduleStreamingPresentation() {
-        guard streamingPresentationTask == nil else { return }
-        let pendingBytes = pendingStreamingText.utf8.count + pendingStreamingReasoning.utf8.count
-        let interval = Self.streamingPresentationInterval(
-            forByteCount: streamingPresentationByteCount + pendingBytes
-        )
-        streamingPresentationTask = Task { @MainActor [weak self] in
-            do {
-                try await Task.sleep(for: interval)
-            } catch {
-                return
-            }
-            guard !Task.isCancelled else { return }
-            self?.flushStreamingPresentation()
-        }
-    }
-
-    private func flushStreamingPresentation() {
-        streamingPresentationTask = nil
-        var didChangePresentation = false
-        if !pendingStreamingText.isEmpty {
-            streamingPresentationByteCount += pendingStreamingText.utf8.count
-            streamingText = Self.boundedStreamingTail(
-                streamingText + pendingStreamingText,
-                maximumCharacters: Self.maximumPresentedStreamingCharacters,
-                marker: "[earlier streaming text hidden]\n"
-            )
-            pendingStreamingText.removeAll(keepingCapacity: true)
-            didChangePresentation = true
-        }
-        if !pendingStreamingReasoning.isEmpty {
-            streamingPresentationByteCount += pendingStreamingReasoning.utf8.count
-            streamingReasoning = Self.boundedStreamingTail(
-                streamingReasoning + pendingStreamingReasoning,
-                maximumCharacters: Self.maximumPresentedReasoningCharacters,
-                marker: "[earlier reasoning hidden]\n"
-            )
-            pendingStreamingReasoning.removeAll(keepingCapacity: true)
-            didChangePresentation = true
-        }
-        if didChangePresentation {
-            streamingPresentationRevision &+= 1
-        }
-    }
-
-    private func resetStreamingPresentation() {
-        streamingPresentationTask?.cancel()
-        streamingPresentationTask = nil
-        pendingStreamingText.removeAll(keepingCapacity: true)
-        pendingStreamingReasoning.removeAll(keepingCapacity: true)
-        streamingPresentationByteCount = 0
-        streamingText = ""
-        streamingReasoning = ""
-    }
-
-    private static func streamingPresentationInterval(forByteCount byteCount: Int) -> Duration {
-        if byteCount < 8 * 1_024 { return .milliseconds(66) }
-        if byteCount < 32 * 1_024 { return .milliseconds(100) }
-        return .milliseconds(160)
-    }
-
-    private static func boundedStreamingTail(
-        _ text: String,
-        maximumCharacters: Int,
-        marker: String
-    ) -> String {
-        guard text.count > maximumCharacters else { return text }
-        return marker + String(text.suffix(maximumCharacters))
-    }
 
     private func persistSession() async {
         do {
@@ -5860,8 +6265,9 @@ final class AppModel {
             return
         }
         await refreshTrajectory(for: activeSessionID)
-        if harnessTraceSessionID == activeSessionID, let harnessTraceRunID {
-            await refreshHarnessTrace(for: harnessTraceRunID)
+        if let identity = selectedRunPresentation?.identity,
+           identity.sessionID == activeSessionID {
+            await refreshHarnessTrace(for: identity)
         }
     }
 
@@ -6364,52 +6770,57 @@ final class AppModel {
         }
     }
 
-    private func prepareHarnessTrace(runID: UUID, sessionID: UUID) async {
-        await traceStore.register(runID: runID, sessionID: sessionID)
+    private func prepareHarnessTrace(for identity: RunIdentity) async {
+        await traceStore.register(runID: identity.runID, sessionID: identity.sessionID)
         let existing = await traceStore.events()
-        harnessTraceRefreshTask?.cancel()
-        harnessTraceRefreshTask = nil
-        harnessTraceSessionID = sessionID
-        harnessTraceRunID = runID
-        harnessTraceStartSequence = existing.last?.sequence ?? 0
-        harnessTraceCursor = harnessTraceStartSequence
-        harnessTraceEvents = []
-        harnessTraceSummary = nil
+        let startSequence = existing.last?.sequence ?? 0
+        _ = try? await sessionRunRegistry.prepareTrace(
+            startSequence: startSequence,
+            for: identity
+        )
+        if selectedRunPresentation?.identity == identity {
+            harnessTraceEvents = []
+            harnessTraceSummary = nil
+        }
     }
 
-    private func refreshHarnessTrace(for runID: UUID) async {
-        guard harnessTraceRunID == runID else { return }
-        guard let sessionID = harnessTraceSessionID else { return }
+    private func refreshHarnessTrace(for identity: RunIdentity) async {
+        guard let presentation = await sessionRunRegistry.presentation(for: identity),
+              let key = presentation.traceKey,
+              key.sessionID == identity.sessionID,
+              key.runID == identity.runID else { return }
         let newEvents = await traceStore.events(
-            after: harnessTraceCursor,
-            sessionID: sessionID,
-            runID: runID
+            after: key.cursor,
+            sessionID: identity.sessionID,
+            runID: identity.runID
         )
-        guard harnessTraceRunID == runID else { return }
         guard !newEvents.isEmpty else { return }
-        harnessTraceCursor = newEvents.last?.sequence ?? harnessTraceCursor
-        let events = newEvents.filter { $0.sequence > harnessTraceStartSequence }
+        let cursor = newEvents.last?.sequence ?? key.cursor
+        guard (try? await sessionRunRegistry.advanceTrace(to: cursor, for: identity)) == true,
+              selectedRunPresentation?.identity == identity else { return }
+        let knownSequences = Set(harnessTraceEvents.map(\.sequence))
+        let events = newEvents.filter {
+            $0.sequence > key.startSequence && !knownSequences.contains($0.sequence)
+        }
         guard !events.isEmpty else { return }
         harnessTraceEvents.append(contentsOf: events)
         let summary = HarnessTraceStore.summarize(
-            harnessTraceEvents.filter { $0.runID == runID }
+            harnessTraceEvents.filter { $0.runID == identity.runID }
         )
         if harnessTraceSummary != summary {
             harnessTraceSummary = summary
         }
     }
 
-    private func scheduleHarnessTraceRefresh(for runID: UUID) {
-        guard harnessTraceRunID == runID, harnessTraceRefreshTask == nil else { return }
-        harnessTraceRefreshTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            defer { self.harnessTraceRefreshTask = nil }
+    private func scheduleHarnessTraceRefresh(for identity: RunIdentity) async {
+        _ = try? await sessionRunRegistry.startTraceRefresh(for: identity) { [weak self] in
             do {
                 try await Task.sleep(for: .milliseconds(100))
             } catch {
                 return
             }
-            await self.refreshHarnessTrace(for: runID)
+            await self?.refreshHarnessTrace(for: identity)
+            _ = try? await self?.sessionRunRegistry.clearTraceRefresh(for: identity)
         }
     }
 
@@ -6450,8 +6861,6 @@ final class AppModel {
     private func resetTrajectoryProjection() {
         trajectoryRefreshTask?.cancel()
         trajectoryRefreshTask = nil
-        harnessTraceRefreshTask?.cancel()
-        harnessTraceRefreshTask = nil
         trajectorySessionID = nil
         trajectoryCursor = nil
         trajectoryLoadedFromSequence = nil
@@ -6459,10 +6868,6 @@ final class AppModel {
         trajectoryEventCount = 0
         trajectoryMetrics = nil
         trajectoryRecoveredTornTail = false
-        harnessTraceSessionID = nil
-        harnessTraceRunID = nil
-        harnessTraceStartSequence = 0
-        harnessTraceCursor = 0
         harnessTraceEvents = []
         harnessTraceSummary = nil
         trajectoryVisibleEvents = []
@@ -6472,39 +6877,48 @@ final class AppModel {
         sessions.first(where: { $0.id == activeSessionID })?.title ?? "Harness 任务"
     }
 
-    private func beginQuestionMonitoring(runID: UUID) {
-        questionMonitorTask?.cancel()
-        questionMonitorTask = Task { [weak self] in
-            guard let self else { return }
-            while !Task.isCancelled, self.activeRunID == runID {
-                let pending = await self.userQuestionProvider.pending()
-                if self.pendingUserQuestion != pending {
-                    let previousID = self.pendingUserQuestion?.id
-                    self.pendingUserQuestion = pending
-                    if let pending, pending.id != previousID {
-                        await self.recordQuestionLifecycle(
-                            .questionRequested(
-                                requestID: pending.id,
-                                questions: pending.request.questions
-                            )
-                        )
-                    }
+    private func beginQuestionMonitoring(
+        identity: RunIdentity,
+        state: SessionRunState
+    ) async {
+        let provider = state.userQuestionProvider
+        _ = await state.startQuestionMonitor(for: identity) { [weak self, state] in
+            var previousID: UUID?
+            while !Task.isCancelled {
+                let pending = await provider.pending()
+                guard await state.setPendingQuestion(pending, for: identity) else { return }
+                if let pending, pending.id != previousID {
+                    await self?.recordQuestionLifecycle(
+                        .questionRequested(
+                            requestID: pending.id,
+                            questions: pending.request.questions
+                        ),
+                        identity: identity
+                    )
                 }
-                try? await Task.sleep(for: .milliseconds(75))
+                previousID = pending?.id
+                do {
+                    try await Task.sleep(for: .milliseconds(75))
+                } catch {
+                    return
+                }
             }
         }
     }
 
-    private func recordQuestionLifecycle(_ draft: SessionEventDraft) async {
-        guard let sessionID = activeSessionID else { return }
+    private func recordQuestionLifecycle(
+        _ draft: SessionEventDraft,
+        identity: RunIdentity
+    ) async {
         do {
-            _ = try await trajectoryRepository.append(draft, sessionID: sessionID)
-            scheduleTrajectoryRefresh(for: sessionID)
+            _ = try await trajectoryRepository.append(draft, sessionID: identity.sessionID)
+            scheduleTrajectoryRefresh(for: identity.sessionID)
         } catch {
             await traceStore.record(
                 HarnessTraceDraft(
                     kind: .error,
-                    runID: activeRunID ?? UUID(),
+                    sessionID: identity.sessionID,
+                    runID: identity.runID,
                     name: draft.type,
                     error: error.localizedDescription
                 )
@@ -6519,180 +6933,592 @@ final class AppModel {
         shouldCheckpointBeforeRun: Bool = false,
         initialUserMessage: AgentMessage? = nil,
         useContinuedProcessing: Bool = true
-    ) {
-        backgroundAutoResumeTask?.cancel()
-        backgroundAutoResumeTask = nil
-        backgroundAutoResumeGate.reset()
-        resetStreamingPresentation()
-        activeContextInjections = []
-        activeToolStatus = nil
-        resetActiveToolPresentation()
-        latestUsage = nil
-        isRunning = true
-        runStartedAt = .now
+    ) async {
+        guard let sessionID = activeSessionID else { return }
         hasResumableRun = false
-        continuedProcessingSubmission = nil
-        let runID = UUID()
-        activeRunID = runID
-        beginQuestionMonitoring(runID: runID)
+        let identity = await sessionRunRegistry.allocateIdentity(sessionID: sessionID)
+        let questionContext = SessionRunQuestionContext()
         let runConfiguration = effectiveConfiguration
-        runTask = Task { [weak self] in
-            guard let self else { return }
-            if let automaticTitle, let activeSessionID = self.activeSessionID {
-                _ = try? await self.sessionStore.renameSession(
-                    id: activeSessionID,
-                    title: automaticTitle,
-                    source: .fallback
+        let runExecutionSnapshot = RunExecutionSnapshot(
+            controlState: controlState,
+            agentPreset: activeAgentPreset?.runtimeProjection,
+            contextWindowTokens: contextWindow(for: runConfiguration)
+        )
+
+        let finiteLeaseToken = legacyBackgroundTaskLease.acquire(identity: identity) { [weak self] expiredIdentity in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                _ = try? await self.sessionRunRegistry.cancel(expiredIdentity)
+            }
+        }
+        finiteBackgroundLeaseTokens[identity] = finiteLeaseToken
+
+        let registration: SessionRunRegistration
+        do {
+            registration = try await sessionRunRegistry.register(
+                identity: identity,
+                maximumLiveRoots: Self.maximumConcurrentRootRuns
+            ) { [weak self] in
+                SessionRunPreparedConfiguration(
+                    trajectorySessionID: sessionID,
+                    backgroundLeaseTokens: [finiteLeaseToken],
+                    initialMessages: history,
+                    initialQueuedInputs: runExecutionSnapshot.controlState.queuedInputs,
+                    questionContext: questionContext,
+                    presentationHandler: { [weak self] snapshot in
+                        await self?.projectRunPresentation(snapshot)
+                    },
+                    cancellationHandler: { [weak self] in
+                        await self?.cancelContinuedProcessing(identity: identity)
+                    },
+                    terminalCleanupHandler: { [weak self] identity, outcome, leaseTokens in
+                        await self?.performTerminalCleanup(
+                            identity: identity,
+                            outcome: outcome,
+                            backgroundLeaseTokens: leaseTokens
+                        )
+                    },
+                    rollbackHandler: { [weak self] in
+                        await self?.releaseFiniteBackgroundLease(
+                            token: finiteLeaseToken,
+                            for: identity
+                        )
+                    }
                 )
             }
-            if shouldCheckpointBeforeRun {
-                await self.persistSession()
-            }
-            guard self.activeRunID == runID else { return }
+        } catch {
+            releaseFiniteBackgroundLease(token: finiteLeaseToken, for: identity)
+            presentError(error)
+            return
+        }
 
-            let initialStatus = try? ContinuedProcessingStatus(
-                title: "Harness 正在执行",
-                subtitle: "准备模型与本机工具",
-                completedUnitCount: 0,
-                totalUnitCount: 1
+        guard await registration.handle.beginRunning(for: identity),
+              await registration.state.markRunning(for: identity) else {
+            _ = try? await sessionRunRegistry.finish(.failed, for: identity)
+            return
+        }
+        _ = await sessionRunRegistry.setPresentationUpdatesEnabled(
+            appIsActive,
+            for: identity
+        )
+        await refreshSessionRunProjection()
+        do {
+            try await backgroundRunJournal.upsert(
+                BackgroundRunJournalEntry(
+                    identity: identity,
+                    phase: .running,
+                    finiteBackgroundLeaseActive: true,
+                    audioKeepAliveActive: appIsBackgrounded,
+                    locationKeepAliveActive: appIsBackgrounded
+                )
             )
-            guard let initialStatus else {
-                self.errorMessage = "无法创建后台任务进度。"
-                self.cancelRun()
-                return
-            }
-            self.backgroundRuntimeStatus = .running(initialStatus)
-            self.lastBackgroundEvent = self.backgroundPreferences.isEnhancedBackgroundEnabled
-                ? "requesting_continued_processing"
-                : "foreground_only"
-#if os(iOS)
-            await HarnessLiveActivityManager.shared.start(
-                runID: runID,
-                sessionID: self.activeSessionID,
-                sessionTitle: self.activeSessionTitle,
-                status: initialStatus,
-                privacyModeEnabled: self.backgroundPreferences.isPrivacyModeEnabled,
-                isEnabled: self.backgroundPreferences.isLiveActivityEnabled
-            )
-#endif
-            let runOperation: @MainActor (ContinuedProcessingContext) async -> Void = { context in
-                let outcome = await self.performRun(
-                    runID: runID,
+        } catch {
+            await recordStartupIssue(error, source: "background_run_journal")
+        }
+        // A run can start while the scene is already backgrounded (for example
+        // from a continued/scheduled handoff). Reconcile after publication so
+        // the audio leg does not depend on another scene-phase transition.
+        refreshBackgroundAudioKeepAlive()
+        refreshBackgroundLocationKeepAlive()
+        await beginQuestionMonitoring(identity: identity, state: registration.state)
+        do {
+            let started = try await sessionRunRegistry.startOwnedTask(for: identity) { [weak self] in
+                await self?.executeRegisteredRun(
+                    registration: registration,
                     history: history,
                     workState: workState,
                     configuration: runConfiguration,
-                    continuedContext: context,
-                    initialUserMessage: initialUserMessage
+                    executionSnapshot: runExecutionSnapshot,
+                    automaticTitle: automaticTitle,
+                    shouldCheckpointBeforeRun: shouldCheckpointBeforeRun,
+                    initialUserMessage: initialUserMessage,
+                    useContinuedProcessing: useContinuedProcessing
                 )
-                switch outcome {
-                case .succeeded:
-                    await self.deliverCompletionNotification(runID: runID, succeeded: true)
-                case .failed:
-                    self.continuedProcessingController.finish(runID: runID, success: false)
-                    await self.deliverCompletionNotification(runID: runID, succeeded: false)
-                case .cancelled:
-                    break
-                }
             }
-
-            guard useContinuedProcessing,
-                  self.backgroundPreferences.isEnhancedBackgroundEnabled else {
-                let context = ContinuedProcessingContext(runID: runID) { _ in }
-                await runOperation(context)
+            guard started else {
+                _ = try? await sessionRunRegistry.finish(.failed, for: identity)
                 return
             }
-            do {
-                let handle = try await self.continuedProcessingController.startUserInitiated(
-                    runID: runID,
-                    initialStatus: initialStatus,
-                    cancellationHandler: { [weak self] reason in
-                        await self?.handleContinuedProcessingCancellation(
-                            runID: runID,
-                            reason: reason
-                        )
-                    },
-                    operation: { context in
-                        await runOperation(context)
-                    }
-                )
-                guard self.activeRunID == runID else { return }
-                self.continuedProcessingSubmission = handle.submission
-                self.lastBackgroundEvent = Self.continuedProcessingSubmissionDescription(handle.submission)
-            } catch {
-                guard self.activeRunID == runID else { return }
-                self.presentError(error)
-                self.cancelRun()
-            }
+        } catch {
+            _ = try? await sessionRunRegistry.finish(.failed, for: identity)
+            presentError(error)
         }
     }
 
+    private func executeRegisteredRun(
+        registration: SessionRunRegistration,
+        history: [AgentMessage],
+        workState: ConversationWorkState,
+        configuration: AgentConfiguration,
+        executionSnapshot: RunExecutionSnapshot,
+        automaticTitle: String?,
+        shouldCheckpointBeforeRun: Bool,
+        initialUserMessage: AgentMessage?,
+        useContinuedProcessing: Bool
+    ) async {
+        let identity = registration.identity
+        let runID = identity.runID
+        let state = registration.state
+
+        if let automaticTitle {
+            _ = try? await sessionStore.renameSession(
+                id: identity.sessionID,
+                title: automaticTitle,
+                source: .fallback
+            )
+        }
+        if shouldCheckpointBeforeRun,
+           activeSessionID == identity.sessionID,
+           selectedRunPresentation?.identity == identity {
+            await persistSession()
+        }
+        guard await sessionRunRegistry.snapshot(for: identity) != nil else { return }
+
+        guard let initialStatus = try? ContinuedProcessingStatus(
+            title: "Harness 正在执行",
+            subtitle: "准备模型与本机工具",
+            completedUnitCount: 0,
+            totalUnitCount: 1
+        ) else {
+            if selectedRunPresentation?.identity == identity {
+                errorMessage = "无法创建后台任务进度。"
+            }
+            _ = try? await sessionRunRegistry.finish(.failed, for: identity)
+            return
+        }
+        _ = await state.updateBackground(
+            status: .running(initialStatus),
+            submission: nil,
+            event: backgroundPreferences.isEnhancedBackgroundEnabled
+                ? "requesting_continued_processing"
+                : "foreground_only",
+            for: identity
+        )
+#if os(iOS)
+        await HarnessLiveActivityManager.shared.start(
+            runID: runID,
+            sessionID: identity.sessionID,
+            sessionTitle: sessions.first(where: { $0.id == identity.sessionID })?.title
+                ?? "Harness 任务",
+            status: initialStatus,
+            privacyModeEnabled: backgroundPreferences.isPrivacyModeEnabled,
+            isEnabled: backgroundPreferences.isLiveActivityEnabled
+        )
+#endif
+        let runOperation: @MainActor (ContinuedProcessingContext) async -> RunOutcome = { context in
+            let outcome = await self.performRun(
+                registration: registration,
+                history: history,
+                workState: workState,
+                configuration: configuration,
+                executionSnapshot: executionSnapshot,
+                continuedContext: context,
+                initialUserMessage: initialUserMessage
+            )
+            _ = await state.proposeTerminalOutcome(outcome.terminalOutcome, for: identity)
+            return outcome
+        }
+
+        guard useContinuedProcessing,
+              backgroundPreferences.isEnhancedBackgroundEnabled else {
+            let context = ContinuedProcessingContext(runID: runID) { _ in }
+            _ = await runOperation(context)
+            await settleRegisteredRun(
+                identity: identity,
+                state: state,
+                titleConfiguration: configuration
+            )
+            return
+        }
+        do {
+            let handle = try await continuedProcessingController.startUserInitiated(
+                identity: identity,
+                runID: runID,
+                initialStatus: initialStatus,
+                    cancellationHandler: { [weak self] reason in
+                    await self?.handleContinuedProcessingCancellation(
+                        identity: identity,
+                        state: state,
+                        reason: reason
+                    )
+                },
+                systemTaskAttachedHandler: { [weak self] in
+                    self?.releaseFiniteBackgroundLeaseForHandoff(identity: identity)
+                },
+                operation: { context in
+                    switch await runOperation(context) {
+                    case .succeeded:
+                        return
+                    case .failed:
+                        throw ContinuedRunExecutionError.failed
+                    case .cancelled, .interrupted:
+                        throw CancellationError()
+                    }
+                }
+            )
+            _ = await state.updateBackground(
+                status: .running(initialStatus),
+                submission: handle.submission,
+                event: Self.continuedProcessingSubmissionDescription(handle.submission),
+                for: identity
+            )
+            try? await backgroundRunJournal.upsert(
+                BackgroundRunJournalEntry(
+                    identity: identity,
+                    phase: .running,
+                    continuedProcessingRequestIdentifier: handle.requestIdentifier,
+                    finiteBackgroundLeaseActive: true,
+                    continuedProcessingActive: true,
+                    audioKeepAliveActive: appIsBackgrounded,
+                    locationKeepAliveActive: appIsBackgrounded,
+                    liveActivityActive: backgroundPreferences.isLiveActivityEnabled
+                )
+            )
+            let completion = await handle.completion.wait()
+            switch completion {
+            case let .operationFinished(cancellationReason):
+                if let cancellationReason {
+                    await handleContinuedProcessingCancellation(
+                        identity: identity,
+                        state: state,
+                        reason: cancellationReason
+                    )
+                }
+            case let .cancelledBeforeStart(reason):
+                await handleContinuedProcessingCancellation(
+                    identity: identity,
+                    state: state,
+                    reason: reason
+                )
+                if reason != .systemExpiration {
+                    _ = await state.proposeTerminalOutcome(.cancelled, for: identity)
+                }
+            }
+            await settleRegisteredRun(
+                identity: identity,
+                state: state,
+                titleConfiguration: configuration
+            )
+        } catch {
+            guard await sessionRunRegistry.snapshot(for: identity) != nil else { return }
+            if selectedRunPresentation?.identity == identity {
+                presentError(error)
+            }
+            _ = await state.proposeTerminalOutcome(.failed, for: identity)
+            await settleRegisteredRun(
+                identity: identity,
+                state: state,
+                titleConfiguration: configuration
+            )
+        }
+    }
+
+    private func settleRegisteredRun(
+        identity: RunIdentity,
+        state: SessionRunState,
+        titleConfiguration: AgentConfiguration
+    ) async {
+        let proposed = await state.terminalOutcomeProposal(for: identity) ?? .failed
+        let settled = (try? await sessionRunRegistry.finish(proposed, for: identity)) ?? proposed
+        guard settled == .succeeded else { return }
+        do {
+            try await refreshConversationTitleIfNeeded(
+                id: identity.sessionID,
+                force: false,
+                fallbackConfiguration: titleConfiguration
+            )
+        } catch {
+            await traceStore.record(
+                HarnessTraceDraft(
+                    kind: .error,
+                    sessionID: identity.sessionID,
+                    runID: identity.runID,
+                    name: "session-title/generation-failed",
+                    error: error.localizedDescription
+                )
+            )
+        }
+    }
+
+    private func cancelContinuedProcessing(identity: RunIdentity) {
+        continuedProcessingController.cancel(runID: identity.runID, identity: identity)
+    }
+
     private func handleContinuedProcessingCancellation(
-        runID: UUID,
+        identity: RunIdentity,
+        state: SessionRunState,
         reason: ContinuedProcessingCancellationReason
     ) async {
-        await persistSession()
         guard reason == .systemExpiration else { return }
-        backgroundAutoResumeGate.markSystemExpiration(runID: runID)
-        backgroundRuntimeStatus = .interrupted
-        lastBackgroundEvent = "system_expiration"
+        guard await state.proposeTerminalOutcome(.interrupted, for: identity) else { return }
+        await backgroundResumeCoordinator.markSystemExpiration(identity)
+        let presentation = await state.snapshot()
+        _ = await state.updateBackground(
+            status: .interrupted,
+            submission: presentation.continuedProcessingSubmission,
+            event: "system_expiration",
+            for: identity
+        )
 #if os(iOS)
         await traceStore.record(
             HarnessTraceDraft(
                 kind: .backgroundTask,
-                runID: runID,
+                sessionID: identity.sessionID,
+                runID: identity.runID,
                 name: "system_expiration",
                 attributes: [
                     "reason": .string("system_expiration"),
                     "submission": .string(
-                        Self.continuedProcessingSubmissionDescription(continuedProcessingSubmission)
+                        Self.continuedProcessingSubmissionDescription(
+                            presentation.continuedProcessingSubmission
+                        )
                     )
                 ]
             )
         )
-        await refreshHarnessTrace(for: runID)
+        await refreshHarnessTrace(for: identity)
 #endif
+    }
+
+    /// The registry's terminal owner invokes this exactly once after runtime
+    /// exit and before removing the entry. Keep the ordering durable first,
+    /// then release OS-facing resources, then publish optional completion UI.
+    private func performTerminalCleanup(
+        identity: RunIdentity,
+        outcome: MobileAgentTerminalOutcome,
+        backgroundLeaseTokens: Set<SessionRunBackgroundLeaseToken>
+    ) async {
+        do {
+            try await trajectoryRepository.flush(sessionID: identity.sessionID)
+        } catch {
+            await traceStore.record(
+                HarnessTraceDraft(
+                    kind: .error,
+                    sessionID: identity.sessionID,
+                    runID: identity.runID,
+                    name: "run/terminal-trajectory-flush-failed",
+                    error: error.localizedDescription
+                )
+            )
+        }
+
+        do {
+            let session = try await sessionStore.session(id: identity.sessionID)
+            let committedMessages = await sessionRunRegistry.messages(for: identity)
+                ?? session.messages
+            var checkpointControlState = session.controlState
+            if let presentation = await sessionRunRegistry.presentation(for: identity) {
+                checkpointControlState.replaceQueuedInputs(presentation.queuedInputs)
+            }
+            let checkpoint = ConversationCheckpoint(
+                messages: committedMessages,
+                workState: session.workState,
+                controlState: checkpointControlState
+            )
+            _ = try await sessionStore.checkpointSession(
+                id: identity.sessionID,
+                checkpoint: checkpoint
+            )
+            if activeSessionID == identity.sessionID {
+                messages = committedMessages
+                workState = session.workState
+                controlState = checkpointControlState
+                await refreshSessionSummaries()
+            }
+        } catch {
+            presentError(error)
+        }
+
+        if let client = ishPluginHostClient {
+            try? await synchronizeISHMobileContext(
+                client: client,
+                sessionID: identity.sessionID.uuidString,
+                runID: identity.runID
+            )
+        }
+
+        continuedProcessingController.finish(
+            runID: identity.runID,
+            identity: identity,
+            success: outcome == .succeeded
+        )
+        continuedProcessingController.releaseCompletion(runID: identity.runID, identity: identity)
+        do {
+            let phase: BackgroundRunJournalPhase = switch outcome {
+            case .succeeded: .succeeded
+            case .cancelled: .cancelled
+            case .failed: .failed
+            case .interrupted: .interrupted
+            case .disposed: .disposed
+            }
+            let lastDurableSequence: UInt64?
+            if let snapshot = try? await trajectoryRepository.snapshot(
+                sessionID: identity.sessionID
+            ) {
+                lastDurableSequence = snapshot.cursor.nextSequence == 0
+                    ? 0
+                    : snapshot.cursor.nextSequence - 1
+            } else {
+                lastDurableSequence = nil
+            }
+            try await backgroundRunJournal.markTerminal(
+                identity: identity,
+                phase: phase,
+                lastDurableSequence: lastDurableSequence
+            )
+        } catch {
+            await recordStartupIssue(error, source: "background_run_journal_terminal")
+        }
 #if os(iOS)
+        let liveActivityPhase: HarnessLiveActivityPhase = switch outcome {
+        case .succeeded: .completed
+        case .failed: .failed
+        case .cancelled, .interrupted, .disposed: .interrupted
+        }
         await HarnessLiveActivityManager.shared.finish(
-            runID: runID,
-            phase: .interrupted,
+            runID: identity.runID,
+            phase: liveActivityPhase,
             privacyModeEnabled: backgroundPreferences.isPrivacyModeEnabled
         )
 #endif
-        scheduleSystemExpirationResume()
-    }
 
-    private func scheduleSystemExpirationResume() {
-        guard backgroundAutoResumeGate.isApplicationActive,
-              let expiredRunID = backgroundAutoResumeGate.pendingRunID,
-              backgroundAutoResumeTask == nil else { return }
+        for token in backgroundLeaseTokens {
+            releaseFiniteBackgroundLease(token: token, for: identity)
+        }
+        // Terminal ownership removed this run from the registry before invoking
+        // cleanup. Re-evaluate against the remaining live roots so the last run
+        // releases its audio keep-alive leg, while another session keeps it.
+        refreshBackgroundAudioKeepAlive()
+        refreshBackgroundLocationKeepAlive()
+        if !backgroundLeaseTokens.isEmpty {
+            await traceStore.record(
+                HarnessTraceDraft(
+                    kind: .backgroundTask,
+                    sessionID: identity.sessionID,
+                    runID: identity.runID,
+                    name: "run/terminal-background-leases-released",
+                    attributes: [
+                        "count": .number(Double(backgroundLeaseTokens.count))
+                    ]
+                )
+            )
+        }
 
-        backgroundAutoResumeTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            defer { self.backgroundAutoResumeTask = nil }
+        switch outcome {
+        case .succeeded:
+            await deliverCompletionNotification(
+                runID: identity.runID,
+                sessionID: identity.sessionID,
+                succeeded: true
+            )
+        case .failed:
+            await deliverCompletionNotification(
+                runID: identity.runID,
+                sessionID: identity.sessionID,
+                succeeded: false
+            )
+        case .cancelled, .interrupted, .disposed:
+            break
+        }
 
-            while self.isRunning {
-                guard !Task.isCancelled,
-                      self.backgroundAutoResumeGate.isApplicationActive,
-                      self.backgroundAutoResumeGate.pendingRunID == expiredRunID else { return }
-                try? await Task.sleep(for: .milliseconds(100))
-            }
-
-            guard !Task.isCancelled,
-                  self.backgroundAutoResumeGate.pendingRunID == expiredRunID,
-                  self.backgroundAutoResumeGate.shouldResume(
-                    isRunning: self.isRunning,
-                    hasResumableRun: self.hasResumableRun
-                  ) else { return }
-
-            _ = self.backgroundAutoResumeGate.consumePendingRun()
-            self.lastBackgroundEvent = "foreground_auto_resume"
-            self.resumePendingRun()
+        if activeSessionID == identity.sessionID,
+           selectedRunPresentation?.identity == identity {
+            hasResumableRun = Self.canResume(messages)
+            await refreshTrajectory(for: identity.sessionID)
+            await refreshHarnessTrace(for: identity)
+        }
+        if outcome == .interrupted {
+            await scheduleSystemExpirationResume(for: identity.sessionID)
         }
     }
 
-    private func deliverCompletionNotification(runID: UUID, succeeded: Bool) async {
+    private func auditBackgroundRunJournalOnLaunch() async {
+        do {
+            let audit = try await backgroundRunJournal.auditOnLaunch()
+            guard audit.didCleanOrphans else { return }
+            for identifier in audit.clearedRequestIdentifiers {
+                continuedProcessingController.cancelOrphanRequest(identifier: identifier)
+            }
+#if os(iOS)
+            let activeRunIDs = Set((await sessionRunRegistry.aggregate()).runs.map { $0.identity.runID })
+            await HarnessLiveActivityManager.shared.cleanupStaleActivities(activeRunIDs: activeRunIDs)
+#endif
+            refreshBackgroundAudioKeepAlive()
+            refreshBackgroundLocationKeepAlive()
+        } catch {
+            await recordStartupIssue(error, source: "background_run_journal_launch_audit")
+        }
+    }
+
+    private func auditBackgroundRunJournalOnForeground() async {
+        do {
+            let audit = try await backgroundRunJournal.auditOnForeground()
+            guard audit.didCleanOrphans else { return }
+            for identifier in audit.clearedRequestIdentifiers {
+                continuedProcessingController.cancelOrphanRequest(identifier: identifier)
+            }
+#if os(iOS)
+            let activeRunIDs = Set((await sessionRunRegistry.aggregate()).runs.map { $0.identity.runID })
+            await HarnessLiveActivityManager.shared.cleanupStaleActivities(activeRunIDs: activeRunIDs)
+#endif
+            refreshBackgroundAudioKeepAlive()
+            refreshBackgroundLocationKeepAlive()
+        } catch {
+            await recordStartupIssue(error, source: "background_run_journal_foreground_audit")
+        }
+    }
+
+    private func releaseFiniteBackgroundLeaseForHandoff(identity: RunIdentity) {
+        guard let token = finiteBackgroundLeaseTokens[identity] else { return }
+        finiteBackgroundLeaseTokens.removeValue(forKey: identity)
+        legacyBackgroundTaskLease.release(token)
+        Task { [sessionRunRegistry] in
+            try? await sessionRunRegistry.removeBackgroundLease(token, from: identity)
+        }
+    }
+
+    private func releaseFiniteBackgroundLease(
+        token: SessionRunBackgroundLeaseToken,
+        for identity: RunIdentity
+    ) {
+        if finiteBackgroundLeaseTokens[identity] == token {
+            finiteBackgroundLeaseTokens.removeValue(forKey: identity)
+        }
+        legacyBackgroundTaskLease.release(token)
+    }
+
+    private func scheduleSystemExpirationResume(for sessionID: UUID) async {
+        guard let identity = await backgroundResumeCoordinator.pendingIdentity(
+            sessionID: sessionID
+        ) else { return }
+        _ = await backgroundResumeCoordinator.startMonitor(
+            for: identity,
+            readiness: { [weak self] in
+                guard let self else { return false }
+                guard await self.sessionRunRegistry.lookup(
+                    sessionID: identity.sessionID
+                ) == nil else {
+                    return false
+                }
+                return await MainActor.run {
+                    self.activeSessionID == identity.sessionID
+                        && !self.isRunning
+                        && self.hasResumableRun
+                }
+            },
+            resume: { [weak self] in
+                await self?.resumePendingRunNow()
+            }
+        )
+    }
+
+    private func deliverCompletionNotification(
+        runID: UUID,
+        sessionID: UUID,
+        succeeded: Bool
+    ) async {
         guard backgroundPreferences.areTaskNotificationsEnabled else { return }
-        let taskTitle = sessions.first(where: { $0.id == activeSessionID })?.title
+        let taskTitle = sessions.first(where: { $0.id == sessionID })?.title
         try? await completionNotifier.deliverCompletion(
             runID: runID,
             succeeded: succeeded,
@@ -6720,9 +7546,9 @@ final class AppModel {
         let earliest = Date(timeIntervalSince1970: max(now + 1, Double(runAt) / 1_000))
         do {
             try scheduleBackgroundController.submit(earliestBeginDate: earliest)
-            lastBackgroundEvent = "schedule_submitted"
+            scheduleBackgroundEvent = "schedule_submitted"
         } catch {
-            lastBackgroundEvent = "schedule_submit_failed"
+            scheduleBackgroundEvent = "schedule_submit_failed"
             await traceStore.record(
                 HarnessTraceDraft(
                     kind: .backgroundTask,
@@ -6737,27 +7563,41 @@ final class AppModel {
     }
 
     private func handleScheduleBackgroundTask(_ task: BGProcessingTask) async {
+        let claimOwner = "bg-\(UUID().uuidString.lowercased())"
+        var didExpire = false
         task.expirationHandler = { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                if self.isRunning { self.cancelRun() }
+                didExpire = true
+                // Expiration must only release this task's schedule claim.
+                // The claimed record is requeued below after the bounded run
+                // quiesces; if iOS terminates us first, cold launch reclaim
+                // handles the lease without touching another foreground run.
             }
         }
 
-        let due = await scheduleStore.claimDue(now: nil, limit: 1)
+        let due = await scheduleStore.claimDue(now: nil, limit: 1, owner: claimOwner)
         var succeeded = true
         for schedule in due {
             guard !Task.isCancelled else {
+                try? await scheduleStore.requeue(id: schedule.id, owner: claimOwner, reason: "task cancelled")
+                succeeded = false
+                break
+            }
+            guard !didExpire else {
+                try? await scheduleStore.requeue(id: schedule.id, owner: claimOwner, reason: "system expiration")
                 succeeded = false
                 break
             }
             guard let sessionID = UUID(uuidString: schedule.ownerSession) else {
+                try? await scheduleStore.requeue(id: schedule.id, owner: claimOwner, reason: "invalid owner session")
                 succeeded = false
                 continue
             }
             do {
                 let session = try await sessionStore.session(id: sessionID)
                 guard !isRunning else {
+                    try? await scheduleStore.requeue(id: schedule.id, owner: claimOwner, reason: "session already running")
                     succeeded = false
                     break
                 }
@@ -6776,17 +7616,31 @@ final class AppModel {
                     ])
                 )
                 messages.append(message)
-                startRun(
+                await startRun(
                     history: messages,
                     workState: workState,
                     shouldCheckpointBeforeRun: true,
                     initialUserMessage: message,
                     useContinuedProcessing: false
                 )
-                let run = runTask
-                await run?.value
-                succeeded = succeeded && !isRunning && backgroundRuntimeStatus != .completed(success: false)
+                if let identity = selectedRunPresentation?.identity {
+                    try? await sessionRunRegistry.awaitQuiescence(for: identity)
+                }
+                if didExpire {
+                    try? await scheduleStore.requeue(id: schedule.id, owner: claimOwner, reason: "system expiration")
+                    succeeded = false
+                } else if !isRunning && backgroundRuntimeStatus != .completed(success: false) {
+                    try? await scheduleStore.acknowledge(id: schedule.id, owner: claimOwner)
+                } else {
+                    try? await scheduleStore.requeue(id: schedule.id, owner: claimOwner, reason: "run did not complete")
+                    succeeded = false
+                }
             } catch {
+                try? await scheduleStore.requeue(
+                    id: schedule.id,
+                    owner: claimOwner,
+                    reason: error.localizedDescription
+                )
                 succeeded = false
                 presentError(error)
             }
@@ -6822,14 +7676,37 @@ final class AppModel {
         messages = session.messages
         workState = session.workState
         controlState = session.controlState
-        currentStep = 0
-        latestUsage = nil
-        resetStreamingPresentation()
-        activeContextInjections = []
-        activeToolStatus = nil
-        resetActiveToolPresentation()
+        selectedRunPresentation = nil
         omittedContextMessages = 0
         hasResumableRun = Self.canResume(session.messages)
+    }
+
+    private func restoreRunPresentation(for sessionID: UUID) async {
+        guard activeSessionID == sessionID else { return }
+        await refreshSessionRunProjection()
+        selectedRunPresentation = sessionRunSnapshots[sessionID]?.presentation
+        if let presentation = selectedRunPresentation {
+            controlState.replaceQueuedInputs(presentation.queuedInputs)
+        }
+    }
+
+    /// Rebuilds the transient session-list run projection from the registry.
+    /// SessionStore remains the source for durable metadata; this map is only
+    /// for live root phase, queue, and presentation status.
+    private func refreshSessionRunProjection() async {
+        let aggregate = await sessionRunRegistry.aggregate()
+        sessionRunSnapshots = Dictionary(
+            uniqueKeysWithValues: aggregate.runs.map { ($0.identity.sessionID, $0) }
+        )
+        await refreshAppIntentRunningSessionProjection()
+    }
+
+    private func refreshAppIntentRunningSessionProjection() async {
+        do {
+            try await appIntentInboxStore.updateRunningSessions(Set(sessionRunSnapshots.keys))
+        } catch {
+            await recordStartupIssue(error, source: "app_intent_running_projection")
+        }
     }
 
     private func projectFeedbackSidecar() async {
@@ -6848,6 +7725,8 @@ final class AppModel {
 
     private func refreshSessionSummaries() async {
         do {
+            await refreshSessionRunProjection()
+            _ = try await sessionQueryReadModel.rebuild(persistence: trajectoryRepository)
             sessions = try await sessionStore.listSessions()
                 .sorted { $0.updatedAt > $1.updatedAt }
         } catch {
@@ -6883,6 +7762,25 @@ final class AppModel {
         return try await credentialStore.readAPIKey(for: origin)
     }
 
+    /// Resolves the current profile identity only while a request is being
+    /// assembled. The returned value is immutable and contains no credential.
+    func providerRequestRoute(
+        for configuration: AgentConfiguration
+    ) throws -> ProviderRequestRoute {
+        let profileID = providerDirectory.profile(matching: configuration)?.id
+            ?? configuration.profileID
+        let generation = profileID.flatMap { providerRouteGenerations[$0] } ?? 0
+        return try ProviderRequestRoute(
+            configuration: configuration,
+            profileID: profileID,
+            generation: generation
+        )
+    }
+
+    private func advanceProviderRouteGeneration(for profileID: String) {
+        providerRouteGenerations[profileID, default: 0] &+= 1
+    }
+
     func contextWindow(for configuration: AgentConfiguration) -> Int? {
         let configuredModels = providerDirectory.profile(matching: configuration)?.models
             ?? ModelProviderCatalog.descriptor(for: configuration.providerID).builtInModels
@@ -6903,111 +7801,6 @@ final class AppModel {
             return models
         }
         return models + [ProviderModel(id: modelID)]
-    }
-
-    private func upsertActiveToolEvent(_ event: AgentToolEvent) {
-        if event.status == .running,
-           activeToolEvents.contains(where: { $0.callID == event.callID }) {
-            var pending = pendingActiveToolPresentations[event.callID, default: .init()]
-            pending.replace(with: event)
-            pendingActiveToolPresentations[event.callID] = pending
-            scheduleActiveToolPresentation()
-            return
-        }
-
-        pendingActiveToolPresentations.removeValue(forKey: event.callID)
-        applyActiveToolEvent(event)
-        cancelActiveToolPresentationTaskIfIdle()
-    }
-
-    private func applyActiveToolEvent(_ event: AgentToolEvent) {
-        for index in activeToolEvents.indices {
-            if activeToolEvents[index].replaceRecursively(event) {
-                return
-            }
-        }
-        activeToolEvents.append(event)
-    }
-
-    private func appendActiveToolOutput(
-        callID: String,
-        chunk: AgentToolOutputChunk
-    ) {
-        let rootCallID = pendingActiveToolPresentations.first(where: { _, pending in
-            pending.replacement?.containsRecursively(callID: callID) == true
-        })?.key ?? activeToolEvents.first(where: {
-            $0.containsRecursively(callID: callID)
-        })?.callID ?? callID
-        var pending = pendingActiveToolPresentations[rootCallID, default: .init()]
-        pending.append(callID: callID, chunk: chunk)
-        pendingActiveToolPresentations[rootCallID] = pending
-        scheduleActiveToolPresentation()
-    }
-
-    private func scheduleActiveToolPresentation() {
-        guard activeToolPresentationTask == nil else { return }
-        activeToolPresentationTask = Task { @MainActor [weak self] in
-            do {
-                try await Task.sleep(for: .milliseconds(100))
-            } catch {
-                return
-            }
-            guard !Task.isCancelled else { return }
-            self?.flushActiveToolPresentation()
-        }
-    }
-
-    private func flushActiveToolPresentation() {
-        activeToolPresentationTask = nil
-        let pending = pendingActiveToolPresentations
-        pendingActiveToolPresentations.removeAll(keepingCapacity: true)
-        for rootCallID in pending.keys.sorted() {
-            guard let presentation = pending[rootCallID] else { continue }
-            if let replacement = presentation.replacement {
-                applyActiveToolEvent(replacement)
-            }
-            for callID in presentation.outputByCallID.keys.sorted() {
-                guard let chunks = presentation.outputByCallID[callID] else { continue }
-                for chunk in chunks {
-                    for index in activeToolEvents.indices {
-                        if activeToolEvents[index].appendOutputRecursively(
-                            callID: callID,
-                            chunk: chunk
-                        ) {
-                            break
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private func cancelActiveToolPresentationTaskIfIdle() {
-        guard pendingActiveToolPresentations.isEmpty else { return }
-        activeToolPresentationTask?.cancel()
-        activeToolPresentationTask = nil
-    }
-
-    private func resetActiveToolPresentation() {
-        activeToolPresentationTask?.cancel()
-        activeToolPresentationTask = nil
-        pendingActiveToolPresentations.removeAll(keepingCapacity: true)
-        activeToolEvents = []
-    }
-
-    private func finishActiveToolEvents(
-        status: AgentToolEventStatus,
-        message: String
-    ) {
-        flushActiveToolPresentation()
-        let now = Date.now
-        for index in activeToolEvents.indices {
-            activeToolEvents[index].finishNonterminalRecursively(
-                status: status,
-                message: message,
-                at: now
-            )
-        }
     }
 
     private static func canResume(_ messages: [AgentMessage]) -> Bool {

@@ -111,6 +111,7 @@ actor CordisToolRuntime {
     private struct ToolEntry: Sendable {
         let registrationID: UUID
         let pluginID: CordisPluginID
+        let mcpGenerationID: UUID?
         let tool: any LocalAgentTool
     }
 
@@ -137,10 +138,52 @@ actor CordisToolRuntime {
         toolEntries[name] = ToolEntry(
             registrationID: registrationID,
             pluginID: pluginID,
+            mcpGenerationID: nil,
             tool: tool
         )
         return { [runtime = self] in
             await runtime.removeTool(name: name, registrationID: registrationID)
+        }
+    }
+
+    /// Replaces every tool in one configured local-server generation within this actor turn.
+    /// Callers either observe the prior full set or the replacement full set;
+    /// conflicting third-party names fail before any entry is changed.
+    func replaceMCPTools(
+        pluginID: CordisPluginID,
+        generationID: UUID,
+        tools: [any LocalAgentTool]
+    ) throws {
+        var replacements: [String: ToolEntry] = [:]
+        for tool in tools {
+            let name = tool.definition.name
+            try Self.validateContributionName(name)
+            guard replacements[name] == nil else {
+                throw CordisAgentServiceError.duplicateTool(name)
+            }
+            if let existing = toolEntries[name],
+               existing.pluginID != pluginID,
+               existing.mcpGenerationID != generationID {
+                throw CordisAgentServiceError.duplicateTool(name)
+            }
+            replacements[name] = ToolEntry(
+                registrationID: UUID(),
+                pluginID: pluginID,
+                mcpGenerationID: generationID,
+                tool: tool
+            )
+        }
+        toolEntries = toolEntries.filter { _, entry in
+            entry.mcpGenerationID != generationID
+        }
+        for (name, entry) in replacements {
+            toolEntries[name] = entry
+        }
+    }
+
+    func removeMCPTools(generationID: UUID) {
+        toolEntries = toolEntries.filter { _, entry in
+            entry.mcpGenerationID != generationID
         }
     }
 

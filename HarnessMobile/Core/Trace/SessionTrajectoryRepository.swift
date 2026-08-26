@@ -31,7 +31,7 @@ enum SessionTrajectoryRepositoryError: Error, Sendable, Equatable, LocalizedErro
 /// Stores are keyed by session identity instead of a mutable "current" file so
 /// a cancelled run can finish closing its events without writing into a newly
 /// selected conversation.
-actor SessionTrajectoryRepository {
+actor SessionTrajectoryRepository: SessionPersistence {
     private let directory: URL
     private var knownEventTypes: Set<String>
     private var stores: [UUID: SessionEventJSONLStore] = [:]
@@ -56,7 +56,9 @@ actor SessionTrajectoryRepository {
     }
 
     func prepare(sessionID: UUID) async throws -> SessionTrajectoryPreparation {
-        let snapshot = try await store(for: sessionID).recover()
+        let sessionStore = try store(for: sessionID)
+        try await sessionStore.flush()
+        let snapshot = try await sessionStore.recover()
         let maximumTurn = snapshot.events.compactMap(Self.turnNumber).max() ?? 0
         let (nextTurn, overflow) = maximumTurn.addingReportingOverflow(1)
         guard !overflow else { throw SessionTrajectoryRepositoryError.turnNumberExhausted }
@@ -76,6 +78,14 @@ actor SessionTrajectoryRepository {
         after cursor: SessionTrajectoryCursor? = nil
     ) async throws -> SessionTrajectorySnapshot {
         try await store(for: sessionID).snapshot(after: cursor)
+    }
+
+    func persistenceSnapshot(sessionID: UUID) async throws -> SessionPersistenceSnapshot {
+        let snapshot = try await store(for: sessionID).snapshot(after: nil)
+        return SessionPersistenceSnapshot(
+            snapshot: snapshot,
+            revision: try await store(for: sessionID).persistenceRevision()
+        )
     }
 
     /// Reads the complete persisted stream on demand. The live AppModel keeps
@@ -129,6 +139,22 @@ actor SessionTrajectoryRepository {
     func flush(sessionID: UUID) async throws {
         guard let store = stores[sessionID] else { return }
         try await store.flush()
+    }
+
+    func listSessionIDs() async throws -> [UUID] {
+        guard FileManager.default.fileExists(atPath: directory.path) else { return [] }
+        let urls = try FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )
+        return urls.compactMap { url in
+            guard url.pathExtension == "jsonl" else { return nil }
+            guard (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0 > 0 else {
+                return nil
+            }
+            return UUID(uuidString: url.deletingPathExtension().lastPathComponent)
+        }.sorted { $0.uuidString < $1.uuidString }
     }
 
     func delete(sessionID: UUID) async throws {

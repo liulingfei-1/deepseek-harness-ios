@@ -21,14 +21,216 @@ extension AppModel {
     }
 
     func presentLongConversationForUITesting() {
-        messages = (0..<240).map { index in
+        messages = (0..<1_000).map { index in
             let payload = "长对话性能夹具"
             if index.isMultiple(of: 2) {
                 return AgentMessage.user("perf-message-\(index) \(payload)")
             }
-            return AgentMessage.assistant("perf-message-\(index) \(payload)")
+            let toolCalls = index == 999
+                ? (0..<100).map { toolIndex in
+                    AgentToolCall(
+                        id: "perf-call-\(toolIndex)",
+                        name: "perf_tool_\(toolIndex)",
+                        arguments: "{\"index\":\(toolIndex)}"
+                    )
+                }
+                : []
+            return AgentMessage.assistant(
+                "perf-message-\(index) \(payload)",
+                toolCalls: toolCalls
+            )
         }
-        streamingText = String(repeating: "流式尾部 ", count: 160) + "perf-stream-tail"
+        var presentation = uiTestingRunPresentation()
+        presentation.streamingText = String(repeating: "流式尾部 ", count: 160)
+            + "perf-stream-tail"
+        presentation.streamingPresentationRevision &+= 1
+        selectedRunPresentation = presentation
+    }
+
+    func presentConcurrentSessionRunsForUITesting() async {
+        guard let firstSessionID = activeSessionID else { return }
+        let firstIdentity = await sessionRunRegistry.allocateIdentity(sessionID: firstSessionID)
+        let first = try? await sessionRunRegistry.register(identity: firstIdentity) {
+            SessionRunPreparedConfiguration(trajectorySessionID: firstSessionID)
+        }
+        guard let first else { return }
+        _ = await first.handle.beginRunning(for: firstIdentity)
+        _ = await first.state.markRunning(for: firstIdentity)
+
+        await createConversation(title: "并发会话 B")
+        guard let secondSessionID = activeSessionID else { return }
+        let secondIdentity = await sessionRunRegistry.allocateIdentity(sessionID: secondSessionID)
+        let second = try? await sessionRunRegistry.register(identity: secondIdentity) {
+            SessionRunPreparedConfiguration(trajectorySessionID: secondSessionID)
+        }
+        guard let second else { return }
+        _ = await second.handle.beginRunning(for: secondIdentity)
+        _ = await second.state.markRunning(for: secondIdentity)
+
+        // End on the original session so the UI exercise proves that switching
+        // away from the newly created session preserves both root runs.
+        await switchConversation(to: firstSessionID)
+    }
+
+    func presentTrajectoryForUITesting() async {
+        guard let sessionID = activeSessionID else { return }
+        let userID = UUID().uuidString
+        let assistantID = UUID().uuidString
+        let usage = SessionTokenUsage(
+            inputTokens: 120,
+            outputTokens: 24,
+            cacheReadTokens: 80,
+            cacheWriteTokens: 0,
+            reasoningTokens: 6
+        )
+        let header: JSONValue = .object([
+            "config": .object([
+                "provider": .string("deepseek"),
+                "model": .string("deepseek-chat"),
+                "tools": .array([.string("workspace_read_text")])
+            ]),
+            "system": .string("UI-008 trajectory fixture")
+        ])
+        let userMessage: JSONValue = .object([
+            "id": .string(userID),
+            "role": .string("user"),
+            "content": .array([.object([
+                "type": .string("text"),
+                "text": .string("inspect this trajectory")
+            ])]),
+            "source": .object(["kind": .string("user")])
+        ])
+        let assistantMessage: JSONValue = .object([
+            "id": .string(assistantID),
+            "role": .string("assistant"),
+            "content": .array([.object([
+                "type": .string("text"),
+                "text": .string("I inspected the local session.")
+            ]), .object([
+                "type": .string("tool-call"),
+                "id": .string("ui008-call"),
+                "name": .string("workspace_read_text"),
+                "arguments": .string("{\"path\":\"/workspace/README.md\"}")
+            ])])
+        ])
+        let toolMessage: JSONValue = .object([
+            "id": .string(UUID().uuidString),
+            "role": .string("tool"),
+            "content": .array([.object([
+                "type": .string("text"),
+                "text": .string("README fixture output")
+            ])]),
+            "source": .object([
+                "kind": .string("tool"),
+                "callId": .string("ui008-call")
+            ])
+        ])
+
+        do {
+            _ = try await trajectoryRepository.append(
+                .requestHeader(header: header, reason: .initial, time: 1_000),
+                sessionID: sessionID
+            )
+            _ = try await trajectoryRepository.append(
+                .requestContext(
+                    provider: "deepseek",
+                    model: "deepseek-chat",
+                    contextWindow: 128_000,
+                    time: 1_010
+                ),
+                sessionID: sessionID
+            )
+            _ = try await trajectoryRepository.append(
+                .turnStart(turn: 1, time: 1_020),
+                sessionID: sessionID
+            )
+            _ = try await trajectoryRepository.append(
+                .stepStart(turn: 1, step: 1, time: 1_030),
+                sessionID: sessionID
+            )
+            _ = try await trajectoryRepository.append(
+                .userMessage(userMessage, time: 1_040),
+                sessionID: sessionID
+            )
+            _ = try await trajectoryRepository.append(
+                .assistantMessage(
+                    turn: 1,
+                    step: 1,
+                    message: assistantMessage,
+                    usage: usage,
+                    time: 1_120
+                ),
+                sessionID: sessionID
+            )
+            _ = try await trajectoryRepository.append(
+                .toolCall(
+                    turn: 1,
+                    step: 1,
+                    callID: "ui008-call",
+                    name: "workspace_read_text",
+                    arguments: "{\"path\":\"/workspace/README.md\"}",
+                    time: 1_140
+                ),
+                sessionID: sessionID
+            )
+            _ = try await trajectoryRepository.append(
+                .toolResult(
+                    turn: 1,
+                    step: 1,
+                    message: toolMessage,
+                    time: 1_240
+                ),
+                sessionID: sessionID
+            )
+            _ = try await trajectoryRepository.append(
+                .stepEnd(turn: 1, step: 1, time: 1_250),
+                sessionID: sessionID
+            )
+            _ = try await trajectoryRepository.append(
+                .turnEnd(turn: 1, reason: .string("completed"), time: 1_260),
+                sessionID: sessionID
+            )
+            try await trajectoryRepository.flush(sessionID: sessionID)
+            await refreshTrajectory()
+        } catch {
+            presentError(error)
+        }
+    }
+
+    func presentLargeMarkdownForUITesting(characterCount: Int = 1_000_000) {
+        isConfigured = true
+        let prefix = """
+        # large-markdown-start
+
+        """
+        let suffix = """
+
+
+        # large-markdown-end
+
+        [OpenAI](https://openai.com)
+
+        > quoted line one
+        > quoted line two
+
+        | Name | Status |
+        | :--- | :----: |
+        | Harness | ready |
+
+        ~~~~swift
+        let localOnly = true
+        ~~~~
+        """
+        let paragraph = String(repeating: "bounded markdown paragraph word ", count: 120) + "\n\n"
+        let tailPadding = String(repeating: "x", count: 12_000) + "\n\n"
+        let bodyCount = max(
+            0,
+            characterCount - prefix.count - tailPadding.count - suffix.count
+        )
+        let repeatedBody = String(repeating: paragraph, count: bodyCount / paragraph.count)
+        let remainder = String(repeating: "x", count: bodyCount - repeatedBody.count)
+        let markdown = prefix + repeatedBody + remainder + tailPadding + suffix
+        messages = [AgentMessage.assistant(markdown)]
     }
 
     func presentPluginMarketplaceForUITesting() {
@@ -169,6 +371,67 @@ extension AppModel {
         ishPluginMarketplaceOperation = nil
     }
 
+    func presentPluginCompilationFailureForUITesting() {
+        presentPluginMarketplaceForUITesting()
+
+        let timestamp = Date(timeIntervalSince1970: 1_724_587_200)
+        var trace = NativePluginCompilationTrace(
+            source: "example/unsupported-web-client",
+            now: timestamp
+        )
+        trace.finishedAt = timestamp.addingTimeInterval(12)
+        trace.outcome = "失败：检测到未审计的 Web client contribution。"
+        trace.diagnostic = NativeAgentCompilationDiagnostic(
+            code: "UNSUPPORTED_CLIENT_CONTRIBUTION",
+            stage: NativePluginCompilationStage.validation.rawValue,
+            message: "该插件请求 Web client slot；手机端不动态加载 Web 或 Swift 代码。",
+            retryable: false,
+            suggestedAction: "删除 Web client contribution，改用受控 native manifest 后重新编译。"
+        )
+        trace.steps = trace.steps.map { step in
+            var updated = step
+            switch step.stage {
+            case .sourceAcquisition:
+                updated.state = .succeeded
+                updated.detail = "源码快照已完成，凭据仍留在 Keychain。"
+            case .sourceAnalysis:
+                updated.state = .succeeded
+                updated.detail = "已识别插件贡献和本机 Host 边界。"
+            case .adaptability:
+                updated.state = .succeeded
+                updated.detail = "核心能力可投影为受控原生清单。"
+            case .modelCompilation:
+                updated.state = .succeeded
+                updated.detail = "Agent 已返回候选原生插件清单。"
+            case .validation:
+                updated.state = .failed
+                updated.detail = "拒绝未审计的 Web client contribution。"
+            case .nativeInstallation, .ishFallback:
+                updated.state = .skipped
+                updated.detail = "校验失败，未继续执行。"
+            }
+            updated.updatedAt = timestamp
+            return updated
+        }
+        trace.logs = [
+            NativePluginCompilationLogEntry(
+                id: UUID(uuidString: "00000000-0000-0000-0000-000000000009")!,
+                timestamp: timestamp,
+                stage: .sourceAcquisition,
+                state: .succeeded,
+                message: "源码快照已完成，凭据仍留在 Keychain。"
+            ),
+            NativePluginCompilationLogEntry(
+                id: UUID(uuidString: "00000000-0000-0000-0000-000000000010")!,
+                timestamp: timestamp.addingTimeInterval(12),
+                stage: .validation,
+                state: .failed,
+                message: "拒绝未审计的 Web client contribution。"
+            ),
+        ]
+        nativePluginCompilationTrace = trace
+    }
+
     func presentPlanReviewForUITesting() {
         let request = AskUserQuestionRequest(
             questions: [
@@ -191,10 +454,27 @@ extension AppModel {
                 ),
             ]
         )
-        pendingUserQuestion = ContinuationUserQuestionProvider.Pending(
+        var presentation = uiTestingRunPresentation()
+        presentation.pendingUserQuestion = ContinuationUserQuestionProvider.Pending(
             id: request.id,
             request: request
         )
+        selectedRunPresentation = presentation
+    }
+
+    private func uiTestingRunPresentation() -> SessionRunPresentation {
+        if let selectedRunPresentation {
+            return selectedRunPresentation
+        }
+        let identity = RunIdentity(
+            sessionID: activeSessionID ?? UUID(),
+            runID: UUID(),
+            generation: 1
+        )
+        var presentation = SessionRunPresentation(identity: identity)
+        presentation.phase = .running
+        presentation.runStartedAt = .now
+        return presentation
     }
 }
 #endif

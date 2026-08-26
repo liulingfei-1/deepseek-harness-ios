@@ -321,6 +321,7 @@ private struct ISHCommandConsoleView: View {
         HStack(alignment: .bottom, spacing: 8) {
             TextField("输入 Alpine 命令", text: $command, axis: .vertical)
                 .accessibilityIdentifier("ish-command-field")
+                .accessibilityLabel("Alpine 命令")
                 .focused($isCommandFocused)
                 .lineLimit(1...5)
                 .textInputAutocapitalization(.never)
@@ -339,7 +340,7 @@ private struct ISHCommandConsoleView: View {
                 } label: {
                     Image(systemName: "stop.fill")
                         .foregroundStyle(.white)
-                        .frame(width: 36, height: 36)
+                        .frame(width: 44, height: 44)
                         .background(.red, in: Circle())
                 }
                 .accessibilityLabel("停止命令")
@@ -348,7 +349,7 @@ private struct ISHCommandConsoleView: View {
                 Button(action: runCommand) {
                     Image(systemName: "play.fill")
                         .foregroundStyle(.white)
-                        .frame(width: 36, height: 36)
+                        .frame(width: 44, height: 44)
                         .background(Color.accentColor, in: Circle())
                 }
                 .disabled(!canRun)

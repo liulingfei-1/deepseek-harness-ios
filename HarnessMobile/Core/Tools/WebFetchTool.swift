@@ -132,24 +132,28 @@ enum WebFetchError: LocalizedError, Sendable, Equatable {
 }
 
 struct WebFetchTool: LocalAgentTool {
-    let definition = ModelToolDefinition(
-        name: "web_fetch",
-        description: "Fetch one public HTTP or HTTPS URL directly from this iPhone. Returns bounded text or HTML with the final URL and HTTP status. It never sends model-provider credentials.",
-        parameters: .object([
-            "type": .string("object"),
-            "properties": .object([
-                "url": .object([
-                    "type": .string("string"),
-                    "description": .string("Absolute HTTP or HTTPS URL without embedded credentials.")
-                ])
-            ]),
-            "required": .array([.string("url")]),
-            "additionalProperties": .bool(false)
-        ])
-    )
     let risk: ToolRisk = .sideEffect
 
     private let client: WebFetchHTTPClient
+
+    var definition: ModelToolDefinition {
+        ModelToolDefinition(
+            name: "web_fetch",
+            description: "Fetch one public HTTP or HTTPS URL directly from this iPhone. Returns bounded text or HTML with the final URL and HTTP status. It never sends model-provider credentials.",
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "url": .object([
+                        "type": .string("string"),
+                        "description": .string("Absolute HTTP or HTTPS URL without embedded credentials.")
+                    ])
+                ]),
+                "required": .array([.string("url")]),
+                "additionalProperties": .bool(false)
+            ]),
+            timeoutMs: max(1, Int((client.limits.timeoutSeconds * 1_000).rounded()))
+        )
+    }
 
     init(client: WebFetchHTTPClient = WebFetchHTTPClient()) {
         self.client = client
@@ -299,25 +303,29 @@ struct WebSearchTool: LocalAgentTool {
 
     let limits: Limits
     private let provider: any WebSearchProvider
-    let definition = ModelToolDefinition(
-        name: "web_search",
-        description: "Search the web from the iPhone and return bounded ranked sources. Search runs over the phone network, never on a remote command executor; use web_fetch to inspect a selected result in detail.",
-        parameters: .object([
-            "type": .string("object"),
-            "properties": .object([
-                "queries": .object([
-                    "type": .string("array"),
-                    "items": .object(["type": .string("string")]),
-                    "minItems": .number(1),
-                    "maxItems": .number(4),
-                    "description": .string("Required non-empty search queries. One to four queries run concurrently on the phone.")
-                ])
-            ]),
-            "required": .array([.string("queries")]),
-            "additionalProperties": .bool(false)
-        ])
-    )
     let risk: ToolRisk = .sensitiveRead
+
+    var definition: ModelToolDefinition {
+        ModelToolDefinition(
+            name: "web_search",
+            description: "Search the web from the iPhone and return bounded ranked sources. Search runs over the phone network, never on a remote command executor; use web_fetch to inspect a selected result in detail.",
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "queries": .object([
+                        "type": .string("array"),
+                        "items": .object(["type": .string("string")]),
+                        "minItems": .number(1),
+                        "maxItems": .number(4),
+                        "description": .string("Required non-empty search queries. One to four queries run concurrently on the phone.")
+                    ])
+                ]),
+                "required": .array([.string("queries")]),
+                "additionalProperties": .bool(false)
+            ]),
+            timeoutMs: max(1, Int((limits.timeout * 1_000).rounded()))
+        )
+    }
 
     init(
         limits: Limits = Limits(),

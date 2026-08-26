@@ -85,6 +85,7 @@ actor AgentRuntime {
     typealias QueuedInputCommitter = @Sendable (UUID) async -> Bool
     typealias SystemPromptProvider = @Sendable () async -> String
     typealias APIKeyProvider = @Sendable (AgentConfiguration) async throws -> String
+    typealias ProviderRequestRouteProvider = @Sendable (AgentConfiguration) async throws -> ProviderRequestRoute
     typealias CompactionConfigurationProvider = @Sendable (AgentConfiguration) async throws -> AgentConfiguration?
     typealias ContextWindowProvider = @Sendable (AgentConfiguration) async -> Int?
     typealias SurfaceReplacementRangeProvider = @Sendable (Int) async throws -> ClosedRange<UInt64>?
@@ -96,6 +97,7 @@ actor AgentRuntime {
     typealias ImageAttachmentProvider = @Sendable ([AgentImageAttachmentRef]) async throws -> [ModelImagePayload]
     typealias TraceHandler = @Sendable (HarnessTraceDraft) async -> Void
     typealias SessionEventHandler = @Sendable (SessionEventDraft) async throws -> SessionEvent?
+    typealias SessionEventSnapshotProvider = @Sendable () async throws -> [SessionEvent]
     typealias CheckpointHandler = @Sendable () async throws -> Void
 
     private let agentID: UUID
@@ -110,6 +112,7 @@ actor AgentRuntime {
     private let workspaceBoundary: String
     private let systemPromptProvider: SystemPromptProvider?
     private let apiKeyProvider: APIKeyProvider?
+    private let providerRequestRouteProvider: ProviderRequestRouteProvider?
     private let compactionConfigurationProvider: CompactionConfigurationProvider?
     private let contextWindowProvider: ContextWindowProvider?
     private let surfaceReplacementRangeProvider: SurfaceReplacementRangeProvider?
@@ -123,10 +126,12 @@ actor AgentRuntime {
     private let agentPreset: AgentPresetRuntimeProjection?
     private let traceHandler: TraceHandler
     private let sessionEventHandler: SessionEventHandler
+    private let sessionEventSnapshotProvider: SessionEventSnapshotProvider?
     private let checkpointHandler: CheckpointHandler
     private var openSessionTurn: Int?
     private var openSessionStep: SessionStepData?
     private var promptContributionFingerprints: [String: String] = [:]
+    private var sessionEventLedger: [UInt64: SessionEvent] = [:]
     private static let maximumParallelToolCalls = MobileHarnessPrompt.maximumParallelToolCalls
     init(
         agentID: UUID? = nil,
@@ -142,6 +147,7 @@ actor AgentRuntime {
         workspaceBoundary: String = "workspace",
         systemPromptProvider: SystemPromptProvider? = nil,
         apiKeyProvider: APIKeyProvider? = nil,
+        providerRequestRouteProvider: ProviderRequestRouteProvider? = nil,
         compactionConfigurationProvider: CompactionConfigurationProvider? = nil,
         contextWindowProvider: ContextWindowProvider? = nil,
         surfaceReplacementRangeProvider: SurfaceReplacementRangeProvider? = nil,
@@ -154,6 +160,7 @@ actor AgentRuntime {
         agentPreset: AgentPresetRuntimeProjection? = nil,
         traceHandler: @escaping TraceHandler = { _ in },
         sessionEventHandler: @escaping SessionEventHandler = { _ in nil },
+        sessionEventSnapshotProvider: SessionEventSnapshotProvider? = nil,
         checkpointHandler: @escaping CheckpointHandler = {}
     ) {
         self.agentID = agentID ?? runID
@@ -169,6 +176,7 @@ actor AgentRuntime {
         self.workspaceBoundary = workspaceBoundary
         self.systemPromptProvider = systemPromptProvider
         self.apiKeyProvider = apiKeyProvider
+        self.providerRequestRouteProvider = providerRequestRouteProvider
         self.compactionConfigurationProvider = compactionConfigurationProvider
         self.contextWindowProvider = contextWindowProvider
         self.surfaceReplacementRangeProvider = surfaceReplacementRangeProvider
@@ -181,6 +189,7 @@ actor AgentRuntime {
         self.agentPreset = agentPreset
         self.traceHandler = traceHandler
         self.sessionEventHandler = sessionEventHandler
+        self.sessionEventSnapshotProvider = sessionEventSnapshotProvider
         self.checkpointHandler = checkpointHandler
     }
 
@@ -198,6 +207,19 @@ actor AgentRuntime {
         openSessionTurn = nil
         openSessionStep = nil
         promptContributionFingerprints.removeAll(keepingCapacity: true)
+        sessionEventLedger.removeAll(keepingCapacity: true)
+        if let sessionEventSnapshotProvider {
+            do {
+                let events = try await sessionEventSnapshotProvider()
+                sessionEventLedger = Dictionary(
+                    uniqueKeysWithValues: events.map { ($0.seq, $0) }
+                )
+            } catch {
+                throw AgentRuntimeError.sessionEventPersistenceFailed(
+                    "model-visible audit source unavailable"
+                )
+            }
+        }
         await traceHandler(
             HarnessTraceDraft(
                 kind: .runStarted,
@@ -475,6 +497,7 @@ actor AgentRuntime {
                 initialConfiguration: configuration,
                 initialAPIKey: apiKey
             )
+            let requestRoute = try await resolveRequestRoute(for: callConfiguration)
             var request = assembledStepRequest.modelRequest(
                 apiKey: requestAPIKey,
                 systemPrompt: requestSystemPrompt,
@@ -483,7 +506,8 @@ actor AgentRuntime {
                 imagePayloads: try await resolveImagePayloads(
                     in: conversation,
                     configuration: callConfiguration
-                )
+                ),
+                route: requestRoute
             )
             // Mirror upstream compaction-basic at the canonical request
             // boundary. A successful replacement becomes the live conversation
@@ -545,6 +569,12 @@ actor AgentRuntime {
             modelRequest: while true {
                 do {
                     let currentRequest = request
+                    try await auditModelRequest(
+                        currentRequest,
+                        requestHeader: requestHeader,
+                        turn: turn,
+                        step: step
+                    )
                     // Persist the request prefix before any provider/Cordis
                     // adapter dispatch. Retries cross the same boundary.
                     try await checkpointSession(
@@ -665,6 +695,7 @@ actor AgentRuntime {
                             visibleText ?? "",
                             reasoning: visibleReasoning,
                             isIncomplete: true,
+                            incompleteReason: .cancelled,
                             source: modelSource.jsonValue
                         )
                         _ = try await recordSessionEvent(
@@ -677,6 +708,7 @@ actor AgentRuntime {
                                 ),
                                 usage: turnUsage.map(Self.sessionUsage),
                                 interrupted: true,
+                                incompleteReason: .cancelled,
                                 sourceEventSeqs: assistantChunkSeqs
                             )
                         )
@@ -700,7 +732,8 @@ actor AgentRuntime {
                                     systemPrompt: request.systemPrompt,
                                     messages: conversation,
                                     tools: request.tools,
-                                    imagePayloads: request.imagePayloads
+                                    imagePayloads: request.imagePayloads,
+                                    route: request.route
                                 ),
                                 contextWindow: effectiveContextWindow,
                                 trigger: "context-overflow",
@@ -845,18 +878,17 @@ actor AgentRuntime {
             guard let finishReason else {
                 throw AgentRuntimeError.invalidFinishSequence
             }
-            // A truncated tool-call payload is never executable. There is no
-            // synthetic continuation or recovery request: the provider's output
-            // budget is authoritative, and a new request could repeat side
-            // effects under a different context.
+            // A truncated tool-call payload is never executable. For ordinary
+            // text/reasoning, preserve the provider-delimited partial result but
+            // do not synthesize another request: the provider's boundary is the
+            // output boundary for this turn.
             if finishReason == .length, accumulator.hasToolCallDeltas {
                 throw AgentRuntimeError.unsafeFinishReason(.length)
             }
-            let isSafeLengthTruncation = finishReason == .length
+            let isProviderLengthBoundary = finishReason == .length
                 && !accumulator.hasToolCallDeltas
-                && (!accumulator.text.isEmpty || !accumulator.reasoning.isEmpty)
             let calls: [AgentToolCall]
-            if isSafeLengthTruncation {
+            if isProviderLengthBoundary {
                 calls = []
             } else {
                 calls = try accumulator.completedToolCalls()
@@ -899,7 +931,8 @@ actor AgentRuntime {
                 reasoning: accumulator.reasoning.isEmpty ? nil : accumulator.reasoning,
                 toolCalls: calls,
                 toolEvents: toolEvents,
-                isIncomplete: isSafeLengthTruncation,
+                isIncomplete: isProviderLengthBoundary,
+                incompleteReason: isProviderLengthBoundary ? .modelOutputLength : nil,
                 source: modelSource.jsonValue
             )
             _ = try await recordSessionEvent(
@@ -911,6 +944,7 @@ actor AgentRuntime {
                         configuration: request.configuration
                     ),
                     usage: turnUsage.map(Self.sessionUsage),
+                    incompleteReason: assistant.incompleteReason,
                     sourceEventSeqs: assistantChunkSeqs
                 )
             )
@@ -933,7 +967,7 @@ actor AgentRuntime {
                     turn: turn,
                     step: step,
                     startedAt: stepStartedAt,
-                    status: isSafeLengthTruncation ? "truncated" : "completed"
+                    status: isProviderLengthBoundary ? "truncated" : "completed"
                 )
                 if let plugins {
                     let context = CordisAgentTurnStoppingContext(
@@ -968,7 +1002,7 @@ actor AgentRuntime {
                 }
                 try await finishTurnTrace(
                     turn: turn,
-                    reason: isSafeLengthTruncation ? "truncated" : "completed"
+                    reason: isProviderLengthBoundary ? "truncated" : "completed"
                 )
                 return
             }
@@ -1029,14 +1063,16 @@ actor AgentRuntime {
             systemPrompt: String,
             messages: [AgentMessage],
             tools: [ModelToolDefinition],
-            imagePayloads: [ModelImagePayload]
+            imagePayloads: [ModelImagePayload],
+            route: ProviderRequestRoute
         ) -> ModelRequest {
             plan.modelRequest(
                 apiKey: apiKey,
                 systemPrompt: systemPrompt,
                 messages: messages,
                 tools: tools,
-                imagePayloads: imagePayloads
+                imagePayloads: imagePayloads,
+                route: route
             )
         }
     }
@@ -1190,7 +1226,8 @@ actor AgentRuntime {
                     systemPrompt: request.systemPrompt,
                     messages: candidateMessages,
                     tools: request.tools,
-                    imagePayloads: request.imagePayloads
+                    imagePayloads: request.imagePayloads,
+                    route: request.route
                 )
                 let candidateMeasurement = ConversationTokenMeter.measure(candidate)
                 guard candidateMeasurement.totalTokens < plan.measurement.totalTokens else {
@@ -1287,7 +1324,8 @@ actor AgentRuntime {
                 systemPrompt: request.systemPrompt,
                 messages: candidateMessages,
                 tools: request.tools,
-                imagePayloads: request.imagePayloads
+                imagePayloads: request.imagePayloads,
+                route: request.route
             )
             let candidateMeasurement = ConversationTokenMeter.measure(candidate)
             guard candidateMeasurement.totalTokens < plan.measurement.totalTokens else {
@@ -1375,7 +1413,7 @@ actor AgentRuntime {
         var inheritedConfiguration = request.configuration
         inheritedConfiguration.maxOutputTokens = 8_192
         inheritedConfiguration = try inheritedConfiguration.validated()
-        let inheritedRequest = Self.compactionSummaryRequest(
+        let inheritedRequest = try await compactionSummaryRequest(
             configuration: inheritedConfiguration,
             apiKey: request.apiKey,
             messages: messages,
@@ -1415,7 +1453,7 @@ actor AgentRuntime {
                 initialConfiguration: request.configuration,
                 initialAPIKey: request.apiKey
             )
-            configuredRequest = Self.compactionSummaryRequest(
+            configuredRequest = try await compactionSummaryRequest(
                 configuration: configured,
                 apiKey: key,
                 messages: messages,
@@ -1446,12 +1484,12 @@ actor AgentRuntime {
         }
     }
 
-    private static func compactionSummaryRequest(
+    private func compactionSummaryRequest(
         configuration: AgentConfiguration,
         apiKey: String,
         messages: [AgentMessage],
         source: ModelRequest
-    ) -> ModelRequest {
+    ) async throws -> ModelRequest {
         ModelRequest(
             configuration: configuration,
             apiKey: apiKey,
@@ -1460,7 +1498,8 @@ actor AgentRuntime {
             // Replaying tool schemas and image payloads preserves the warm
             // provider prefix. Tool deltas remain forbidden and are never run.
             tools: source.tools,
-            imagePayloads: source.imagePayloads
+            imagePayloads: source.imagePayloads,
+            route: try await resolveRequestRoute(for: configuration)
         )
     }
 
@@ -1475,9 +1514,6 @@ actor AgentRuntime {
                 try Task.checkCancellation()
                 switch event {
                 case let .text(delta):
-                    guard delta.utf8.count <= 1_048_576 - text.utf8.count else {
-                        throw AgentRuntimeError.responseTooLarge
-                    }
                     text += delta
                 case .reasoning:
                     // Private summary reasoning is intentionally neither surfaced
@@ -1693,13 +1729,13 @@ actor AgentRuntime {
                     await persistCancelledToolOutcomes(cancellationOutcomes)
                     throw CancellationError()
                 }
-                let imageContext = try await persistToolOutcome(
+                let additionalContexts = try await persistToolOutcome(
                     outcome,
                     projectImageContext: imageCapable
                 )
                 events[outcome.index] = outcome.event
                 messages.append(Self.toolMessage(for: outcome))
-                if let imageContext { messages.append(imageContext) }
+                messages.append(contentsOf: additionalContexts)
 
             case let .ready(prepared):
                 switch prepared.mode {
@@ -1726,13 +1762,13 @@ actor AgentRuntime {
                         await persistCancelledToolOutcomes(cancellationOutcomes)
                         throw CancellationError()
                     }
-                    let imageContext = try await persistToolOutcome(
+                    let additionalContexts = try await persistToolOutcome(
                         outcome,
                         projectImageContext: imageCapable
                     )
                     events[outcome.index] = outcome.event
                     messages.append(Self.toolMessage(for: outcome))
-                    if let imageContext { messages.append(imageContext) }
+                    messages.append(contentsOf: additionalContexts)
 
                 case .parallel:
                     let group = try await executeParallelToolGroup(
@@ -1765,13 +1801,13 @@ actor AgentRuntime {
                         if let digest = outcome.deniedDigest {
                             deniedDigests.insert(digest)
                         }
-                        let imageContext = try await persistToolOutcome(
+                        let additionalContexts = try await persistToolOutcome(
                             outcome,
                             projectImageContext: imageCapable
                         )
                         events[outcome.index] = outcome.event
                         messages.append(Self.toolMessage(for: outcome))
-                        if let imageContext { messages.append(imageContext) }
+                        messages.append(contentsOf: additionalContexts)
                     }
                 }
             }
@@ -2227,52 +2263,54 @@ actor AgentRuntime {
             let emitEvent = eventHandler
             let callID = prepared.call.id
             let defaultExecution: @Sendable () async throws -> CordisToolExecutionResult = {
-                let outputHandler: @Sendable (AgentToolOutputChunk) async -> Void = { chunk in
-                    await accumulator.append(chunk)
-                    await emitEvent(.toolOutput(callID: callID, chunk: chunk))
-                }
-                let output: String
-                if prepared.call.name == "run_code" {
-                    let definitions: [ModelToolDefinition]
-                    if let plugins = self.plugins,
-                       let runtime = try? await plugins.resolveService(CordisAgentServiceKeys.tools) {
-                        definitions = await runtime.definitions(allowedBy: self.permissionMode)
-                    } else {
-                        definitions = self.registry.definitions(allowedBy: self.permissionMode)
+                try await prepared.execution.signal.runCooperatively {
+                    let outputHandler: @Sendable (AgentToolOutputChunk) async -> Void = { chunk in
+                        await accumulator.append(chunk)
+                        await emitEvent(.toolOutput(callID: callID, chunk: chunk))
                     }
-                    let context = CodeModeExecutionContext(
-                        parentCallID: prepared.call.id,
-                        definitions: definitions.filter {
-                            $0.name != "run_code"
-                                && $0.name != "code_execute"
-                                && $0.name != "workflow"
-                        },
-                        dispatch: { request in
-                            await self.dispatchCodeModeChild(
-                                request,
-                                parent: prepared,
-                                parentAccumulator: accumulator,
-                                modelHost: running.modelHost
+                    let output: String
+                    if prepared.call.name == "run_code" {
+                        let definitions: [ModelToolDefinition]
+                        if let plugins = self.plugins,
+                           let runtime = try? await plugins.resolveService(CordisAgentServiceKeys.tools) {
+                            definitions = await runtime.definitions(allowedBy: self.permissionMode)
+                        } else {
+                            definitions = self.registry.definitions(allowedBy: self.permissionMode)
+                        }
+                        let context = CodeModeExecutionContext(
+                            parentCallID: prepared.call.id,
+                            definitions: definitions.filter {
+                                $0.name != "run_code"
+                                    && $0.name != "code_execute"
+                                    && $0.name != "workflow"
+                            },
+                            dispatch: { request in
+                                await self.dispatchCodeModeChild(
+                                    request,
+                                    parent: prepared,
+                                    parentAccumulator: accumulator,
+                                    modelHost: running.modelHost
+                                )
+                            }
+                        )
+                        output = try await CodeModeExecutionScope.$context.withValue(context) {
+                            try await prepared.tool.execute(
+                                arguments: prepared.arguments,
+                                onOutput: outputHandler
                             )
                         }
-                    )
-                    output = try await CodeModeExecutionScope.$context.withValue(context) {
-                        try await prepared.tool.execute(
+                    } else {
+                        output = try await prepared.tool.execute(
                             arguments: prepared.arguments,
                             onOutput: outputHandler
                         )
                     }
-                } else {
-                    output = try await prepared.tool.execute(
-                        arguments: prepared.arguments,
-                        onOutput: outputHandler
+                    return CordisToolExecutionResult(
+                        text: output,
+                        isError: false,
+                        value: Self.canonicalToolValue(from: output)
                     )
                 }
-                return CordisToolExecutionResult(
-                    text: output,
-                    isError: false,
-                    value: Self.canonicalToolValue(from: output)
-                )
             }
             let cordisResult: CordisToolExecutionResult
             if let plugins {
@@ -2334,8 +2372,14 @@ actor AgentRuntime {
                     : nil,
                 sessionError: finalizedResult.isError
                     ? .object([
-                        "name": .string("ToolExecutionError"),
-                        "code": .string(AgentToolEventStatus.failed.rawValue)
+                        "name": .string(
+                            finalizedResult.errorCode == TimeoutPolicy.toolTimeoutCode
+                                ? "ToolTimeoutError"
+                                : "ToolExecutionError"
+                        ),
+                        "code": .string(
+                            finalizedResult.errorCode ?? AgentToolEventStatus.failed.rawValue
+                        )
                     ])
                     : nil
             )
@@ -2501,16 +2545,18 @@ actor AgentRuntime {
             await eventHandler(.toolEventChanged(await parentAccumulator.snapshot()))
             await eventHandler(.toolStarted(call, child.summary))
             let defaultExecution: @Sendable () async throws -> CordisToolExecutionResult = {
-                let output = try await tool.execute(arguments: request.arguments) { chunk in
-                    await parentAccumulator.appendChildOutput(callID: request.callID, chunk: chunk)
-                    await self.eventHandler(.toolOutput(callID: request.callID, chunk: chunk))
-                    await self.eventHandler(.toolEventChanged(await parentAccumulator.snapshot()))
+                try await execution.signal.runCooperatively {
+                    let output = try await tool.execute(arguments: request.arguments) { chunk in
+                        await parentAccumulator.appendChildOutput(callID: request.callID, chunk: chunk)
+                        await self.eventHandler(.toolOutput(callID: request.callID, chunk: chunk))
+                        await self.eventHandler(.toolEventChanged(await parentAccumulator.snapshot()))
+                    }
+                    return CordisToolExecutionResult(
+                        text: output,
+                        isError: false,
+                        value: Self.canonicalToolValue(from: output)
+                    )
                 }
-                return CordisToolExecutionResult(
-                    text: output,
-                    isError: false,
-                    value: Self.canonicalToolValue(from: output)
-                )
             }
             let result: CordisToolExecutionResult
             if let plugins {
@@ -2709,7 +2755,7 @@ actor AgentRuntime {
             status = .failed
         }
         let message = String(error.localizedDescription.prefix(4_096))
-        let result = LocalToolFinalizer.apply(
+        let initialResult = LocalToolFinalizer.apply(
             tool: finalizerTool,
             execution: execution,
             result: CordisToolExecutionResult(
@@ -2720,6 +2766,27 @@ actor AgentRuntime {
                 isError: true
             )
         )
+        let result: CordisToolExecutionResult
+        if let plugins, let execution {
+            // Denied and failed attempts still traverse post-execute so
+            // advisory guards can count the attempt, matching the upstream
+            // ToolRuntime contract.
+            result = (try? await plugins.run(
+                CordisAgentLoopCheckpoints.toolsPostExecute,
+                input: CordisPostToolExecutionContext(
+                    execution: execution,
+                    result: initialResult
+                ),
+                target: .agent(agentID),
+                traceContext: CordisTraceContext(
+                    runID: runID,
+                    turn: turn,
+                    step: step
+                )
+            ) { initialResult }) ?? initialResult
+        } else {
+            result = initialResult
+        }
         return await settledToolOutcome(
             index: index,
             call: call,
@@ -3003,7 +3070,7 @@ actor AgentRuntime {
     private func persistToolOutcome(
         _ outcome: ToolExecutionOutcome,
         projectImageContext: Bool = false
-    ) async throws -> AgentMessage? {
+    ) async throws -> [AgentMessage] {
         _ = try await recordSessionEvent(
             .toolResult(
                 turn: outcome.turn,
@@ -3017,11 +3084,29 @@ actor AgentRuntime {
                 sourceEventSeqs: outcome.sourceEventSeqs
             )
         )
-        guard projectImageContext,
-              let context = Self.toolImageContext(for: outcome),
-              let source = context.source else { return nil }
-        try await recordUserMessage(context, source: source)
-        return context
+        var contexts = outcome.result.additionalContexts
+        if projectImageContext, let imageContext = Self.toolImageContext(for: outcome) {
+            contexts.append(imageContext)
+        }
+        for context in contexts {
+            guard context.role == .user else {
+                throw AgentRuntimeError.pluginProducedInvalidContext(
+                    checkpoint: CordisAgentLoopCheckpoints.toolsPostExecute.name
+                )
+            }
+            let source = context.source ?? .object([
+                "kind": .string("plugin"),
+                "plugin": .string(CordisAgentLoopCheckpoints.toolsPostExecute.name)
+            ])
+            try await recordUserMessage(context, source: source)
+            await publishContextInjection(
+                content: context.content,
+                source: source,
+                turn: outcome.turn,
+                step: outcome.step
+            )
+        }
+        return contexts
     }
 
     private func persistCancelledToolOutcomes(_ outcomes: [ToolExecutionOutcome]) async {
@@ -3109,10 +3194,11 @@ actor AgentRuntime {
                 "plugin": .string(checkpoint.name)
             ])
             for message in inserted {
-                try await recordUserMessage(message, source: source)
+                let durableSource = message.source ?? source
+                try await recordUserMessage(message, source: durableSource)
                 await publishContextInjection(
                     content: message.content,
-                    source: source,
+                    source: durableSource,
                     turn: turn,
                     step: step
                 )
@@ -3529,9 +3615,54 @@ actor AgentRuntime {
 
     private func recordSessionEvent(_ draft: SessionEventDraft) async throws -> SessionEvent? {
         do {
-            return try await sessionEventHandler(draft)
+            let event = try await sessionEventHandler(draft)
+            if let event {
+                sessionEventLedger[event.seq] = event
+            }
+            return event
         } catch {
             throw AgentRuntimeError.sessionEventPersistenceFailed(error.localizedDescription)
+        }
+    }
+
+    /// Runs immediately before provider/Cordis dispatch. The audit is enabled
+    /// only for production runtimes that provide a durable trajectory reader;
+    /// lightweight unit-test runtimes retain their existing storage-free seam.
+    private func auditModelRequest(
+        _ request: ModelRequest,
+        requestHeader: JSONValue,
+        turn: Int,
+        step: Int
+    ) async throws {
+        guard sessionEventSnapshotProvider != nil else { return }
+        let events = Array(sessionEventLedger.values)
+        do {
+            let report = try ModelVisibleEventAuditor.validate(
+                request: request,
+                requestHeader: requestHeader,
+                events: events
+            )
+            _ = try await recordSessionEvent(
+                .modelRequestAudit(turn: turn, step: step, report: report)
+            )
+        } catch let failure as ModelVisibleEventAuditFailure {
+            await traceHandler(
+                HarnessTraceDraft(
+                    kind: .error,
+                    runID: runID,
+                    turn: turn,
+                    step: step,
+                    name: "model-visible-invariant",
+                    attributes: [
+                        "kind": .string(failure.kind.rawValue),
+                        "messageIndex": failure.messageIndex.map {
+                            .number(Double($0))
+                        } ?? .null
+                    ],
+                    error: failure.kind.rawValue
+                )
+            )
+            throw AgentRuntimeError.modelVisibleInvariantFailed(failure)
         }
     }
 
@@ -3652,6 +3783,19 @@ actor AgentRuntime {
             throw AgentRuntimeError.credentialRouteChangedWithoutResolver
         }
         return initialAPIKey
+    }
+
+    /// Snapshot the final route after Cordis route-only checkpoints have run.
+    /// The adapter revalidates this snapshot immediately before transport
+    /// dispatch, so retry and compaction paths cannot silently select another
+    /// endpoint.
+    private func resolveRequestRoute(
+        for configuration: AgentConfiguration
+    ) async throws -> ProviderRequestRoute {
+        if let providerRequestRouteProvider {
+            return try await providerRequestRouteProvider(configuration)
+        }
+        return try ProviderRequestRoute(configuration: configuration)
     }
 
     private static func usesSameCredentialRoute(
@@ -4146,15 +4290,11 @@ struct TurnAccumulator: Sendable {
     private(set) var reasoning = ""
     private(set) var hasToolCallDeltas = false
     private var calls: [Int: PendingToolCall] = [:]
-    private var totalBytes = 0
-
     mutating func appendText(_ delta: String) throws {
-        try account(delta)
         text += delta
     }
 
     mutating func appendReasoning(_ delta: String) throws {
-        try account(delta)
         reasoning += delta
     }
 
@@ -4169,7 +4309,6 @@ struct TurnAccumulator: Sendable {
             throw AgentRuntimeError.invalidToolCallStream
         }
         hasToolCallDeltas = true
-        try account(arguments)
 
         var pending = calls[index, default: PendingToolCall()]
         if let id {
@@ -4226,13 +4365,6 @@ struct TurnAccumulator: Sendable {
         return completed
     }
 
-    private mutating func account(_ delta: String) throws {
-        let byteCount = delta.utf8.count
-        guard byteCount <= 1_048_576 - totalBytes else {
-            throw AgentRuntimeError.responseTooLarge
-        }
-        totalBytes += byteCount
-    }
 }
 
 enum AgentRuntimeError: LocalizedError, Sendable {
@@ -4240,7 +4372,6 @@ enum AgentRuntimeError: LocalizedError, Sendable {
     case invalidToolCallStream
     case invalidFinishSequence
     case unsafeFinishReason(ModelFinishReason)
-    case responseTooLarge
     case duplicateQueuedInput
     case injectedInstructionTooLarge
     case conflictingNormalizedUserContent
@@ -4249,6 +4380,7 @@ enum AgentRuntimeError: LocalizedError, Sendable {
     case pluginProducedInvalidContext(checkpoint: String)
     case credentialRouteChangedWithoutResolver
     case sessionEventPersistenceFailed(String)
+    case modelVisibleInvariantFailed(ModelVisibleEventAuditFailure)
     case compactionDidNotShrink(summaryTokens: Int, shadowedTokens: Int)
     case compactionDidNotReduceRequest
     case compactionSurfaceChanged
@@ -4269,8 +4401,6 @@ enum AgentRuntimeError: LocalizedError, Sendable {
             return "模型响应缺少唯一的完成原因。"
         case let .unsafeFinishReason(reason):
             return "模型以 \(reason.rawValue) 结束；为避免执行截断内容，本轮未提交。"
-        case .responseTooLarge:
-            return "单次模型响应超过 1 MiB 上限。"
         case .duplicateQueuedInput:
             return "排队输入已进入会话，拒绝重复注入。"
         case .injectedInstructionTooLarge:
@@ -4287,6 +4417,8 @@ enum AgentRuntimeError: LocalizedError, Sendable {
             return "模型路由已切换，但运行时没有可用于新服务商的凭据解析器。"
         case let .sessionEventPersistenceFailed(message):
             return "会话轨迹写入失败：\(message)"
+        case let .modelVisibleInvariantFailed(failure):
+            return failure.localizedDescription
         case let .compactionDidNotShrink(summaryTokens, shadowedTokens):
             return "上下文压缩摘要没有缩短被替换内容（摘要 \(summaryTokens) tokens，原文 \(shadowedTokens) tokens）。"
         case .compactionDidNotReduceRequest:

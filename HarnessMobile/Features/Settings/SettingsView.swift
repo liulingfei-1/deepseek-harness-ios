@@ -23,20 +23,26 @@ struct SettingsView: View {
                 } label: {
                     Label("模型与服务商", systemImage: "server.rack")
                 }
+                .accessibilityIdentifier("settings-model-providers")
             }
 
-            Section("执行边界") {
-                LabeledContent("模型推理", value: "你配置的 API")
-                LabeledContent("Agent Loop", value: "本机")
-                LabeledContent("工具与文件", value: "本机")
-                LabeledContent("命令执行", value: "手机 iSH / Alpine")
-                LabeledContent("Linux 网络", value: "默认开启")
-                Text("模型 provider 只负责推理。shell_execute、文件和 Agent Loop 都在 iPhone 内执行；Linux 网络默认可用，也可在“命令”页主动关闭。")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+            Section("后台") {
+                NavigationLink {
+                    BackgroundSettingsView(
+                        runtimeStatus: model.backgroundRuntimeStatus,
+                        locationSnapshot: model.backgroundLocationKeepAliveSnapshot,
+                        systemProjection: model.backgroundSystemProjection,
+                        requestLocationAuthorization: model.requestBackgroundLocationAuthorization
+                    )
+                } label: {
+                    Label("后台任务与恢复", systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90")
+                }
+                .accessibilityIdentifier("settings-background-tasks")
+                LabeledContent("当前状态", value: backgroundStatusLabel)
+                LabeledContent("活动任务", value: "\(model.backgroundSystemProjection.activeRunCount) 个")
             }
 
-            Section("系统能力") {
+            Section("工具与插件") {
                 NavigationLink {
                     AgentProviderBundlesView()
                 } label: {
@@ -47,55 +53,74 @@ struct SettingsView: View {
                 } label: {
                     Label("手机权限", systemImage: "hand.raised")
                 }
-                NavigationLink {
-                    BackgroundSettingsView(runtimeStatus: model.backgroundRuntimeStatus)
-                } label: {
-                    Label("后台任务", systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90")
-                }
+                .accessibilityIdentifier("settings-phone-permissions")
                 NavigationLink {
                     PluginManagementView()
                 } label: {
                     Label("Cordis 插件", systemImage: "puzzlepiece.extension")
                 }
-                    NavigationLink {
-                        ToolApprovalSettingsView()
-                    } label: {
-                        HStack {
-                            Label("工具授权", systemImage: "checkmark.shield")
-                            Spacer()
-                            Text("仅本次")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                LabeledContent("本机工具", value: "\(ProductionToolCatalog.approvedNames.count) 项")
-                LabeledContent("快捷指令", value: "已启用")
-            }
-
-            if let usage = model.latestUsage {
-                Section("最近一次用量") {
-                    LabeledContent("输入", value: "\(usage.promptTokens)")
-                    LabeledContent("输出", value: "\(usage.completionTokens)")
-                    if let reasoning = usage.reasoningTokens {
-                        LabeledContent("思考", value: "\(reasoning)")
-                    }
-                }
-            }
-
-            Section("诊断") {
                 NavigationLink {
-                    DiagnosticLogView()
+                    ToolApprovalSettingsView()
                 } label: {
-                    Label("详细日志", systemImage: "doc.text.magnifyingglass")
+                    HStack {
+                        Label("工具授权", systemImage: "checkmark.shield")
+                        Spacer()
+                        Text("仅本次")
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                LabeledContent("本机工具", value: "\(ProductionToolCatalog.approvedNames.count) 项")
             }
 
-            Section("本地数据") {
+            Section("存储与同步") {
+                NavigationLink {
+                    WorkspaceView()
+                } label: {
+                    Label("本机工作区", systemImage: "folder")
+                }
+                .accessibilityIdentifier("settings-workspace")
+                NavigationLink {
+                    MemoryManagementView()
+                } label: {
+                    Label("记忆", systemImage: "brain")
+                }
+                .accessibilityIdentifier("settings-memory")
+                LabeledContent("会话存储", value: "本机持久化")
+                LabeledContent("同步", value: "未启用")
+                Text("会话、轨迹和工作区文件保存在此 iPhone。当前版本不会把凭据或会话正文上传到同步服务。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
                 Button("清空当前会话", role: .destructive) {
                     isResetConfirmationPresented = true
                 }
                 Button("重置全部模型连接", role: .destructive) {
                     isRemoveConfirmationPresented = true
                 }
+            }
+
+            Section("隐私与诊断") {
+                DisclosureGroup("执行边界") {
+                    LabeledContent("模型推理", value: "你配置的 API")
+                    LabeledContent("Agent Loop", value: "本机")
+                    LabeledContent("工具与文件", value: "本机")
+                    LabeledContent("命令执行", value: "手机 iSH / Alpine")
+                    LabeledContent("Linux 网络", value: "默认开启")
+                    Text("模型 provider 只负责推理。shell_execute、文件和 Agent Loop 都在 iPhone 内执行；Linux 网络默认可用，也可在“命令”页主动关闭。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                NavigationLink {
+                    DiagnosticLogView()
+                } label: {
+                    Label("详细日志", systemImage: "doc.text.magnifyingglass")
+                }
+                .accessibilityIdentifier("settings-diagnostics")
+                if let usage = model.latestUsage {
+                    LabeledContent("最近用量", value: "输入 \(usage.promptTokens) · 输出 \(usage.completionTokens)")
+                }
+                Text("诊断导出会在本机先脱敏；默认不包含 API Key、Authorization、命令正文或模型提示词。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
         }
         .harnessCompactListChrome()
@@ -138,6 +163,17 @@ struct SettingsView: View {
 
     private var endpointHost: String {
         URLComponents(string: model.configuration.baseURL)?.host ?? "无效地址"
+    }
+
+    private var backgroundStatusLabel: String {
+        switch model.backgroundSystemProjection.survivalTier {
+        case .foreground: "前台"
+        case .finiteBackgroundTask: "短时后台"
+        case .continuedProcessing: "Continued Processing"
+        case .extendedAudio: "音频延展"
+        case .extendedLocation: "定位延展"
+        case .degraded: "降级"
+        }
     }
 }
 

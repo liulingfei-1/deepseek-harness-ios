@@ -6,7 +6,7 @@ struct AppRootView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
     @State private var navigationPath: [AppRoute] = []
-    @State private var intentRouter = AppIntentRouter.shared
+    @State private var intentInboxNotifier = AppIntentInboxNotifier.shared
 
     private var stateTransitionAnimation: Animation? {
         ProcessInfo.processInfo.arguments.contains("-disable-animations-for-ui-testing")
@@ -16,7 +16,9 @@ struct AppRootView: View {
 
     private var isPluginMarketPreviewRequested: Bool {
 #if DEBUG
-        ProcessInfo.processInfo.arguments.contains("-present-plugin-market-for-ui-testing")
+        let arguments = ProcessInfo.processInfo.arguments
+        return arguments.contains("-present-plugin-market-for-ui-testing")
+            || arguments.contains("-present-plugin-compilation-failure-for-ui-testing")
 #else
         false
 #endif
@@ -41,7 +43,7 @@ struct AppRootView: View {
         .task {
             handlePendingIntent()
         }
-        .onChange(of: intentRouter.pendingRequest) {
+        .onChange(of: intentInboxNotifier.revision) {
             handlePendingIntent()
         }
         .onChange(of: model.isReady) {
@@ -49,6 +51,12 @@ struct AppRootView: View {
         }
         .onChange(of: model.isConfigured) {
             handlePendingIntent()
+        }
+        .onChange(of: model.backgroundPreferences.isEnhancedBackgroundEnabled) {
+            model.refreshBackgroundAudioKeepAlive()
+        }
+        .onChange(of: model.backgroundPreferences.isBackgroundLocationKeepAliveEnabled) {
+            model.refreshBackgroundLocationKeepAlive()
         }
         .onChange(of: scenePhase, initial: true) { _, phase in
             handleScenePhase(phase)
@@ -75,9 +83,8 @@ struct AppRootView: View {
             SessionsView(
                 onConversationOpened: openChat,
                 onOpenSettings: { navigationPath.append(.settings) },
-                onOpenTerminal: { navigationPath.append(.terminal) },
-                onOpenWorkspace: { navigationPath.append(.workspace) },
-                onOpenTools: { navigationPath.append(.tools) }
+                onOpenTools: { navigationPath.append(.tools) },
+                onOpenBackgroundSettings: { navigationPath.append(.backgroundSettings) }
             )
             .navigationDestination(for: AppRoute.self) { route in
                 switch route {
@@ -95,17 +102,26 @@ struct AppRootView: View {
                     PluginManagementView()
                 case .settings:
                     SettingsView()
+                case .backgroundSettings:
+                    BackgroundSettingsView(
+                        runtimeStatus: model.backgroundRuntimeStatus,
+                        locationSnapshot: model.backgroundLocationKeepAliveSnapshot,
+                        systemProjection: model.backgroundSystemProjection,
+                        requestLocationAuthorization: model.requestBackgroundLocationAuthorization
+                    )
                 }
             }
         }
     }
 
     private func handlePendingIntent() {
-        guard model.isReady, model.isConfigured,
-              let request = intentRouter.pendingRequest else { return }
-        model.pendingDraft = request.draft
-        openChat()
-        intentRouter.consume(request.id)
+        Task { @MainActor in
+            let consumedIntent = await model.consumeAppIntentInbox()
+            let consumedShare = await model.consumeShareHandoffs()
+            if consumedIntent || consumedShare {
+                openChat()
+            }
+        }
     }
 
     private func openChat() {
@@ -124,8 +140,14 @@ struct AppRootView: View {
     }
 
     private func handleScenePhase(_ phase: ScenePhase) {
-        model.updateApplicationActivity(isActive: phase == .active)
+        model.updateApplicationActivity(
+            isActive: phase == .active,
+            isBackgrounded: phase == .background
+        )
         refreshISHExecutionEnvironment(isBackgrounded: phase != .active)
+        if phase == .active {
+            handlePendingIntent()
+        }
     }
 }
 
@@ -137,6 +159,7 @@ private enum AppRoute: Hashable {
     case terminal
     case plugins
     case settings
+    case backgroundSettings
 }
 
 private struct HarnessToolsView: View {
@@ -145,6 +168,14 @@ private struct HarnessToolsView: View {
     var body: some View {
         List {
             Section("工作") {
+                toolRow(
+                    title: "iSH 终端",
+                    detail: "在手机 Alpine 沙箱中执行命令",
+                    systemImage: "terminal.fill",
+                    tint: .black,
+                    accessibilityIdentifier: "tool-route-terminal",
+                    route: .terminal
+                )
                 toolRow(
                     title: "任务与轨迹",
                     detail: "Goal、Plan、Todo 与 Harness 调用链",
@@ -160,14 +191,6 @@ private struct HarnessToolsView: View {
                     tint: .orange,
                     accessibilityIdentifier: "tool-route-workspace",
                     route: .workspace
-                )
-                toolRow(
-                    title: "iSH 终端",
-                    detail: "在手机 Alpine 沙箱中执行命令",
-                    systemImage: "terminal.fill",
-                    tint: .black,
-                    accessibilityIdentifier: "tool-route-terminal",
-                    route: .terminal
                 )
             }
 

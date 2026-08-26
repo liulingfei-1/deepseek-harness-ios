@@ -1486,17 +1486,16 @@ private enum TrajectoryFormat {
     }
 
     static func percent(_ value: Double) -> String {
-        guard value.isFinite else { return "—" }
-        // Keep sub-percent differences visible. Rounding 99.4% to 99% made
-        // provider cache behavior look materially worse than the raw tokens.
-        return value.formatted(.percent.precision(.fractionLength(1)))
+        CacheHitRateFormat.percent(value)
     }
 
     static func cachePercent(_ usage: SessionTokenUsage) -> String? {
-        let read = Double(usage.cacheReadTokens ?? 0)
-        let billed = Double(usage.inputTokens) + read + Double(usage.cacheWriteTokens ?? 0)
-        guard billed > 0 else { return nil }
-        return percent(read / billed)
+        let result = CacheHitRateFormat.percent(
+            inputTokens: usage.inputTokens,
+            cacheReadTokens: usage.cacheReadTokens,
+            cacheWriteTokens: usage.cacheWriteTokens
+        )
+        return result == CacheHitRateFormat.unavailable ? nil : result
     }
 }
 

@@ -124,14 +124,20 @@ struct ToolEventCard: View {
                         isExpanded.toggle()
                     }
                 } label: {
-                    ToolEventSummaryRow(
-                        event: event,
-                        isLive: isLive,
-                        isExpanded: isExpanded,
-                        summary: summary,
-                        terminalExitCode: presentation.terminalExitCode
-                    )
-                    .contentShape(.rect)
+                    ConversationMeasuredBlock(
+                        itemID: .toolEvent(eventID: event.id, callID: event.callID),
+                        kind: "tool-summary",
+                        content: measurementContent(summary: summary)
+                    ) {
+                        ToolEventSummaryRow(
+                            event: event,
+                            isLive: isLive,
+                            isExpanded: isExpanded,
+                            summary: summary,
+                            terminalExitCode: presentation.terminalExitCode
+                        )
+                        .contentShape(.rect)
+                    }
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(
@@ -143,7 +149,7 @@ struct ToolEventCard: View {
                     Image(systemName: "info.circle")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
+                        .frame(width: 44, height: 44)
                         .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
@@ -156,6 +162,17 @@ struct ToolEventCard: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
+    }
+
+    private func measurementContent(summary: NativeToolEventRowSummary) -> String {
+        [
+            event.callID,
+            event.name,
+            event.status.rawValue,
+            summary.text,
+            summary.suffix ?? "",
+            isLive ? "live" : "settled"
+        ].joined(separator: "\u{1f}")
     }
 }
 
@@ -209,7 +226,7 @@ private struct ToolEventSummaryRow: View {
                 terminalExitCode: terminalExitCode
             )
         }
-        .frame(minHeight: 28)
+        .frame(minHeight: 44)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

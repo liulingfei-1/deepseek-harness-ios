@@ -98,6 +98,7 @@ actor MCPStdioClient {
     private let transport: any MCPStdioTransport
     private let authorization: any MCPAuthorizationChecking
     private let eventSink: MCPEventSink
+    private let exitObserver: @Sendable (MCPClientError) async -> Void
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
 
@@ -115,12 +116,14 @@ actor MCPStdioClient {
         configuration: MCPClientConfiguration,
         transport: any MCPStdioTransport,
         authorization: any MCPAuthorizationChecking = MCPDenyAllAuthorization(),
-        eventSink: @escaping MCPEventSink = { _ in }
+        eventSink: @escaping MCPEventSink = { _ in },
+        exitObserver: @escaping @Sendable (MCPClientError) async -> Void = { _ in }
     ) {
         self.configuration = configuration
         self.transport = transport
         self.authorization = authorization
         self.eventSink = eventSink
+        self.exitObserver = exitObserver
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         self.encoder = encoder
@@ -481,6 +484,7 @@ actor MCPStdioClient {
             ? .transportEOF
             : .transportFailure("exitCode=\(exit.exitCode), errorCode=\(exit.errorCode)")
         await failAll(failure)
+        await exitObserver(failure)
     }
 
     private func receiveLine(_ line: Data) async throws {

@@ -14,6 +14,117 @@ final class SessionEventTrajectoryTests: XCTestCase {
             .appendingPathComponent("events.jsonl")
     }
 
+    func testModelVisibleAuditAcceptsDurableMessagesAndToolResult() throws {
+        let userID = UUID()
+        let assistantID = UUID()
+        let header: JSONValue = .object([
+            "config": .object([
+                "provider": .string(AgentConfiguration().providerID.rawValue),
+                "model": .string(AgentConfiguration().model),
+                "maxTokens": .number(Double(AgentConfiguration().maxOutputTokens))
+            ]),
+            "system": .string("system"),
+            "tools": .array([])
+        ])
+        let userMessage = AgentMessage(id: userID, role: .user, content: "hello")
+        let assistantMessage = AgentMessage(
+            id: assistantID,
+            role: .assistant,
+            content: "",
+            toolCalls: [AgentToolCall(id: "call-1", name: "fixture", arguments: "{}")]
+        )
+        let events = try [
+            SessionEvent(type: SessionEventVocabulary.userMessage, seq: 0, time: 1, data: .object([
+                "id": .string(userID.uuidString), "role": .string("user"),
+                "content": .array([]), "source": .object(["kind": .string("user")])
+            ])),
+            SessionEvent(type: SessionEventVocabulary.assistantMessage, seq: 1, time: 2, data: .object([
+                "turn": .number(1), "step": .number(1), "message": .object([
+                    "id": .string(assistantID.uuidString), "role": .string("assistant"),
+                    "content": .array([.object([
+                        "type": .string("tool-call"), "id": .string("call-1"),
+                        "name": .string("fixture"), "arguments": .string("{}")
+                    ])])
+                ])
+            ])),
+            SessionEvent(type: SessionEventVocabulary.toolResult, seq: 2, time: 3, data: .object([
+                "turn": .number(1), "step": .number(1), "message": .object([
+                    "id": .string(UUID().uuidString), "role": .string("user"),
+                    "source": .object(["kind": .string("tool"), "callId": .string("call-1")]),
+                    "content": .array([])
+                ])
+            ])),
+            SessionEvent(type: SessionEventVocabulary.requestHeader, seq: 3, time: 4, data: .object([
+                "header": header, "reason": .string("initial")
+            ]))
+        ]
+        let request = ModelRequest(
+            configuration: AgentConfiguration(), apiKey: "test-only", systemPrompt: "system",
+            messages: [userMessage, assistantMessage, .tool(callID: "call-1", content: "ok")], tools: []
+        )
+
+        let report = try ModelVisibleEventAuditor.validate(
+            request: request, requestHeader: header, events: events
+        )
+        XCTAssertEqual(report.requestHeaderEventSeq, 3)
+        XCTAssertEqual(report.messageSourceEventSeqs, [0, 1, 2])
+    }
+
+    func testModelVisibleAuditRejectsUnrecordedMessageAndToolResponseWithoutContent() throws {
+        let header: JSONValue = .object(["system": .string("system"), "tools": .array([])])
+        let request = ModelRequest(
+            configuration: AgentConfiguration(), apiKey: "test-only", systemPrompt: "system",
+            messages: [.user("secret prompt")], tools: []
+        )
+        let headerEvent = try SessionEvent(
+            type: SessionEventVocabulary.requestHeader, seq: 0, time: 1,
+            data: .object(["header": header, "reason": .string("initial")])
+        )
+        XCTAssertThrowsError(try ModelVisibleEventAuditor.validate(
+            request: request, requestHeader: header, events: [headerEvent]
+        )) { error in
+            let description = (error as? LocalizedError)?.errorDescription ?? ""
+            XCTAssertTrue(description.contains("未记录"))
+            XCTAssertFalse(description.contains("secret prompt"))
+        }
+    }
+
+    func testModelVisibleAuditRejectsMissingRequestHeader() throws {
+        let request = ModelRequest(
+            configuration: AgentConfiguration(), apiKey: "test-only", systemPrompt: "system",
+            messages: [], tools: []
+        )
+        XCTAssertThrowsError(try ModelVisibleEventAuditor.validate(
+            request: request, requestHeader: .object(["system": .string("system")]), events: []
+        )) { error in
+            guard let failure = error as? ModelVisibleEventAuditFailure else {
+                return XCTFail("unexpected error: \(error)")
+            }
+            XCTAssertEqual(failure.kind, .missingRequestHeader)
+        }
+    }
+
+    func testModelVisibleAuditRejectsUnrecordedToolResponse() throws {
+        let request = ModelRequest(
+            configuration: AgentConfiguration(), apiKey: "test-only", systemPrompt: "system",
+            messages: [.tool(callID: "missing-call", content: "tool secret")], tools: []
+        )
+        let header: JSONValue = .object(["system": .string("system"), "tools": .array([])])
+        let headerEvent = try SessionEvent(
+            type: SessionEventVocabulary.requestHeader, seq: 0, time: 1,
+            data: .object(["header": header, "reason": .string("initial")])
+        )
+        XCTAssertThrowsError(try ModelVisibleEventAuditor.validate(
+            request: request, requestHeader: header, events: [headerEvent]
+        )) { error in
+            guard let failure = error as? ModelVisibleEventAuditFailure else {
+                return XCTFail("unexpected error: \(error)")
+            }
+            XCTAssertEqual(failure.kind, .missingToolResultSource)
+            XCTAssertFalse(error.localizedDescription.contains("tool secret"))
+        }
+    }
+
     func testPersistedEventPageReadsOlderVisibleRowsWithoutAssistantChunks() async throws {
         let url = makeFileURL()
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
@@ -134,6 +245,79 @@ final class SessionEventTrajectoryTests: XCTestCase {
         let unchanged = try await store.snapshot(after: tokenDelta.cursor)
         XCTAssertTrue(unchanged.events.isEmpty)
         XCTAssertEqual(unchanged.cursor, tokenDelta.cursor)
+        try await store.close()
+    }
+
+    func testBufferedFlushKeepsBatchOrderAndRevisionMonotonic() async throws {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("buffered.jsonl")
+        let store = SessionEventJSONLStore(fileURL: url, streamID: "buffered")
+
+        _ = try await store.append(.turnStart(turn: 1, time: 1))
+        _ = try await store.append(
+            .turnEnd(turn: 1, reason: .string("completed"), time: 2)
+        )
+        var revision = try await store.persistenceRevision()
+        XCTAssertEqual(revision.nextSequence, 0)
+
+        try await store.flush()
+        revision = try await store.persistenceRevision()
+        XCTAssertEqual(revision.nextSequence, 2)
+
+        _ = try await store.append(.turnStart(turn: 2, time: 3))
+        _ = try await store.append(
+            .turnEnd(turn: 2, reason: .string("completed"), time: 4)
+        )
+        revision = try await store.persistenceRevision()
+        XCTAssertEqual(revision.nextSequence, 2)
+        try await store.flush()
+        revision = try await store.persistenceRevision()
+        XCTAssertEqual(revision.nextSequence, 4)
+
+        let reopened = SessionEventJSONLStore(fileURL: url, streamID: "buffered")
+        let snapshot = try await reopened.recover()
+        XCTAssertEqual(snapshot.events.map(\.seq), [0, 1, 2, 3])
+        revision = try await reopened.persistenceRevision()
+        XCTAssertEqual(revision.nextSequence, 4)
+        try await reopened.close()
+    }
+
+    func testCloseFlushesBufferedEventsBeforeReopen() async throws {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("close.jsonl")
+        let store = SessionEventJSONLStore(fileURL: url, streamID: "close")
+
+        _ = try await store.append([
+            .turnStart(turn: 1, time: 1),
+            .turnEnd(turn: 1, reason: .string("completed"), time: 2)
+        ])
+        var revision = try await store.persistenceRevision()
+        XCTAssertEqual(revision.nextSequence, 0)
+        try await store.close()
+
+        let reopened = SessionEventJSONLStore(fileURL: url, streamID: "close")
+        let snapshot = try await reopened.recover()
+        XCTAssertEqual(snapshot.events.map(\.seq), [0, 1])
+        revision = try await reopened.persistenceRevision()
+        XCTAssertEqual(revision.nextSequence, 2)
+        try await reopened.close()
+    }
+
+    func testLosslessReadFlushesWriteBehindBeforeReadingDisk() async throws {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("read-after-write.jsonl")
+        let store = SessionEventJSONLStore(fileURL: url, streamID: "read-after-write")
+
+        _ = try await store.append(.turnStart(turn: 1, time: 1))
+        var revision = try await store.persistenceRevision()
+        XCTAssertEqual(revision.nextSequence, 0)
+        let events = try await store.allEvents()
+        XCTAssertEqual(events.map(\.seq), [0])
+        revision = try await store.persistenceRevision()
+        XCTAssertEqual(revision.nextSequence, 1)
         try await store.close()
     }
 
@@ -616,6 +800,50 @@ final class SessionEventTrajectoryTests: XCTestCase {
         XCTAssertEqual(metrics.cacheWriteTokens, 10)
         XCTAssertEqual(try XCTUnwrap(metrics.cacheHitRate), 0.8, accuracy: 0.000_001)
         try await store.close()
+    }
+
+    func testMetricsWithoutProviderCacheDataExposeNoCacheRate() async throws {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = SessionEventJSONLStore(
+            fileURL: root.appendingPathComponent("metrics-no-cache.jsonl"),
+            streamID: "metrics-no-cache"
+        )
+
+        _ = try await store.append(
+            .assistantMessage(
+                turn: 1,
+                step: 1,
+                message: .object([:]),
+                usage: SessionTokenUsage(inputTokens: 100, outputTokens: 4),
+                time: 10
+            )
+        )
+
+        let metrics = try await store.currentMetrics()
+        XCTAssertNil(metrics.cacheHitRate)
+        XCTAssertEqual(CacheHitRateFormat.percent(metrics.cacheHitRate), "—")
+        try await store.close()
+    }
+
+    func testCacheHitRateFormattingKeepsTenthsAndRejectsUnavailableData() {
+        XCTAssertEqual(CacheHitRateFormat.percent(0.994), "99.4%")
+        XCTAssertEqual(
+            CacheHitRateFormat.percent(
+                inputTokens: 10,
+                cacheReadTokens: nil,
+                cacheWriteTokens: nil
+            ),
+            "—"
+        )
+        XCTAssertEqual(
+            CacheHitRateFormat.percent(
+                inputTokens: 10,
+                cacheReadTokens: 90,
+                cacheWriteTokens: nil
+            ),
+            "90.0%"
+        )
     }
 
     func testUsageChunkIsReplacedByFinalUsageForSameStep() async throws {

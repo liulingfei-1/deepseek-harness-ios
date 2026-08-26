@@ -6,6 +6,9 @@ struct BackgroundSettingsView: View {
     @State private var notificationErrorDescription: String?
 
     let runtimeStatus: BackgroundRuntimeStatus
+    let locationSnapshot: BackgroundLocationKeepAliveSnapshot
+    let systemProjection: BackgroundSystemProjection
+    let requestLocationAuthorization: () -> Void
 
     private let notifier = BackgroundCompletionNotifier()
 
@@ -16,6 +19,11 @@ struct BackgroundSettingsView: View {
             BackgroundExecutionSettingsSection(
                 isEnabled: $preferences.isEnhancedBackgroundEnabled,
                 isSystemSupported: isContinuedProcessingSupported
+            )
+            BackgroundLocationKeepAliveSettingsSection(
+                isEnabled: $preferences.isBackgroundLocationKeepAliveEnabled,
+                snapshot: locationSnapshot,
+                requestAuthorization: requestLocationAuthorization
             )
             BackgroundLiveActivitySettingsSection(
                 isEnabled: $preferences.isLiveActivityEnabled,
@@ -37,6 +45,7 @@ struct BackgroundSettingsView: View {
                 isLiveActivitySupported: isLiveActivitySupported,
                 isLiveActivityEnabled: preferences.isLiveActivityEnabled
             )
+            BackgroundSystemProjectionSection(projection: systemProjection)
             BackgroundSafetyBoundarySection()
 
             if let persistenceErrorDescription = preferences.persistenceErrorDescription {
@@ -102,6 +111,60 @@ struct BackgroundSettingsView: View {
     }
 }
 
+private struct BackgroundSystemProjectionSection: View {
+    let projection: BackgroundSystemProjection
+
+    var body: some View {
+        Section {
+            LabeledContent("活动任务", value: "\(projection.activeRunCount) 个")
+            LabeledContent("保活层级", value: tierLabel)
+            LabeledContent("通知权限", value: projection.notificationAuthorization)
+            LabeledContent("定位权限", value: projection.locationAuthorization)
+            LabeledContent(
+                "实时活动权限",
+                value: projection.liveActivitySupported
+                    ? (projection.liveActivityEnabled ? "已启用" : "已关闭")
+                    : "不可用"
+            )
+            if !projection.degradedReasons.isEmpty {
+                LabeledContent("当前降级", value: degradedLabel)
+                    .foregroundStyle(.orange)
+            }
+            if !projection.degradedDetails.isEmpty {
+                LabeledContent("故障证据", value: projection.degradedDetails.joined(separator: "、"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("当前系统投影")
+        } footer: {
+            Text("这里显示所有并行任务的汇总状态。不会显示提示词、工具参数、工具输出或模型正文；降级只表示对应系统能力当前不可用。")
+        }
+    }
+
+    private var tierLabel: String {
+        switch projection.survivalTier {
+        case .foreground: "前台"
+        case .finiteBackgroundTask: "短时后台"
+        case .continuedProcessing: "Continued Processing"
+        case .extendedAudio: "音频延展"
+        case .extendedLocation: "定位延展"
+        case .degraded: "降级"
+        }
+    }
+
+    private var degradedLabel: String {
+        projection.degradedReasons.map {
+            switch $0 {
+            case .lowPowerMode: "低电量模式"
+            case .thermalPressure: "温度压力"
+            case .audioUnavailable: "音频不可用"
+            case .locationUnavailable: "定位不可用"
+            }
+        }.sorted().joined(separator: "、")
+    }
+}
+
 private struct BackgroundLiveActivitySettingsSection: View {
     @Binding var isEnabled: Bool
     let isSystemSupported: Bool
@@ -151,6 +214,48 @@ private struct BackgroundExecutionSettingsSection: View {
             } else {
                 Text("当前系统不支持 Continued Processing。iOS 18–25 下，任务只能使用系统通常提供的短暂后台时间，不能保证持续运行。")
             }
+        }
+    }
+}
+
+private struct BackgroundLocationKeepAliveSettingsSection: View {
+    @Binding var isEnabled: Bool
+    let snapshot: BackgroundLocationKeepAliveSnapshot
+    let requestAuthorization: () -> Void
+
+    var body: some View {
+        Section {
+            Toggle("后台粗略定位保活", isOn: $isEnabled)
+            LabeledContent("定位权限", value: authorizationLabel)
+            if isEnabled && (snapshot.authorization == .notDetermined || snapshot.authorization == .whenInUse) {
+                Button("请求 Always 定位授权", action: requestAuthorization)
+            }
+            LabeledContent("当前状态", value: phaseLabel)
+        } header: {
+            Text("可选定位保活")
+        } footer: {
+            Text("仅在开启此开关、已允许 Always 定位、后台停留约 15 秒且仍有任务运行时使用约 3 公里精度的位置服务。不会保存、显示或上传坐标；普通一次定位工具不会触发此授权。")
+        }
+    }
+
+    private var authorizationLabel: String {
+        switch snapshot.authorization {
+        case .notDetermined: "尚未请求"
+        case .whenInUse: "仅使用期间"
+        case .always: "始终允许"
+        case .denied: "已拒绝"
+        case .restricted: "受系统限制"
+        case .unavailable: "不可用"
+        }
+    }
+
+    private var phaseLabel: String {
+        switch snapshot.phase {
+        case .idle: "未运行"
+        case .waitingForDelay: "等待后台延迟"
+        case .waitingForPermission: "等待授权"
+        case .running: "运行中"
+        case .degraded: "不可用"
         }
     }
 }

@@ -133,4 +133,23 @@ extension AppModel {
             )
         )
     }
+
+    /// Uses the same provider adapter/client as an agent request, but does not
+    /// create a session, append messages, or write a trajectory event.
+    func quickTestProviderProfile(id: String) async throws -> ProviderQuickTestResult {
+        guard let profile = providerDirectory.profile(id: id) else {
+            throw ProviderProfileError.missingProfile(id)
+        }
+        let configuration = try profile.configuration().validated()
+        guard let apiKey = try await apiKey(for: configuration) else {
+            throw CredentialStoreError.emptyCredential
+        }
+        let route = try providerRequestRoute(for: configuration)
+        return try await ProviderQuickTester.run(
+            client: modelClient,
+            configuration: configuration,
+            apiKey: apiKey,
+            route: route
+        )
+    }
 }

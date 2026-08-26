@@ -6,6 +6,16 @@ enum AgentRole: String, Codable, Sendable {
     case tool
 }
 
+/// Why an assistant message ended before a normal model completion. The
+/// existing `isIncomplete` flag is intentionally broad for compatibility; UI
+/// must use this reason before attributing the interruption to a model limit.
+enum AgentMessageIncompleteReason: String, Codable, Sendable, Equatable {
+    /// The provider explicitly sent its canonical length finish reason.
+    case modelOutputLength = "model_output_length"
+    /// The local task or transport was cancelled after visible output arrived.
+    case cancelled
+}
+
 /// Provider/model provenance plus adapter-private JSON needed to replay one
 /// assistant response. This mirrors the upstream model message source while
 /// keeping the envelope open for signed-thinking and future provider state.
@@ -306,6 +316,34 @@ struct AgentImageAttachmentRef: Codable, Sendable, Equatable, Hashable {
     }
 }
 
+/// A durable reference to a non-image file copied into private workspace
+/// storage. File contents intentionally never enter conversation persistence,
+/// trajectories, or a provider request without an explicit provider contract.
+struct AgentFileAttachmentRef: Codable, Sendable, Equatable, Hashable {
+    let id: UUID
+    let path: String
+    let mimeType: String
+    let byteCount: Int
+    let displayName: String
+    let expiresAt: Date
+
+    init(
+        id: UUID = UUID(),
+        path: String,
+        mimeType: String,
+        byteCount: Int,
+        displayName: String,
+        expiresAt: Date
+    ) {
+        self.id = id
+        self.path = path
+        self.mimeType = mimeType
+        self.byteCount = byteCount
+        self.displayName = displayName
+        self.expiresAt = expiresAt
+    }
+}
+
 /// Request-local image bytes. This is intentionally not part of AgentMessage
 /// persistence or trace payloads; the durable message stores only a workspace
 /// attachment reference.
@@ -343,10 +381,12 @@ struct AgentMessage: Identifiable, Codable, Sendable, Equatable {
     var toolName: String?
     var isToolError: Bool?
     var isIncomplete: Bool
+    var incompleteReason: AgentMessageIncompleteReason?
     var toolEvents: [AgentToolEvent]
     var feedback: MessageFeedback?
     var source: JSONValue?
     var imageAttachments: [AgentImageAttachmentRef]
+    var fileAttachments: [AgentFileAttachmentRef]
     let createdAt: Date
 
     private enum CodingKeys: String, CodingKey {
@@ -359,10 +399,12 @@ struct AgentMessage: Identifiable, Codable, Sendable, Equatable {
         case toolName
         case isToolError
         case isIncomplete
+        case incompleteReason
         case toolEvents
         case feedback
         case source
         case imageAttachments
+        case fileAttachments
         case createdAt
     }
 
@@ -376,10 +418,12 @@ struct AgentMessage: Identifiable, Codable, Sendable, Equatable {
         toolName: String? = nil,
         isToolError: Bool? = nil,
         isIncomplete: Bool = false,
+        incompleteReason: AgentMessageIncompleteReason? = nil,
         toolEvents: [AgentToolEvent] = [],
         feedback: MessageFeedback? = nil,
         source: JSONValue? = nil,
         imageAttachments: [AgentImageAttachmentRef] = [],
+        fileAttachments: [AgentFileAttachmentRef] = [],
         createdAt: Date = .now
     ) {
         self.id = id
@@ -391,10 +435,12 @@ struct AgentMessage: Identifiable, Codable, Sendable, Equatable {
         self.toolName = toolName
         self.isToolError = isToolError
         self.isIncomplete = isIncomplete
+        self.incompleteReason = incompleteReason
         self.toolEvents = toolEvents
         self.feedback = feedback
         self.source = source
         self.imageAttachments = imageAttachments
+        self.fileAttachments = fileAttachments
         self.createdAt = createdAt
     }
 
@@ -409,12 +455,20 @@ struct AgentMessage: Identifiable, Codable, Sendable, Equatable {
         toolName = try container.decodeIfPresent(String.self, forKey: .toolName)
         isToolError = try container.decodeIfPresent(Bool.self, forKey: .isToolError)
         isIncomplete = try container.decodeIfPresent(Bool.self, forKey: .isIncomplete) ?? false
+        incompleteReason = try container.decodeIfPresent(
+            AgentMessageIncompleteReason.self,
+            forKey: .incompleteReason
+        )
         toolEvents = try container.decodeIfPresent([AgentToolEvent].self, forKey: .toolEvents) ?? []
         feedback = try container.decodeIfPresent(MessageFeedback.self, forKey: .feedback)
         source = try container.decodeIfPresent(JSONValue.self, forKey: .source)
         imageAttachments = try container.decodeIfPresent(
             [AgentImageAttachmentRef].self,
             forKey: .imageAttachments
+        ) ?? []
+        fileAttachments = try container.decodeIfPresent(
+            [AgentFileAttachmentRef].self,
+            forKey: .fileAttachments
         ) ?? []
         createdAt = try container.decode(Date.self, forKey: .createdAt)
     }
@@ -430,10 +484,12 @@ struct AgentMessage: Identifiable, Codable, Sendable, Equatable {
         try container.encodeIfPresent(toolName, forKey: .toolName)
         try container.encodeIfPresent(isToolError, forKey: .isToolError)
         try container.encode(isIncomplete, forKey: .isIncomplete)
+        try container.encodeIfPresent(incompleteReason, forKey: .incompleteReason)
         try container.encode(toolEvents, forKey: .toolEvents)
         try container.encodeIfPresent(feedback, forKey: .feedback)
         try container.encodeIfPresent(source, forKey: .source)
         try container.encode(imageAttachments, forKey: .imageAttachments)
+        try container.encode(fileAttachments, forKey: .fileAttachments)
         try container.encode(createdAt, forKey: .createdAt)
     }
 
@@ -457,9 +513,15 @@ struct AgentMessage: Identifiable, Codable, Sendable, Equatable {
 
     static func user(
         _ text: String,
-        imageAttachments: [AgentImageAttachmentRef] = []
+        imageAttachments: [AgentImageAttachmentRef] = [],
+        fileAttachments: [AgentFileAttachmentRef] = []
     ) -> AgentMessage {
-        AgentMessage(role: .user, content: text, imageAttachments: imageAttachments)
+        AgentMessage(
+            role: .user,
+            content: text,
+            imageAttachments: imageAttachments,
+            fileAttachments: fileAttachments
+        )
     }
 
     static func assistant(
@@ -468,6 +530,7 @@ struct AgentMessage: Identifiable, Codable, Sendable, Equatable {
         toolCalls: [AgentToolCall] = [],
         toolEvents: [AgentToolEvent] = [],
         isIncomplete: Bool = false,
+        incompleteReason: AgentMessageIncompleteReason? = nil,
         source: JSONValue? = nil
     ) -> AgentMessage {
         AgentMessage(
@@ -476,6 +539,7 @@ struct AgentMessage: Identifiable, Codable, Sendable, Equatable {
             reasoning: reasoning,
             toolCalls: toolCalls,
             isIncomplete: isIncomplete,
+            incompleteReason: incompleteReason,
             toolEvents: toolEvents,
             source: source
         )
@@ -483,6 +547,13 @@ struct AgentMessage: Identifiable, Codable, Sendable, Equatable {
 
     var modelSource: AgentModelSource? {
         AgentModelSource(jsonValue: source)
+    }
+
+    /// Only this reason is evidence that a provider, rather than the app UI,
+    /// diagnostics exporter, tool preview, or a local cancellation, truncated
+    /// the model response.
+    var isModelOutputLengthTruncated: Bool {
+        incompleteReason == .modelOutputLength
     }
 
     static func tool(

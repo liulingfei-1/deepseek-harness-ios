@@ -292,6 +292,7 @@ enum ModelRetryPolicy {
                     code = contextWindowExceededCode
                 } else { code = normalizedCode ?? "HTTP" }
             case .incompleteStream: code = "TRANSPORT"
+            case .networkPathChanged: code = "TRANSPORT"
             case .streamError: code = "TRANSPORT"
             case let .providerStreamFailure(providerCode, _):
                 code = normalizedProviderStreamCode(providerCode)

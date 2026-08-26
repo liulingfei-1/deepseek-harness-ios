@@ -234,4 +234,66 @@ final class HarnessTraceStoreTests: XCTestCase {
         XCTAssertTrue(text.contains("terminal diagnostic sentinel"))
         XCTAssertTrue(text.contains("boundedOmissionCount"))
     }
+
+    func testSummaryLeavesCacheHitRateUnavailableWhenProviderOmitsCacheFields() async {
+        let store = HarnessTraceStore(capacity: 10)
+        _ = await store.record(
+            HarnessTraceDraft(
+                kind: .modelCompleted,
+                payload: .modelResponse(
+                    HarnessTraceModelResponse(
+                        text: "ok",
+                        reasoning: nil,
+                        toolCalls: [],
+                        finishReason: "stop",
+                        usage: HarnessTraceTokenUsage(
+                            ModelTokenUsage(
+                                promptTokens: 100,
+                                completionTokens: 1,
+                                totalTokens: 101,
+                                cachedPromptTokens: nil,
+                                reasoningTokens: nil
+                            )
+                        )
+                    )
+                )
+            )
+        )
+
+        let summary = HarnessTraceStore.summarize(await store.events())
+        XCTAssertNil(summary.cacheHitRate)
+    }
+
+    func testSummaryPreservesExplicitZeroCacheHitRate() async {
+        let store = HarnessTraceStore(capacity: 10)
+        _ = await store.record(
+            HarnessTraceDraft(
+                kind: .modelCompleted,
+                payload: .modelResponse(
+                    HarnessTraceModelResponse(
+                        text: "ok",
+                        reasoning: nil,
+                        toolCalls: [],
+                        finishReason: "stop",
+                        usage: HarnessTraceTokenUsage(
+                            ModelTokenUsage(
+                                promptTokens: 100,
+                                completionTokens: 1,
+                                totalTokens: 101,
+                                cachedPromptTokens: 0,
+                                reasoningTokens: nil,
+                                uncachedPromptTokens: 100
+                            )
+                        )
+                    )
+                )
+            )
+        )
+
+        let summary = HarnessTraceStore.summarize(await store.events())
+        guard let rate = summary.cacheHitRate else {
+            return XCTFail("expected explicit cache data to produce a rate")
+        }
+        XCTAssertEqual(rate, 0, accuracy: 0.000_001)
+    }
 }

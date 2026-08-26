@@ -66,4 +66,73 @@ final class HarnessLiveActivityStateTests: XCTestCase {
         second.detail = "Step 2"
         XCTAssertFalse(first.hasSamePresentation(as: second))
     }
+
+    func testMultiRunProjectionStoreDoesNotCrossFinishRuns() {
+        let firstID = UUID()
+        let secondID = UUID()
+        let first = HarnessLiveActivityState.make(
+            sessionTitle: "First",
+            phase: .working,
+            detail: "one",
+            completedUnitCount: 1,
+            totalUnitCount: 3,
+            privacyModeEnabled: true
+        )
+        let second = HarnessLiveActivityState.make(
+            sessionTitle: "Second",
+            phase: .usingTool,
+            detail: "two",
+            completedUnitCount: 2,
+            totalUnitCount: 4,
+            privacyModeEnabled: true
+        )
+        var store = HarnessLiveActivityProjectionStore()
+        store.upsert(first, for: firstID)
+        store.upsert(second, for: secondID)
+
+        XCTAssertEqual(store.activeRunIDs, [firstID, secondID])
+        XCTAssertEqual(store.remove(runID: firstID), first)
+        XCTAssertEqual(store.activeRunIDs, [secondID])
+        XCTAssertEqual(store.states[secondID], second)
+    }
+
+    func testBackgroundProjectionPrioritizesContinuedProcessingAndKeepsDegradedReasons() {
+        let keepAlive = BackgroundKeepAliveState(
+            inputs: BackgroundKeepAliveInputs(
+                isBackgrounded: true,
+                hasLiveRoot: true,
+                enhancedAudioRequested: true,
+                locationRequested: false,
+                hasFiniteBackgroundLease: true,
+                hasContinuedProcessing: true,
+                isLowPowerMode: true,
+                isThermallyConstrained: false
+            ),
+            layers: [
+                .finiteBackgroundTask,
+                .continuedProcessing,
+                .extendedAudio,
+                .degraded(.lowPowerMode)
+            ],
+            generation: 4,
+            degradedDetails: ["low_power_mode"]
+        )
+
+        let projection = BackgroundSystemProjection.make(
+            activeRunCount: 2,
+            keepAliveState: keepAlive,
+            isBackgrounded: true,
+            liveActivitySupported: true,
+            liveActivityEnabled: true,
+            notificationAuthorization: "已允许",
+            locationAuthorization: "始终允许",
+            privacyModeEnabled: true
+        )
+
+        XCTAssertEqual(projection.activeRunCount, 2)
+        XCTAssertEqual(projection.survivalTier, .continuedProcessing)
+        XCTAssertEqual(projection.degradedReasons, [.lowPowerMode])
+        XCTAssertEqual(projection.degradedDetails, ["low_power_mode"])
+        XCTAssertTrue(projection.privacyModeEnabled)
+    }
 }

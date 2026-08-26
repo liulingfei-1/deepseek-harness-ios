@@ -3,12 +3,14 @@ import Observation
 
 struct BackgroundPreferences: Codable, Equatable, Sendable {
     var isEnhancedBackgroundEnabled: Bool
+    var isBackgroundLocationKeepAliveEnabled: Bool
     var isLiveActivityEnabled: Bool
     var areTaskNotificationsEnabled: Bool
     var isPrivacyModeEnabled: Bool
 
     static let defaults = BackgroundPreferences(
         isEnhancedBackgroundEnabled: false,
+        isBackgroundLocationKeepAliveEnabled: false,
         isLiveActivityEnabled: true,
         areTaskNotificationsEnabled: false,
         isPrivacyModeEnabled: true
@@ -16,11 +18,13 @@ struct BackgroundPreferences: Codable, Equatable, Sendable {
 
     init(
         isEnhancedBackgroundEnabled: Bool,
+        isBackgroundLocationKeepAliveEnabled: Bool = false,
         isLiveActivityEnabled: Bool = true,
         areTaskNotificationsEnabled: Bool,
         isPrivacyModeEnabled: Bool
     ) {
         self.isEnhancedBackgroundEnabled = isEnhancedBackgroundEnabled
+        self.isBackgroundLocationKeepAliveEnabled = isBackgroundLocationKeepAliveEnabled
         self.isLiveActivityEnabled = isLiveActivityEnabled
         self.areTaskNotificationsEnabled = areTaskNotificationsEnabled
         self.isPrivacyModeEnabled = isPrivacyModeEnabled
@@ -28,6 +32,7 @@ struct BackgroundPreferences: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case isEnhancedBackgroundEnabled
+        case isBackgroundLocationKeepAliveEnabled
         case isLiveActivityEnabled
         case areTaskNotificationsEnabled
         case isPrivacyModeEnabled
@@ -39,6 +44,10 @@ struct BackgroundPreferences: Codable, Equatable, Sendable {
             Bool.self,
             forKey: .isEnhancedBackgroundEnabled
         ) ?? Self.defaults.isEnhancedBackgroundEnabled
+        isBackgroundLocationKeepAliveEnabled = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .isBackgroundLocationKeepAliveEnabled
+        ) ?? Self.defaults.isBackgroundLocationKeepAliveEnabled
         isLiveActivityEnabled = try container.decodeIfPresent(
             Bool.self,
             forKey: .isLiveActivityEnabled
@@ -102,6 +111,13 @@ final class BackgroundPreferencesModel {
         }
     }
 
+    var isBackgroundLocationKeepAliveEnabled: Bool {
+        didSet {
+            guard isBackgroundLocationKeepAliveEnabled != oldValue else { return }
+            persist()
+        }
+    }
+
     var areTaskNotificationsEnabled: Bool {
         didSet {
             guard areTaskNotificationsEnabled != oldValue else { return }
@@ -131,6 +147,7 @@ final class BackgroundPreferencesModel {
         self.store = store
         let preferences = store.load()
         isEnhancedBackgroundEnabled = preferences.isEnhancedBackgroundEnabled
+        isBackgroundLocationKeepAliveEnabled = preferences.isBackgroundLocationKeepAliveEnabled
         isLiveActivityEnabled = preferences.isLiveActivityEnabled
         areTaskNotificationsEnabled = preferences.areTaskNotificationsEnabled
         isPrivacyModeEnabled = preferences.isPrivacyModeEnabled
@@ -139,6 +156,7 @@ final class BackgroundPreferencesModel {
     var value: BackgroundPreferences {
         BackgroundPreferences(
             isEnhancedBackgroundEnabled: isEnhancedBackgroundEnabled,
+            isBackgroundLocationKeepAliveEnabled: isBackgroundLocationKeepAliveEnabled,
             isLiveActivityEnabled: isLiveActivityEnabled,
             areTaskNotificationsEnabled: areTaskNotificationsEnabled,
             isPrivacyModeEnabled: isPrivacyModeEnabled
@@ -148,6 +166,7 @@ final class BackgroundPreferencesModel {
     func reload() {
         let preferences = store.load()
         isEnhancedBackgroundEnabled = preferences.isEnhancedBackgroundEnabled
+        isBackgroundLocationKeepAliveEnabled = preferences.isBackgroundLocationKeepAliveEnabled
         isLiveActivityEnabled = preferences.isLiveActivityEnabled
         areTaskNotificationsEnabled = preferences.areTaskNotificationsEnabled
         isPrivacyModeEnabled = preferences.isPrivacyModeEnabled
@@ -157,6 +176,7 @@ final class BackgroundPreferencesModel {
     func reset() {
         store.clear()
         isEnhancedBackgroundEnabled = BackgroundPreferences.defaults.isEnhancedBackgroundEnabled
+        isBackgroundLocationKeepAliveEnabled = BackgroundPreferences.defaults.isBackgroundLocationKeepAliveEnabled
         isLiveActivityEnabled = BackgroundPreferences.defaults.isLiveActivityEnabled
         areTaskNotificationsEnabled = BackgroundPreferences.defaults.areTaskNotificationsEnabled
         isPrivacyModeEnabled = BackgroundPreferences.defaults.isPrivacyModeEnabled

@@ -221,7 +221,9 @@ struct OpenAIChatCompletionsAdapter: ModelProviderAdapter {
 
 private enum OpenAIChatCompletionsRequestBuilder {
     static func make(_ request: ModelRequest) throws -> URLRequest {
-        var urlRequest = URLRequest(url: try request.configuration.chatCompletionsURL())
+        let endpoint = try request.configuration.chatCompletionsURL()
+        try request.route?.validate(endpoint: endpoint)
+        var urlRequest = URLRequest(url: endpoint)
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         urlRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
@@ -249,7 +251,9 @@ struct AnthropicMessagesAdapter: ModelProviderAdapter {
     }
 
     func makeStreamingRequest(_ request: ModelRequest) throws -> URLRequest {
-        var urlRequest = URLRequest(url: try request.configuration.chatCompletionsURL())
+        let endpoint = try request.configuration.chatCompletionsURL()
+        try request.route?.validate(endpoint: endpoint)
+        var urlRequest = URLRequest(url: endpoint)
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         urlRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")

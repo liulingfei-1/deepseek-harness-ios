@@ -15,6 +15,7 @@ final class BackgroundPreferencesTests: XCTestCase {
 
         XCTAssertEqual(store.load(), .defaults)
         XCTAssertFalse(store.load().isEnhancedBackgroundEnabled)
+        XCTAssertFalse(store.load().isBackgroundLocationKeepAliveEnabled)
         XCTAssertTrue(store.load().isLiveActivityEnabled)
         XCTAssertFalse(store.load().areTaskNotificationsEnabled)
         XCTAssertTrue(store.load().isPrivacyModeEnabled)
@@ -25,6 +26,7 @@ final class BackgroundPreferencesTests: XCTestCase {
         let store = BackgroundPreferencesStore(defaults: defaults)
         let expected = BackgroundPreferences(
             isEnhancedBackgroundEnabled: true,
+            isBackgroundLocationKeepAliveEnabled: true,
             isLiveActivityEnabled: false,
             areTaskNotificationsEnabled: true,
             isPrivacyModeEnabled: false
@@ -41,6 +43,7 @@ final class BackgroundPreferencesTests: XCTestCase {
         let model = BackgroundPreferencesModel(store: store)
 
         model.isEnhancedBackgroundEnabled = true
+        model.isBackgroundLocationKeepAliveEnabled = true
         model.isLiveActivityEnabled = false
         model.areTaskNotificationsEnabled = true
         model.isPrivacyModeEnabled = false
@@ -55,6 +58,7 @@ final class BackgroundPreferencesTests: XCTestCase {
         try store.save(
             BackgroundPreferences(
                 isEnhancedBackgroundEnabled: true,
+                isBackgroundLocationKeepAliveEnabled: true,
                 isLiveActivityEnabled: false,
                 areTaskNotificationsEnabled: true,
                 isPrivacyModeEnabled: false
@@ -77,6 +81,7 @@ final class BackgroundPreferencesTests: XCTestCase {
         let loaded = BackgroundPreferencesStore(defaults: defaults, key: key).load()
 
         XCTAssertTrue(loaded.isEnhancedBackgroundEnabled)
+        XCTAssertFalse(loaded.isBackgroundLocationKeepAliveEnabled)
         XCTAssertTrue(loaded.isLiveActivityEnabled)
         XCTAssertTrue(loaded.areTaskNotificationsEnabled)
         XCTAssertFalse(loaded.isPrivacyModeEnabled)

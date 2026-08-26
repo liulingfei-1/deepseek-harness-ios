@@ -844,9 +844,11 @@ actor SessionStore {
                 toolName: message.toolName,
                 isToolError: message.isToolError,
                 isIncomplete: message.isIncomplete,
+                incompleteReason: message.incompleteReason,
                 toolEvents: message.toolEvents.map(forkToolEvent),
                 source: message.source,
                 imageAttachments: message.imageAttachments,
+                fileAttachments: message.fileAttachments,
                 createdAt: message.createdAt
             )
         }
@@ -974,6 +976,181 @@ enum SessionStoreError: LocalizedError, Sendable {
             return "会话快照已损坏。"
         case .emptyTitle:
             return "会话标题不能为空。"
+        }
+    }
+}
+
+/// A durable admission queue for App Intents. It is deliberately separate from
+/// conversation state: an Intent may be invoked before the SwiftUI scene and
+/// AppModel have restored their session projection.
+enum AppIntentInboxActionKind: String, Codable, Sendable, Equatable {
+    case sendPrompt
+    case openSession
+    case retryLatestUserMessage
+}
+
+struct AppIntentInboxRequest: Codable, Sendable, Equatable, Identifiable {
+    static let maximumPromptUTF8Bytes = 64 * 1_024
+
+    let id: UUID
+    let action: AppIntentInboxActionKind
+    let sessionID: UUID?
+    let prompt: String?
+    let createdAt: Date
+
+    init(
+        id: UUID = UUID(),
+        action: AppIntentInboxActionKind,
+        sessionID: UUID? = nil,
+        prompt: String? = nil,
+        createdAt: Date = .now
+    ) throws {
+        let normalizedPrompt = prompt?.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch action {
+        case .sendPrompt:
+            guard let normalizedPrompt,
+                  !normalizedPrompt.isEmpty,
+                  normalizedPrompt.utf8.count <= Self.maximumPromptUTF8Bytes else {
+                throw AppIntentInboxError.invalidRequest
+            }
+        case .openSession, .retryLatestUserMessage:
+            guard sessionID != nil, normalizedPrompt == nil else {
+                throw AppIntentInboxError.invalidRequest
+            }
+        }
+        self.id = id
+        self.action = action
+        self.sessionID = sessionID
+        self.prompt = normalizedPrompt
+        self.createdAt = createdAt
+    }
+}
+
+actor AppIntentInboxStore {
+    private struct Snapshot: Codable {
+        var version: Int
+        var pending: [AppIntentInboxRequest]
+        var consumedRequestIDs: Set<UUID>
+        var runningSessionIDs: Set<UUID>
+
+        static let empty = Snapshot(
+            version: AppIntentInboxStore.currentVersion,
+            pending: [],
+            consumedRequestIDs: [],
+            runningSessionIDs: []
+        )
+    }
+
+    static let currentVersion = 1
+    static let maximumPendingRequests = 64
+
+    private let fileURL: URL
+    private let fileManager: FileManager
+
+    init(fileURL: URL = AppIntentInboxStore.applicationSupportURL(), fileManager: FileManager = .default) {
+        self.fileURL = fileURL
+        self.fileManager = fileManager
+    }
+
+    static func applicationSupportURL(fileManager: FileManager = .default) -> URL {
+        let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? fileManager.temporaryDirectory
+        return base
+            .appendingPathComponent("HarnessMobile", isDirectory: true)
+            .appendingPathComponent("app-intent-inbox.json")
+    }
+
+    /// Returns false for an already-seen id, making a Shortcuts retry safe to
+    /// repeat without injecting a second prompt.
+    @discardableResult
+    func enqueue(_ request: AppIntentInboxRequest) throws -> Bool {
+        var snapshot = try load()
+        guard !snapshot.consumedRequestIDs.contains(request.id),
+              !snapshot.pending.contains(where: { $0.id == request.id }) else {
+            return false
+        }
+        guard snapshot.pending.count < Self.maximumPendingRequests else {
+            throw AppIntentInboxError.queueFull
+        }
+        snapshot.pending.append(request)
+        try save(snapshot)
+        return true
+    }
+
+    /// Consumption is persisted before an AppModel action is dispatched. This
+    /// gives cold launches at-most-once admission; a user can explicitly retry
+    /// a failed action with a new request id instead of duplicating a prompt.
+    func consumeNext() throws -> AppIntentInboxRequest? {
+        var snapshot = try load()
+        guard !snapshot.pending.isEmpty else { return nil }
+        let request = snapshot.pending.removeFirst()
+        snapshot.consumedRequestIDs.insert(request.id)
+        try save(snapshot)
+        return request
+    }
+
+    func updateRunningSessions(_ sessionIDs: Set<UUID>) throws {
+        var snapshot = try load()
+        guard snapshot.runningSessionIDs != sessionIDs else { return }
+        snapshot.runningSessionIDs = sessionIDs
+        try save(snapshot)
+    }
+
+    func isSessionRunning(_ sessionID: UUID) throws -> Bool {
+        try load().runningSessionIDs.contains(sessionID)
+    }
+
+    func pendingRequests() throws -> [AppIntentInboxRequest] {
+        try load().pending
+    }
+
+    private func load() throws -> Snapshot {
+        guard fileManager.fileExists(atPath: fileURL.path) else { return .empty }
+        do {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let snapshot = try decoder.decode(Snapshot.self, from: Data(contentsOf: fileURL))
+            guard snapshot.version == Self.currentVersion else {
+                throw AppIntentInboxError.unsupportedVersion(snapshot.version)
+            }
+            return snapshot
+        } catch let error as AppIntentInboxError {
+            throw error
+        } catch {
+            throw AppIntentInboxError.unreadableStore
+        }
+    }
+
+    private func save(_ snapshot: Snapshot) throws {
+        let directory = fileURL.deletingLastPathComponent()
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try encoder.encode(snapshot)
+        try data.write(to: fileURL, options: [.atomic])
+#if os(iOS)
+        try fileManager.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: fileURL.path)
+#endif
+    }
+}
+
+enum AppIntentInboxError: LocalizedError, Sendable, Equatable {
+    case invalidRequest
+    case queueFull
+    case unsupportedVersion(Int)
+    case unreadableStore
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidRequest:
+            "App Intent 请求无效。"
+        case .queueFull:
+            "App Intent 请求队列已满。"
+        case let .unsupportedVersion(version):
+            "不支持的 App Intent 收件箱版本：\(version)。"
+        case .unreadableStore:
+            "App Intent 收件箱无法读取。"
         }
     }
 }

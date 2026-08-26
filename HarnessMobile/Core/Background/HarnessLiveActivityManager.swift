@@ -23,20 +23,25 @@ final class HarnessLiveActivityManager {
         subsystem: Bundle.main.bundleIdentifier ?? "com.llf.harnessmobile",
         category: "LiveActivity"
     )
-    private var currentActivity: Activity<HarnessActivityAttributes>?
-    private var currentRunID: UUID?
-    private var lastState: HarnessLiveActivityState?
+    private var activities: [UUID: Activity<HarnessActivityAttributes>] = [:]
+    private var projections = HarnessLiveActivityProjectionStore()
 
     private init() {}
 
-    func cleanupStaleActivities() async {
+    func cleanupStaleActivities(activeRunIDs: Set<UUID> = []) async {
         guard Self.isSystemSupported else { return }
         for activity in Activity<HarnessActivityAttributes>.activities {
-            await activity.end(nil, dismissalPolicy: .immediate)
+            guard let runID = UUID(uuidString: activity.attributes.runID),
+                  activeRunIDs.contains(runID) else {
+                await activity.end(nil, dismissalPolicy: .immediate)
+                continue
+            }
+            activities[runID] = activity
         }
-        currentActivity = nil
-        currentRunID = nil
-        lastState = nil
+        let staleRunIDs = Set(activities.keys).subtracting(activeRunIDs)
+        for runID in staleRunIDs {
+            clear(runID: runID)
+        }
     }
 
     func start(
@@ -48,7 +53,7 @@ final class HarnessLiveActivityManager {
         isEnabled: Bool
     ) async {
         guard isEnabled else {
-            await endAll()
+            await end(runID: runID)
             return
         }
         guard areActivitiesEnabled else {
@@ -65,12 +70,11 @@ final class HarnessLiveActivityManager {
             privacyModeEnabled: privacyModeEnabled
         )
 
-        if currentRunID == runID, currentActivity != nil {
+        if activity(for: runID) != nil {
             await push(state, runID: runID)
             return
         }
 
-        await endAll()
         let attributes = HarnessActivityAttributes(
             runID: runID.uuidString.lowercased(),
             sessionID: sessionID?.uuidString.lowercased(),
@@ -82,9 +86,8 @@ final class HarnessLiveActivityManager {
                 content: runningContent(for: state),
                 pushType: nil
             )
-            currentActivity = activity
-            currentRunID = runID
-            lastState = state
+            activities[runID] = activity
+            projections.upsert(state, for: runID)
         } catch {
             logger.error("Live Activity start failed: \(error.localizedDescription, privacy: .public)")
         }
@@ -107,7 +110,7 @@ final class HarnessLiveActivityManager {
         }
         guard areActivitiesEnabled else { return }
 
-        if currentRunID != runID || activity(for: runID) == nil {
+        if activity(for: runID) == nil {
             await start(
                 runID: runID,
                 sessionID: sessionID,
@@ -138,11 +141,11 @@ final class HarnessLiveActivityManager {
     ) async {
         guard phase.isTerminal else { return }
         guard let activity = activity(for: runID) else {
-            clearIfMatching(runID)
+            clear(runID: runID)
             return
         }
 
-        let previous = lastState ?? HarnessLiveActivityState.make(
+        let previous = projections.states[runID] ?? HarnessLiveActivityState.make(
             sessionTitle: "Harness 任务",
             phase: phase,
             detail: "",
@@ -163,35 +166,33 @@ final class HarnessLiveActivityManager {
         let dismissalDate = Date().addingTimeInterval(45)
         let content = ActivityContent(state: terminalState, staleDate: nil)
         await activity.end(content, dismissalPolicy: .after(dismissalDate))
-        clearIfMatching(runID)
+        clear(runID: runID)
     }
 
     func applyPrivacyMode(_ privacyModeEnabled: Bool) async {
-        guard let runID = currentRunID,
-              let state = lastState,
-              activity(for: runID) != nil else {
-            return
+        for runID in Array(activities.keys) {
+            guard let state = projections.states[runID] else { continue }
+            let projected = HarnessLiveActivityState.make(
+                sessionTitle: state.sessionTitle,
+                phase: state.phase,
+                detail: state.detail,
+                toolName: state.toolName,
+                toolSummary: state.toolSummary,
+                completedUnitCount: state.completedUnitCount,
+                totalUnitCount: state.totalUnitCount,
+                privacyModeEnabled: privacyModeEnabled
+            )
+            await push(projected, runID: runID)
         }
-        let projected = HarnessLiveActivityState.make(
-            sessionTitle: state.sessionTitle,
-            phase: state.phase,
-            detail: state.detail,
-            toolName: state.toolName,
-            toolSummary: state.toolSummary,
-            completedUnitCount: state.completedUnitCount,
-            totalUnitCount: state.totalUnitCount,
-            privacyModeEnabled: privacyModeEnabled
-        )
-        await push(projected, runID: runID)
     }
 
     func end(runID: UUID) async {
         guard let activity = activity(for: runID) else {
-            clearIfMatching(runID)
+            clear(runID: runID)
             return
         }
         await activity.end(nil, dismissalPolicy: .immediate)
-        clearIfMatching(runID)
+        clear(runID: runID)
     }
 
     func endAll() async {
@@ -199,21 +200,22 @@ final class HarnessLiveActivityManager {
         for activity in Activity<HarnessActivityAttributes>.activities {
             await activity.end(nil, dismissalPolicy: .immediate)
         }
-        currentActivity = nil
-        currentRunID = nil
-        lastState = nil
+        activities.removeAll(keepingCapacity: false)
+        projections.removeAll()
     }
 
     private func push(_ state: HarnessLiveActivityState, runID: UUID) async {
         guard let activity = activity(for: runID) else { return }
-        if let lastState, lastState.hasSamePresentation(as: state) { return }
+        if let lastState = projections.states[runID], lastState.hasSamePresentation(as: state) {
+            return
+        }
         await activity.update(runningContent(for: state))
-        self.lastState = state
+        projections.upsert(state, for: runID)
     }
 
     private func activity(for runID: UUID) -> Activity<HarnessActivityAttributes>? {
-        if currentRunID == runID, let currentActivity {
-            return currentActivity
+        if let activity = activities[runID] {
+            return activity
         }
         let identifier = runID.uuidString.lowercased()
         guard let restored = Activity<HarnessActivityAttributes>.activities.first(where: {
@@ -221,8 +223,7 @@ final class HarnessLiveActivityManager {
         }) else {
             return nil
         }
-        currentActivity = restored
-        currentRunID = runID
+        activities[runID] = restored
         return restored
     }
 
@@ -235,11 +236,9 @@ final class HarnessLiveActivityManager {
         )
     }
 
-    private func clearIfMatching(_ runID: UUID) {
-        guard currentRunID == runID else { return }
-        currentActivity = nil
-        currentRunID = nil
-        lastState = nil
+    private func clear(runID: UUID) {
+        activities.removeValue(forKey: runID)
+        projections.remove(runID: runID)
     }
 }
 #endif

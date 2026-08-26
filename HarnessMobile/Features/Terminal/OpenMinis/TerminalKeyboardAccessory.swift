@@ -163,6 +163,8 @@ struct QuickCommandButton: View {
             .background(isActive ? Color.accentColor : Color(white: 0.25))
             .foregroundStyle(isActive ? .white : .green)
             .clipShape(.rect(cornerRadius: 6))
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)

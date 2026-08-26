@@ -24,6 +24,8 @@ targets:
       path: HarnessMobile/HarnessMobile.entitlements
       properties:
         com.apple.developer.healthkit: true
+        com.apple.security.application-groups:
+          - group.com.llf.harnessmobile.share
     sources:
       - path: HarnessMobile
         excludes:
@@ -38,6 +40,8 @@ targets:
       # project is regenerated from this spec. This file is intentionally
       # outside the generated group layout used by older checkouts.
       - path: HarnessMobile/Core/Plugins/PluginInstallCoordinator.swift
+      - path: HarnessMobile/Core/Plugins/ISHHost/ISHNativeClientSlotRegistry.swift
+      - path: HarnessMobile/Core/Trace/SessionPersistence.swift
       # Ralph is part of the production tool catalog and must remain in the
       # application target when the project is regenerated.
       - path: HarnessMobile/Core/Tools/RalphTool.swift
@@ -57,6 +61,8 @@ targets:
     dependencies:
       - target: HarnessMobileLiveActivity
         embed: true
+      - target: HarnessMobileShare
+        embed: true
       - framework: Vendor/OpenMinisISH/Artifacts/HarnessISH.xcframework
         embed: false
       - sdk: HealthKit.framework
@@ -74,6 +80,7 @@ targets:
         NSPhotoLibraryAddUsageDescription: 仅在你批准照片工具保存结果时写入照片图库。
         NSContactsUsageDescription: 仅在你批准联系人搜索工具时读取有限的姓名、电话和邮箱。
         NSLocationWhenInUseUsageDescription: 仅在你批准定位工具时获取一次当前定位，不进行后台跟踪。
+        NSLocationAlwaysAndWhenInUseUsageDescription: 仅在你明确开启后台粗略定位保活并允许 Always 定位后，于后台任务运行期间使用约 3 公里精度的位置服务；不会存储或显示位置坐标。
         NSMotionUsageDescription: 仅在你批准运动工具时读取最近的本机运动活动估计。
         NSMicrophoneUsageDescription: 仅在你主动使用语音输入时访问麦克风。
         NSSpeechRecognitionUsageDescription: 仅在你主动使用语音转文字时进行语音识别。
@@ -94,6 +101,8 @@ targets:
           - com.llf.harnessmobile.continued-processing.*
           - com.llf.harnessmobile.schedule-processing
         UIBackgroundModes:
+          - audio
+          - location
           - processing
         UILaunchScreen: {}
         UIApplicationSupportsIndirectInputEvents: true
@@ -114,6 +123,42 @@ targets:
         inputFileLists:
           - $(SRCROOT)/Scripts/device-audit-inputs.xcfilelist
         basedOnDependencyAnalysis: false
+  HarnessMobileShare:
+    type: app-extension
+    platform: iOS
+    entitlements:
+      path: HarnessMobileShare/HarnessMobileShare.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.llf.harnessmobile.share
+    sources:
+      - path: HarnessMobileShare
+        excludes:
+          - Info.plist
+          - HarnessMobileShare.entitlements
+      - path: HarnessMobile/Core/Storage/ShareHandoff.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.llf.harnessmobile.share
+        PRODUCT_NAME: HarnessMobileShare
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 2SH3TUR2JL
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
+    info:
+      path: HarnessMobileShare/Info.plist
+      properties:
+        CFBundleDisplayName: 分享到 Harness
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
+          NSExtensionAttributes:
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsText: true
+              NSExtensionActivationSupportsWebURLWithMaxCount: 8
+              NSExtensionActivationSupportsImageWithMaxCount: 8
+              NSExtensionActivationSupportsMovieWithMaxCount: 8
+              NSExtensionActivationSupportsFileWithMaxCount: 8
   HarnessMobileLiveActivity:
     type: app-extension
     platform: iOS

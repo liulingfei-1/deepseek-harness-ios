@@ -113,7 +113,8 @@ struct CordisModelRequestPlan: Sendable, Equatable {
         systemPrompt: String,
         messages: [AgentMessage],
         tools: [ModelToolDefinition],
-        imagePayloads: [ModelImagePayload] = []
+        imagePayloads: [ModelImagePayload] = [],
+        route: ProviderRequestRoute? = nil
     ) -> ModelRequest {
         ModelRequest(
             configuration: configuration,
@@ -121,7 +122,8 @@ struct CordisModelRequestPlan: Sendable, Equatable {
             systemPrompt: systemPrompt,
             messages: messages,
             tools: tools,
-            imagePayloads: imagePayloads
+            imagePayloads: imagePayloads,
+            route: route
         )
     }
 }
@@ -194,6 +196,9 @@ struct CordisToolExecution: Sendable, Equatable {
     let arguments: [String: JSONValue]
     let risk: ToolRisk
     let summary: String
+    private let signalBox: ToolCancellationSignalBox
+
+    var signal: ToolCancellationSignal { signalBox.get() }
 
     init(
         agentID: UUID? = nil,
@@ -203,7 +208,8 @@ struct CordisToolExecution: Sendable, Equatable {
         call: AgentToolCall,
         arguments: [String: JSONValue],
         risk: ToolRisk,
-        summary: String
+        summary: String,
+        signal: ToolCancellationSignal = ToolCancellationSignal()
     ) {
         self.agentID = agentID ?? runID
         self.runID = runID
@@ -213,6 +219,22 @@ struct CordisToolExecution: Sendable, Equatable {
         self.arguments = arguments
         self.risk = risk
         self.summary = summary
+        signalBox = ToolCancellationSignalBox(signal)
+    }
+
+    func replacingSignal(_ signal: ToolCancellationSignal) {
+        signalBox.replace(signal)
+    }
+
+    static func == (lhs: CordisToolExecution, rhs: CordisToolExecution) -> Bool {
+        lhs.agentID == rhs.agentID
+            && lhs.runID == rhs.runID
+            && lhs.turn == rhs.turn
+            && lhs.step == rhs.step
+            && lhs.call == rhs.call
+            && lhs.arguments == rhs.arguments
+            && lhs.risk == rhs.risk
+            && lhs.summary == rhs.summary
     }
 }
 
@@ -229,15 +251,34 @@ struct CordisToolExecutionResult: Sendable, Equatable {
     /// presentation content for model/session compatibility; finalizers may
     /// replace only that content.
     let value: JSONValue?
+    /// Stable structured error code for model/session routing.
+    let errorCode: String?
+    /// Model-visible context folded by post-execute plugins. These messages are
+    /// persisted immediately after the tool result and never veto execution.
+    let additionalContexts: [AgentMessage]
 
-    init(text: String, isError: Bool, value: JSONValue? = nil) {
+    init(
+        text: String,
+        isError: Bool,
+        value: JSONValue? = nil,
+        errorCode: String? = nil,
+        additionalContexts: [AgentMessage] = []
+    ) {
         self.text = text
         self.isError = isError
         self.value = value
+        self.errorCode = errorCode
+        self.additionalContexts = additionalContexts
     }
 
     func replacingContent(_ text: String) -> Self {
-        Self(text: text, isError: isError, value: value)
+        Self(
+            text: text,
+            isError: isError,
+            value: value,
+            errorCode: errorCode,
+            additionalContexts: additionalContexts
+        )
     }
 }
 

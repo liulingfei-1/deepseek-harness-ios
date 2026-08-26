@@ -153,7 +153,8 @@ enum AnthropicWireSerializer {
         }
 
         for message in messages {
-            if message.role != .user, !message.imageAttachments.isEmpty {
+            if message.role != .user,
+               (!message.imageAttachments.isEmpty || !message.fileAttachments.isEmpty) {
                 throw AnthropicMessagesWireError.unsupportedImageRole(message.role.rawValue)
             }
             switch message.role {
@@ -171,7 +172,8 @@ enum AnthropicWireSerializer {
             case .user:
                 flushToolResults()
                 var blocks: [AnthropicMessagesRequest.ContentBlock] = []
-                if !message.content.isEmpty || message.imageAttachments.isEmpty {
+                if !message.content.isEmpty ||
+                    (message.imageAttachments.isEmpty && message.fileAttachments.isEmpty) {
                     blocks.append(.text(message.content))
                 }
                 var omittedImages = 0
@@ -195,6 +197,13 @@ enum AnthropicWireSerializer {
                     blocks.append(
                         .text(
                             "[\(omittedImages) earlier image(s) omitted because the request image limit was reached.]"
+                        )
+                    )
+                }
+                for attachment in message.fileAttachments {
+                    blocks.append(
+                        .text(
+                            "[Local attachment metadata: name=\(attachment.displayName); type=\(attachment.mimeType); size=\(attachment.byteCount) bytes. File bytes were not sent because this provider has no declared non-image file-input contract.]"
                         )
                     )
                 }

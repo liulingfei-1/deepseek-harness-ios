@@ -7,6 +7,114 @@ import XCTest
 #endif
 
 final class SessionStoreTests: XCTestCase {
+    func testAppIntentInboxAdmitsConcurrentDistinctRequestsInFIFOStorage() async throws {
+        let fileURL = makeInboxURL()
+        defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }
+
+        let store = AppIntentInboxStore(fileURL: fileURL)
+        let requests = try (0..<12).map { index in
+            try AppIntentInboxRequest(
+                action: .sendPrompt,
+                prompt: "parallel request \(index)"
+            )
+        }
+        let accepted = try await withThrowingTaskGroup(of: Bool.self) { group in
+            for request in requests {
+                group.addTask {
+                    try await store.enqueue(request)
+                }
+            }
+            var result: [Bool] = []
+            for try await didAccept in group {
+                result.append(didAccept)
+            }
+            return result
+        }
+
+        XCTAssertEqual(accepted.filter { $0 }.count, requests.count)
+        let pending = try await store.pendingRequests()
+        XCTAssertEqual(Set(pending.map(\.id)), Set(requests.map(\.id)))
+        XCTAssertEqual(pending.count, requests.count)
+    }
+
+    func testAppIntentInboxRejectsDuplicateRequestIDAndConsumesOnlyOnceAfterRestart() async throws {
+        let fileURL = makeInboxURL()
+        defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }
+
+        let request = try AppIntentInboxRequest(
+            id: UUID(),
+            action: .sendPrompt,
+            prompt: "durable request"
+        )
+        let first = AppIntentInboxStore(fileURL: fileURL)
+        let firstEnqueue = try await first.enqueue(request)
+        let duplicateEnqueue = try await first.enqueue(request)
+        XCTAssertTrue(firstEnqueue)
+        XCTAssertFalse(duplicateEnqueue)
+
+        let restarted = AppIntentInboxStore(fileURL: fileURL)
+        let consumed = try await restarted.consumeNext()
+        let exhausted = try await restarted.consumeNext()
+        let replayEnqueue = try await restarted.enqueue(request)
+        XCTAssertEqual(consumed?.id, request.id)
+        XCTAssertEqual(consumed?.action, request.action)
+        XCTAssertEqual(consumed?.sessionID, request.sessionID)
+        XCTAssertEqual(consumed?.prompt, request.prompt)
+        XCTAssertNil(exhausted)
+        XCTAssertFalse(replayEnqueue)
+    }
+
+    func testAppIntentInboxRejectsCorruptAndUnsupportedSnapshots() async throws {
+        let fileURL = makeInboxURL()
+        defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }
+        try FileManager.default.createDirectory(
+            at: fileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+
+        try Data("not json".utf8).write(to: fileURL)
+        let corrupt = AppIntentInboxStore(fileURL: fileURL)
+        do {
+            _ = try await corrupt.pendingRequests()
+            XCTFail("Corrupt inbox data must fail closed")
+        } catch let error as AppIntentInboxError {
+            XCTAssertEqual(error, .unreadableStore)
+        }
+
+        let unsupported = #"{"consumedRequestIDs":[],"pending":[],"runningSessionIDs":[],"version":99}"#
+        try Data(unsupported.utf8).write(to: fileURL, options: .atomic)
+        let versioned = AppIntentInboxStore(fileURL: fileURL)
+        do {
+            _ = try await versioned.pendingRequests()
+            XCTFail("Unknown inbox versions must fail closed")
+        } catch let error as AppIntentInboxError {
+            XCTAssertEqual(error, .unsupportedVersion(99))
+        }
+    }
+
+    func testAppIntentInboxPersistsRunningSessionProjection() async throws {
+        let fileURL = makeInboxURL()
+        defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }
+
+        let firstID = UUID()
+        let secondID = UUID()
+        let store = AppIntentInboxStore(fileURL: fileURL)
+        try await store.updateRunningSessions([firstID, secondID])
+        let firstIsRunning = try await store.isSessionRunning(firstID)
+        let secondIsRunning = try await store.isSessionRunning(secondID)
+        XCTAssertTrue(firstIsRunning)
+        XCTAssertTrue(secondIsRunning)
+
+        let restarted = AppIntentInboxStore(fileURL: fileURL)
+        let restartedFirstIsRunning = try await restarted.isSessionRunning(firstID)
+        XCTAssertTrue(restartedFirstIsRunning)
+        try await restarted.updateRunningSessions([secondID])
+        let firstIsStopped = try await restarted.isSessionRunning(firstID)
+        let secondRemainsRunning = try await restarted.isSessionRunning(secondID)
+        XCTAssertFalse(firstIsStopped)
+        XCTAssertTrue(secondRemainsRunning)
+    }
+
     func testLoadRepairsTrailingAssistantToolCallWithoutResult() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("HarnessSessionTests-\(UUID().uuidString)", isDirectory: true)
@@ -413,5 +521,11 @@ final class SessionStoreTests: XCTestCase {
     private func makeRoot() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("HarnessSessionTests-\(UUID().uuidString)", isDirectory: true)
+    }
+
+    private func makeInboxURL() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("HarnessIntentInboxTests-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("app-intent-inbox.json")
     }
 }

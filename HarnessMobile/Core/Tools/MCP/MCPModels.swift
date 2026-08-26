@@ -171,15 +171,18 @@ struct MCPClientConfiguration: Sendable, Equatable {
     let server: MCPStdioServerConfiguration
     let toolCallTimeout: Duration
     let limits: MCPClientLimits
+    let reconnectPolicy: MCPReconnectPolicy
 
     init(
         server: MCPStdioServerConfiguration,
         toolCallTimeout: Duration = .seconds(60),
-        limits: MCPClientLimits = MCPClientLimits()
+        limits: MCPClientLimits = MCPClientLimits(),
+        reconnectPolicy: MCPReconnectPolicy = MCPReconnectPolicy()
     ) {
         self.server = server
         self.toolCallTimeout = toolCallTimeout
         self.limits = limits
+        self.reconnectPolicy = reconnectPolicy
     }
 
     func validate() throws {
@@ -190,6 +193,43 @@ struct MCPClientConfiguration: Sendable, Equatable {
         guard limits.maximumOutboundFrameBytes <= limits.maximumInboundFrameBytes else {
             throw MCPClientError.invalidConfiguration("出站消息上限不能大于入站消息上限")
         }
+        try reconnectPolicy.validate()
+    }
+}
+
+/// Bounded recovery policy for one local MCP stdio server. A fresh transport
+/// is created for every attempt so a stopped iSH process is never reused.
+struct MCPReconnectPolicy: Sendable, Equatable {
+    let initialDelay: Duration
+    let maximumDelay: Duration
+    let maximumAttempts: Int
+
+    init(
+        initialDelay: Duration = .milliseconds(500),
+        maximumDelay: Duration = .seconds(30),
+        maximumAttempts: Int = 10
+    ) {
+        self.initialDelay = initialDelay
+        self.maximumDelay = maximumDelay
+        self.maximumAttempts = maximumAttempts
+    }
+
+    func validate() throws {
+        guard initialDelay > .zero, maximumDelay >= initialDelay else {
+            throw MCPClientError.invalidConfiguration("MCP 重连延迟无效")
+        }
+        guard (1...10).contains(maximumAttempts) else {
+            throw MCPClientError.invalidConfiguration("MCP maximumAttempts 必须在 1 到 10 之间")
+        }
+    }
+
+    func delay(forAttempt attempt: Int) -> Duration {
+        var delay = initialDelay
+        for _ in 1..<max(1, attempt) {
+            delay += delay
+            if delay >= maximumDelay { return maximumDelay }
+        }
+        return min(delay, maximumDelay)
     }
 }
 

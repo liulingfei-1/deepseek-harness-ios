@@ -4,6 +4,29 @@ import XCTest
 
 @MainActor
 final class AppModelProviderProfileTests: XCTestCase {
+    func testSavingProfileAdvancesRequestRouteGeneration() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanFilesAndDefaults() }
+        let model = fixture.makeModel()
+        let profile = try XCTUnwrap(model.activeProviderProfile)
+        let configuration = try profile.configuration().validated()
+
+        let before = try model.providerRequestRoute(for: configuration)
+        try await model.saveProviderProfile(
+            profile,
+            apiKey: "generation-fixture-secret",
+            makeActive: true,
+            existingProfileID: profile.id
+        )
+        let after = try model.providerRequestRoute(for: configuration)
+
+        XCTAssertEqual(before.profileID, profile.id)
+        XCTAssertEqual(after.profileID, profile.id)
+        XCTAssertEqual(after.generation, before.generation + 1)
+        XCTAssertEqual(after.endpoint, before.endpoint)
+        try await fixture.credentialStore.deleteAllAPIKeys()
+    }
+
     func testBootstrapMigratesLegacyCredentialIntoProfileReference() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanFilesAndDefaults() }
@@ -179,6 +202,47 @@ final class AppModelProviderProfileTests: XCTestCase {
         XCTAssertNil(model.errorMessage)
     }
 
+    func testSwitchingSessionsKeepsBothLiveRootRunsAndProjectsNonSelectedStatus() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanFilesAndDefaults() }
+        let model = fixture.makeModel()
+        await model.bootstrap()
+
+        let firstID = try XCTUnwrap(model.activeSessionID)
+        let firstIdentity = await model.sessionRunRegistry.allocateIdentity(sessionID: firstID)
+        let first = try await model.sessionRunRegistry.register(identity: firstIdentity) {
+            SessionRunPreparedConfiguration(trajectorySessionID: firstID)
+        }
+        let didBeginFirstRun = await first.handle.beginRunning(for: firstIdentity)
+        XCTAssertTrue(didBeginFirstRun)
+
+        // Use the production new-session route. It must leave the first
+        // session's root registered while making the new session active.
+        await model.createConversation(title: "第二个会话")
+        let secondID = try XCTUnwrap(model.activeSessionID)
+        XCTAssertNotEqual(secondID, firstID)
+        let firstLookupAfterCreate = await model.sessionRunRegistry.lookup(sessionID: firstID)
+        XCTAssertNotNil(firstLookupAfterCreate)
+
+        let secondIdentity = await model.sessionRunRegistry.allocateIdentity(sessionID: secondID)
+        let secondRun = try await model.sessionRunRegistry.register(identity: secondIdentity) {
+            SessionRunPreparedConfiguration(trajectorySessionID: secondID)
+        }
+        let didBeginSecondRun = await secondRun.handle.beginRunning(for: secondIdentity)
+        XCTAssertTrue(didBeginSecondRun)
+        await model.switchConversation(to: firstID)
+
+        XCTAssertEqual(model.activeSessionID, firstID)
+        let firstLookup = await model.sessionRunRegistry.lookup(sessionID: firstID)
+        let secondLookup = await model.sessionRunRegistry.lookup(sessionID: secondID)
+        XCTAssertNotNil(firstLookup)
+        XCTAssertNotNil(secondLookup)
+        XCTAssertEqual(model.sessionRunSnapshots[firstID]?.identity, firstIdentity)
+        XCTAssertEqual(model.sessionRunSnapshots[secondID]?.identity, secondIdentity)
+        _ = await first.handle.dispose()
+        _ = await secondRun.handle.dispose()
+    }
+
     private func makeFixture() throws -> AppModelProviderFixture {
         let identifier = UUID().uuidString
         let defaultsSuiteName = "com.llf.harnessmobile.provider-app-model.\(identifier)"
@@ -212,11 +276,18 @@ private struct AppModelProviderFixture {
     let defaultsSuiteName: String
     let root: URL
 
+    var sessionStore: SessionStore {
+        SessionStore(root: root.appendingPathComponent("Sessions"))
+    }
+
     func makeModel() -> AppModel {
         AppModel(
             settingsStore: settingsStore,
             credentialStore: credentialStore,
-            sessionStore: SessionStore(root: root.appendingPathComponent("Sessions")),
+            sessionStore: sessionStore,
+            sessionQueryReadModel: SessionQueryReadModel(
+                root: root.appendingPathComponent("SessionQuery.sqlite")
+            ),
             workspaceStore: WorkspaceStore(root: root.appendingPathComponent("Workspace")),
             backgroundPreferences: BackgroundPreferencesModel(
                 store: BackgroundPreferencesStore(

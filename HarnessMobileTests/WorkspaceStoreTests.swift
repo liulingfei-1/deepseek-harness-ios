@@ -93,6 +93,69 @@ final class WorkspaceStoreTests: XCTestCase {
         XCTAssertEqual(entries.map(\.path), ["visible.md"])
     }
 
+    func testFileAttachmentIsPrivatelyCopiedValidatedAndExpires() async throws {
+        let root = temporaryDirectory()
+        let sourceRoot = temporaryDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: sourceRoot)
+        }
+        try FileManager.default.createDirectory(at: sourceRoot, withIntermediateDirectories: true)
+        let source = sourceRoot.appendingPathComponent("brief.pdf")
+        let pdf = Data("%PDF-1.7\nlocal-only".utf8)
+        try pdf.write(to: source)
+
+        let store = WorkspaceStore(root: root)
+        let ref = try await store.stageFileAttachment(from: source)
+        try FileManager.default.removeItem(at: source)
+
+        XCTAssertEqual(ref.mimeType, "application/pdf")
+        XCTAssertEqual(ref.displayName, "brief.pdf")
+        let stagedData = try await store.readFileAttachment(ref)
+        XCTAssertEqual(stagedData, pdf)
+        let visibleFiles = try await store.listFiles()
+        XCTAssertFalse(visibleFiles.contains { $0.path.contains("Attachments") })
+
+        let expired = AgentFileAttachmentRef(
+            id: ref.id,
+            path: ref.path,
+            mimeType: ref.mimeType,
+            byteCount: ref.byteCount,
+            displayName: ref.displayName,
+            expiresAt: .distantPast
+        )
+        do {
+            _ = try await store.readFileAttachment(expired)
+            XCTFail("Expired attachment must not be readable")
+        } catch {
+            guard case WorkspaceError.attachmentExpired = error else {
+                return XCTFail("Expected attachmentExpired, got \(error)")
+            }
+        }
+    }
+
+    func testFileAttachmentRejectsTypeSignatureMismatch() async throws {
+        let root = temporaryDirectory()
+        let sourceRoot = temporaryDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: sourceRoot)
+        }
+        try FileManager.default.createDirectory(at: sourceRoot, withIntermediateDirectories: true)
+        let source = sourceRoot.appendingPathComponent("disguised.mp4")
+        try Data("not a movie".utf8).write(to: source)
+        let store = WorkspaceStore(root: root)
+
+        do {
+            _ = try await store.stageFileAttachment(from: source)
+            XCTFail("A mismatched signature must be rejected")
+        } catch {
+            guard case WorkspaceError.unsupportedFileType = error else {
+                return XCTFail("Expected unsupportedFileType, got \(error)")
+            }
+        }
+    }
+
     func testStageImageNormalizesDimensionsAndUsesInterpolatedUUIDFilename() async throws {
         let root = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }

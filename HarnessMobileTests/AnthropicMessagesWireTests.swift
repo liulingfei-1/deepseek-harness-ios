@@ -116,6 +116,27 @@ final class AnthropicMessagesWireTests: XCTestCase {
         )
     }
 
+    func testNonImageAttachmentUsesMetadataMarkerWithoutBase64Block() throws {
+        let attachment = AgentFileAttachmentRef(
+            path: "Attachments/recording.m4a",
+            mimeType: "audio/mp4",
+            byteCount: 42,
+            displayName: "recording.m4a",
+            expiresAt: .distantFuture
+        )
+        let messages = try AnthropicWireSerializer.makeMessages([
+            .user("transcribe", fileAttachments: [attachment])
+        ])
+        let encoded = try JSONEncoder().encode(messages)
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [[String: Any]]
+        )
+        let content = try XCTUnwrap(object[0]["content"] as? [[String: Any]])
+        XCTAssertEqual(content.map { $0["type"] as? String }, ["text", "text"])
+        XCTAssertTrue((content.last?["text"] as? String)?.contains("recording.m4a") == true)
+        XCTAssertNil(content.last?["source"])
+    }
+
     func testSerializerUsesMessagesContentBlocksAndGroupsToolResults() throws {
         let configuration = ModelProviderCatalog.applying(.anthropic, to: AgentConfiguration())
         let request = ModelRequest(

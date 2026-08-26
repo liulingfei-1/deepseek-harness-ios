@@ -117,7 +117,7 @@ final class CustomOpenAICompatibleWireTests: XCTestCase {
         XCTAssertEqual(object["reasoning_effort"] as? String, "high")
         XCTAssertNotNil(object["stream_options"])
         XCTAssertNil(object["max_tokens"])
-        XCTAssertEqual(object["max_completion_tokens"] as? Int, 8_192)
+        XCTAssertNil(object["max_completion_tokens"])
         let messages = try XCTUnwrap(object["messages"] as? [[String: Any]])
         XCTAssertEqual(messages[0]["role"] as? String, "developer")
         XCTAssertEqual(messages[1]["reasoning_content"] as? String, "reasoning")

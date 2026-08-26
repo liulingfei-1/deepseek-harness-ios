@@ -92,7 +92,7 @@ enum SessionTrajectoryToolSupport {
 }
 
 struct SessionTraceTool: LocalAgentTool {
-    let repository: SessionTrajectoryRepository
+    let repository: any SessionPersistence
     let sessionID: String
 
     let definition = ModelToolDefinition(
@@ -151,7 +151,7 @@ struct SessionTraceTool: LocalAgentTool {
 }
 
 struct SessionSearchTool: LocalAgentTool {
-    let repository: SessionTrajectoryRepository
+    let repository: any SessionPersistence
     let sessionID: String
 
     let definition = ModelToolDefinition(
@@ -211,7 +211,7 @@ struct SessionSearchTool: LocalAgentTool {
 }
 
 struct SessionEventGetTool: LocalAgentTool {
-    let repository: SessionTrajectoryRepository
+    let repository: any SessionPersistence
     let sessionID: String
 
     let definition = ModelToolDefinition(
@@ -250,7 +250,7 @@ struct SessionEventGetTool: LocalAgentTool {
 }
 
 struct SessionEventTypesTool: LocalAgentTool {
-    let repository: SessionTrajectoryRepository
+    let repository: any SessionPersistence
     let sessionID: String
 
     let definition = ModelToolDefinition(
@@ -289,7 +289,7 @@ struct SessionEventTypesTool: LocalAgentTool {
 enum SessionTrajectoryToolSuite {
     static let names: Set<String> = ["session_search", "session_trace", "session_event_get", "session_event_types"]
 
-    static func makeTools(repository: SessionTrajectoryRepository, sessionID: String) -> [any LocalAgentTool] {
+    static func makeTools(repository: any SessionPersistence, sessionID: String) -> [any LocalAgentTool] {
         [
             SessionSearchTool(repository: repository, sessionID: sessionID),
             SessionTraceTool(repository: repository, sessionID: sessionID),

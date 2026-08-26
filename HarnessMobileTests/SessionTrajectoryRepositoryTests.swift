@@ -7,6 +7,65 @@ import XCTest
 #endif
 
 final class SessionTrajectoryRepositoryTests: XCTestCase {
+    func testSessionPersistenceSeamUsesCanonicalLogRevisionAndLifecycle() async throws {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let persistence: any SessionPersistence = SessionTrajectoryRepository(root: root)
+        let sessionID = UUID()
+
+        let before = try await persistence.persistenceSnapshot(sessionID: sessionID)
+        XCTAssertEqual(before.revision.nextSequence, 0)
+        _ = try await persistence.append(
+            .turnStart(turn: 1, time: 1),
+            sessionID: sessionID
+        )
+        _ = try await persistence.append(
+            .turnEnd(turn: 1, reason: .string("completed"), time: 2),
+            sessionID: sessionID
+        )
+        try await persistence.flush(sessionID: sessionID)
+
+        let after = try await persistence.persistenceSnapshot(sessionID: sessionID)
+        XCTAssertEqual(after.snapshot.events.count, 2)
+        XCTAssertEqual(after.revision.streamID, sessionID.uuidString.lowercased())
+        XCTAssertEqual(after.revision.nextSequence, 2)
+        XCTAssertNotEqual(after.revision, before.revision)
+        let listed = try await persistence.listSessionIDs()
+        XCTAssertEqual(listed, [sessionID])
+
+        try await persistence.delete(sessionID: sessionID)
+        let afterDelete = try await persistence.listSessionIDs()
+        XCTAssertTrue(afterDelete.isEmpty)
+    }
+
+    func testWriteBehindSeparatesLogicalCursorFromDurableRevisionUntilFlush() async throws {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = SessionTrajectoryRepository(root: root)
+        let sessionID = UUID()
+
+        _ = try await repository.append(.turnStart(turn: 1, time: 1), sessionID: sessionID)
+        _ = try await repository.append(
+            .turnEnd(turn: 1, reason: .string("completed"), time: 2),
+            sessionID: sessionID
+        )
+        let pending = try await repository.persistenceSnapshot(sessionID: sessionID)
+        XCTAssertEqual(pending.snapshot.cursor.nextSequence, 2)
+        XCTAssertEqual(pending.revision.nextSequence, 0)
+
+        let coldBeforeFlush = SessionTrajectoryRepository(root: root)
+        let coldSnapshotBeforeFlush = try await coldBeforeFlush.persistenceSnapshot(sessionID: sessionID)
+        XCTAssertEqual(coldSnapshotBeforeFlush.revision.nextSequence, 0)
+
+        try await repository.flush(sessionID: sessionID)
+        let durable = try await repository.persistenceSnapshot(sessionID: sessionID)
+        XCTAssertEqual(durable.revision.nextSequence, 2)
+
+        let reopened = SessionTrajectoryRepository(root: root)
+        let recovered = try await reopened.persistenceSnapshot(sessionID: sessionID)
+        XCTAssertEqual(recovered.snapshot.events.map(\.seq), [0, 1])
+        XCTAssertEqual(recovered.revision.nextSequence, 2)
+    }
     func testSessionsKeepIndependentStreamsAndIncrementalCursors() async throws {
         let root = makeRoot()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -405,13 +464,65 @@ final class SessionTrajectoryRepositoryTests: XCTestCase {
         )
     }
 
+    func testConversationProjectionRetainsNonImageFileAttachmentMetadata() throws {
+        let attachment = AgentFileAttachmentRef(
+            id: UUID(uuidString: "9DFA7394-C5BC-407B-918A-47E2F18A906A")!,
+            path: "Attachments/9dfa7394-c5bc-407b-918a-47e2f18a906a.pdf",
+            mimeType: "application/pdf",
+            byteCount: 128,
+            displayName: "brief.pdf",
+            expiresAt: .distantFuture
+        )
+        let message = AgentMessage.user(
+            "Please inspect this document.",
+            fileAttachments: [attachment]
+        )
+        let event = try SessionEvent(
+            type: SessionEventVocabulary.userMessage,
+            seq: 0,
+            time: 1,
+            data: sessionUserMessage(message),
+            surfaceOp: .append
+        )
+
+        let projected = SessionTrajectoryConversationProjection.messages(from: [event])
+
+        XCTAssertEqual(projected.count, 1)
+        XCTAssertEqual(projected[0].id, message.id)
+        XCTAssertEqual(projected[0].content, message.content)
+        XCTAssertEqual(projected[0].fileAttachments, [attachment])
+    }
+
     private func sessionUserMessage(_ message: AgentMessage) -> JSONValue {
-        .object([
+        var value: [String: JSONValue] = [
             "id": .string(message.id.uuidString),
             "role": .string("user"),
             "content": .array([textBlock(message.content)]),
             "source": message.source ?? .object(["kind": .string("user")])
-        ])
+        ]
+        if !message.imageAttachments.isEmpty {
+            value["imageAttachments"] = .array(message.imageAttachments.map { attachment in
+                .object([
+                    "id": .string(attachment.id.uuidString),
+                    "path": .string(attachment.path),
+                    "mimeType": .string(attachment.mimeType),
+                    "byteCount": .number(Double(attachment.byteCount))
+                ])
+            })
+        }
+        if !message.fileAttachments.isEmpty {
+            value["fileAttachments"] = .array(message.fileAttachments.map { attachment in
+                .object([
+                    "id": .string(attachment.id.uuidString),
+                    "path": .string(attachment.path),
+                    "mimeType": .string(attachment.mimeType),
+                    "byteCount": .number(Double(attachment.byteCount)),
+                    "displayName": .string(attachment.displayName),
+                    "expiresAt": .string(ISO8601DateFormatter().string(from: attachment.expiresAt))
+                ])
+            })
+        }
+        return .object(value)
     }
 
     private func sessionAssistantMessage(_ message: AgentMessage) -> JSONValue {
