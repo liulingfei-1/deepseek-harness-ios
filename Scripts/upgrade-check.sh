@@ -8,6 +8,7 @@ swift_scratch_path_value="${HARNESS_SWIFT_SCRATCH_PATH:-${TMPDIR:-/tmp}/harnessm
 
 "$script_dir_value/verify-upstreams.sh"
 "$script_dir_value/audit-no-remote-execution.sh"
+"$script_dir_value/verify-capability-manifest.sh"
 swift test \
   --package-path "$repository_root_value" \
   --scratch-path "$swift_scratch_path_value"

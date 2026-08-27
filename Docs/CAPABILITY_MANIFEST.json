@@ -1,0 +1,164 @@
+{
+  "capabilities": [
+    {
+      "boundaryPaths": [
+        "Scripts/verify-capability-manifest.sh"
+      ],
+      "compiled": true,
+      "device": false,
+      "entitlement": {
+        "names": [],
+        "required": false
+      },
+      "experimental": false,
+      "id": "app-shell",
+      "lastVerified": "2026-08-27",
+      "simulator": true,
+      "sourcePaths": [
+        "HarnessMobile/App/AppModel.swift",
+        "HarnessMobile/App/AppRootView.swift",
+        "HarnessMobile/App/DeepSeekHarnessMobileApp.swift"
+      ],
+      "state": "VERIFY",
+      "surfaces": [
+        "production",
+        "ui",
+        "lifecycle"
+      ],
+      "testPaths": [
+        "HarnessMobileTests/AppModelProviderProfileTests.swift",
+        "HarnessMobileTests/AppModelModelDiscoveryTests.swift"
+      ],
+      "unit": true
+    },
+    {
+      "boundaryPaths": [
+        "Scripts/audit-no-remote-execution.sh",
+        "Scripts/verify-capability-manifest.sh"
+      ],
+      "compiled": true,
+      "device": false,
+      "entitlement": {
+        "names": [],
+        "required": false
+      },
+      "experimental": false,
+      "id": "production-tool-catalog",
+      "lastVerified": "2026-08-27",
+      "simulator": true,
+      "sourcePaths": [
+        "HarnessMobile/Core/Tools/ProductionToolCatalog.swift"
+      ],
+      "state": "VERIFY",
+      "surfaces": [
+        "production",
+        "catalog",
+        "model-schema",
+        "boundary"
+      ],
+      "testPaths": [
+        "HarnessMobileTests/ProductionToolCatalogTests.swift"
+      ],
+      "unit": true
+    },
+    {
+      "boundaryPaths": [
+        "HarnessMobile/Core/Tools/DeviceCapabilitiesTool.swift"
+      ],
+      "compiled": true,
+      "device": false,
+      "entitlement": {
+        "names": [
+          "com.apple.developer.healthkit"
+        ],
+        "required": true
+      },
+      "experimental": false,
+      "id": "mobile-native-capabilities",
+      "lastVerified": "2026-08-27",
+      "simulator": true,
+      "sourcePaths": [
+        "HarnessMobile/Core/Tools/MobileNativeTools.swift",
+        "HarnessMobile/Core/Tools/DeviceCapabilitiesTool.swift",
+        "HarnessMobile/Core/Permissions/DevicePermissionCenter.swift"
+      ],
+      "state": "VERIFY",
+      "surfaces": [
+        "production",
+        "catalog",
+        "boundary",
+        "permissions"
+      ],
+      "testPaths": [
+        "HarnessMobileTests/MobileNativeToolsTests.swift",
+        "HarnessMobileTests/DeviceCapabilitiesToolTests.swift",
+        "HarnessMobileTests/PhonePermissionsTests.swift"
+      ],
+      "unit": true
+    },
+    {
+      "boundaryPaths": [
+        "HarnessMobile/Core/Browser/HarnessBrowserService.swift"
+      ],
+      "compiled": true,
+      "device": false,
+      "entitlement": {
+        "names": [],
+        "required": false
+      },
+      "experimental": false,
+      "id": "browser-service",
+      "lastVerified": "2026-08-27",
+      "simulator": true,
+      "sourcePaths": [
+        "HarnessMobile/Core/Browser/HarnessBrowserService.swift",
+        "HarnessMobile/Core/Browser/HarnessBrowserWebKitBackend.swift",
+        "HarnessMobile/Core/Tools/HarnessBrowserTool.swift"
+      ],
+      "state": "PARTIAL",
+      "surfaces": [
+        "production",
+        "ui",
+        "boundary",
+        "download"
+      ],
+      "testPaths": [
+        "HarnessMobileTests/HarnessBrowserServiceTests.swift"
+      ],
+      "unit": true
+    },
+    {
+      "boundaryPaths": [
+        "HarnessMobile/Core/Sync/HarnessSyncEnvelope.swift"
+      ],
+      "compiled": true,
+      "device": false,
+      "entitlement": {
+        "names": [],
+        "required": false
+      },
+      "experimental": false,
+      "id": "sync-contract",
+      "lastVerified": "2026-08-27",
+      "simulator": true,
+      "sourcePaths": [
+        "HarnessMobile/Core/Sync/HarnessSyncEnvelope.swift",
+        "HarnessMobile/Core/Trace/SessionTrajectoryRepository.swift"
+      ],
+      "state": "PARTIAL",
+      "surfaces": [
+        "production",
+        "boundary",
+        "persistence"
+      ],
+      "testPaths": [
+        "HarnessMobileTests/HarnessSyncEnvelopeTests.swift",
+        "HarnessMobileTests/SessionTrajectoryRepositoryTests.swift"
+      ],
+      "unit": true
+    }
+  ],
+  "generatedAt": "2026-08-27",
+  "repository": "deepseek-harness-ios",
+  "schemaVersion": 1
+}
