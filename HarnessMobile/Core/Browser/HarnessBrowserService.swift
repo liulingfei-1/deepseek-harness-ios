@@ -16,6 +16,33 @@ struct HarnessBrowserRequest: Codable, Sendable, Equatable {
     let url: URL?
 }
 
+struct HarnessBrowserProvenance: Codable, Sendable, Equatable {
+    let source: String
+    let kind: String
+    let pageURL: URL?
+    let byteCount: Int
+
+    static func forResult(_ result: HarnessBrowserResult) -> Self {
+        let kind: String
+        switch result.action {
+        case .open, .navigate: kind = "navigation"
+        case .readText: kind = "dom_text"
+        case .screenshot: kind = "screenshot"
+        case .close: kind = "lifecycle"
+        case .listTabs: kind = "tab_list"
+        }
+        let byteCount = result.text?.utf8.count
+            ?? result.screenshotBase64?.utf8.count
+            ?? 0
+        return Self(
+            source: "on_device_browser",
+            kind: kind,
+            pageURL: result.pageURL,
+            byteCount: byteCount
+        )
+    }
+}
+
 struct HarnessBrowserResult: Codable, Sendable, Equatable {
     static let maximumTextUTF8Bytes = 48 * 1_024
     static let maximumTitleUTF8Bytes = 512
@@ -29,6 +56,29 @@ struct HarnessBrowserResult: Codable, Sendable, Equatable {
     let screenshotBase64: String?
     let tabIDs: [UUID]
     let evictedTabID: UUID?
+    let provenance: HarnessBrowserProvenance?
+
+    init(
+        tabID: UUID?,
+        action: HarnessBrowserAction,
+        pageURL: URL?,
+        title: String?,
+        text: String?,
+        screenshotBase64: String?,
+        tabIDs: [UUID],
+        evictedTabID: UUID?,
+        provenance: HarnessBrowserProvenance? = nil
+    ) {
+        self.tabID = tabID
+        self.action = action
+        self.pageURL = pageURL
+        self.title = title
+        self.text = text
+        self.screenshotBase64 = screenshotBase64
+        self.tabIDs = tabIDs
+        self.evictedTabID = evictedTabID
+        self.provenance = provenance
+    }
 }
 
 struct HarnessBrowserTabDescriptor: Codable, Sendable, Equatable, Identifiable {
@@ -44,6 +94,7 @@ enum HarnessBrowserServiceError: Error, LocalizedError, Sendable, Equatable {
     case invalidAction
     case invalidURL
     case tabNotFound
+    case webContentTerminated
     case resultTooLarge
     case backendFailure
 
@@ -54,6 +105,7 @@ enum HarnessBrowserServiceError: Error, LocalizedError, Sendable, Equatable {
         case .invalidAction: "浏览器动作不受支持。"
         case .invalidURL: "浏览器仅允许不含凭据的 HTTP/HTTPS 地址。"
         case .tabNotFound: "找不到当前会话的浏览器标签页。"
+        case .webContentTerminated: "浏览器页面进程已终止，标签页已关闭。"
         case .resultTooLarge: "浏览器结果超过本机输出上限。"
         case .backendFailure: "本机浏览器页面未能完成动作。"
         }
@@ -122,7 +174,8 @@ actor HarnessBrowserService {
                     text: nil,
                     screenshotBase64: nil,
                     tabIDs: ids,
-                    evictedTabID: nil
+                    evictedTabID: nil,
+                    provenance: nil
                 )
             )
 
@@ -172,7 +225,11 @@ actor HarnessBrowserService {
                 )
                 return try Self.validatedResult(result)
             } catch {
-                throw Self.mapBackendError(error)
+                let mapped = Self.mapBackendError(error)
+                if mapped == .webContentTerminated {
+                    tabs.removeValue(forKey: tabID)
+                }
+                throw mapped
             }
 
         case .readText, .screenshot:
@@ -192,7 +249,11 @@ actor HarnessBrowserService {
                     )
                 )
             } catch {
-                throw Self.mapBackendError(error)
+                let mapped = Self.mapBackendError(error)
+                if mapped == .webContentTerminated {
+                    tabs.removeValue(forKey: tabID)
+                }
+                throw mapped
             }
 
         case .close:
@@ -290,6 +351,22 @@ actor HarnessBrowserService {
         guard result.tabIDs.count <= maximumTabsPerSession else {
             throw HarnessBrowserServiceError.resultTooLarge
         }
+        let result = result.provenance == nil
+            ? HarnessBrowserResult(
+                tabID: result.tabID,
+                action: result.action,
+                pageURL: result.pageURL,
+                title: result.title,
+                text: result.text,
+                screenshotBase64: result.screenshotBase64,
+                tabIDs: result.tabIDs,
+                evictedTabID: result.evictedTabID,
+                provenance: HarnessBrowserProvenance.forResult(result)
+            )
+            : result
+        guard result.provenance?.source == "on_device_browser" else {
+            throw HarnessBrowserServiceError.backendFailure
+        }
         return result
     }
 
@@ -305,12 +382,13 @@ actor HarnessBrowserService {
             text: result.text,
             screenshotBase64: result.screenshotBase64,
             tabIDs: result.tabIDs,
-            evictedTabID: evictedTabID
+            evictedTabID: evictedTabID,
+            provenance: result.provenance
         )
     }
 
-    private static func mapBackendError(_ error: Error) -> Error {
+    private static func mapBackendError(_ error: Error) -> HarnessBrowserServiceError {
         if let typed = error as? HarnessBrowserServiceError { return typed }
-        return HarnessBrowserServiceError.backendFailure
+        return .backendFailure
     }
 }

@@ -126,6 +126,46 @@ final class HarnessBrowserServiceTests: XCTestCase {
         }
     }
 
+    func testWebContentTerminationClosesTheTabAndReturnsTypedOutcome() async throws {
+        let backend = RecordingBrowserBackend()
+        let service = HarnessBrowserService(backend: backend)
+        let tabID = try await service.execute(
+            sessionID: "session-a", action: .open, url: URL(string: "https://example.com")!
+        ).tabID!
+        await backend.terminateNextAction()
+
+        await XCTAssertThrowsErrorAsync {
+            try await service.execute(sessionID: "session-a", action: .readText, tabID: tabID)
+        } verify: { error in
+            XCTAssertEqual(error as? HarnessBrowserServiceError, .webContentTerminated)
+        }
+        let descriptors = try await service.descriptors(sessionID: "session-a")
+        XCTAssertEqual(descriptors.count, 0)
+        await XCTAssertThrowsErrorAsync {
+            try await service.execute(sessionID: "session-a", action: .readText, tabID: tabID)
+        } verify: { error in
+            XCTAssertEqual(error as? HarnessBrowserServiceError, .tabNotFound)
+        }
+    }
+
+    func testResultsCarryBoundedModelVisibleProvenance() async throws {
+        let backend = RecordingBrowserBackend()
+        let service = HarnessBrowserService(backend: backend)
+        let result = try await service.execute(
+            sessionID: "session-a", action: .open, url: URL(string: "https://example.com")!
+        )
+        XCTAssertEqual(result.provenance?.source, "on_device_browser")
+        XCTAssertEqual(result.provenance?.kind, "navigation")
+        XCTAssertEqual(result.provenance?.pageURL, result.pageURL)
+        XCTAssertEqual(result.provenance?.byteCount, 0)
+
+        let text = try await service.execute(
+            sessionID: "session-a", action: .readText, tabID: result.tabID!
+        )
+        XCTAssertEqual(text.provenance?.kind, "dom_text")
+        XCTAssertEqual(text.provenance?.byteCount, text.text?.utf8.count)
+    }
+
     func testToolSchemaDoesNotAcceptCookiesHeadersOrJavaScript() throws {
         let tool = HarnessBrowserTool(sessionID: "session-a")
         XCTAssertEqual(tool.definition.name, "browser_use")
@@ -145,6 +185,7 @@ final class HarnessBrowserServiceTests: XCTestCase {
 
 private actor RecordingBrowserBackend: HarnessBrowserBackend {
     private var text = "page text"
+    private var terminateNext = false
     private(set) var discardedCount = 0
 
     func discard(sessionID _: String, tabID _: UUID) async {
@@ -155,6 +196,10 @@ private actor RecordingBrowserBackend: HarnessBrowserBackend {
         self.text = text
     }
 
+    func terminateNextAction() {
+        terminateNext = true
+    }
+
     func perform(_ request: HarnessBrowserRequest) async throws -> HarnessBrowserResult {
         switch request.action {
         case .open, .navigate:
@@ -163,6 +208,10 @@ private actor RecordingBrowserBackend: HarnessBrowserBackend {
                 title: "Example", text: nil, screenshotBase64: nil, tabIDs: [], evictedTabID: nil
             )
         case .readText:
+            if terminateNext {
+                terminateNext = false
+                throw HarnessBrowserServiceError.webContentTerminated
+            }
             return HarnessBrowserResult(
                 tabID: request.tabID, action: request.action, pageURL: nil,
                 title: "Example", text: text, screenshotBase64: nil, tabIDs: [], evictedTabID: nil

@@ -158,7 +158,7 @@ final class HarnessBrowserWebKitBackend: NSObject, HarnessBrowserBackend, WKNavi
     nonisolated func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         Task { @MainActor in
             webViews = webViews.filter { $0.value !== webView }
-            finish(webView, error: HarnessBrowserServiceError.backendFailure)
+            finish(webView, error: HarnessBrowserServiceError.webContentTerminated)
         }
     }
 }
