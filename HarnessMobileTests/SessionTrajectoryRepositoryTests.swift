@@ -66,6 +66,102 @@ final class SessionTrajectoryRepositoryTests: XCTestCase {
         XCTAssertEqual(recovered.snapshot.events.map(\.seq), [0, 1])
         XCTAssertEqual(recovered.revision.nextSequence, 2)
     }
+
+    func testSyncEnvelopeExportsDurableSuffixAndAdmitsExactCanonicalEvents() async throws {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sessionID = UUID()
+        let source = SessionTrajectoryRepository(root: root.appendingPathComponent("source"))
+        let destination = SessionTrajectoryRepository(root: root.appendingPathComponent("destination"))
+
+        _ = try await source.append(.turnStart(turn: 1, time: 1), sessionID: sessionID)
+        _ = try await source.append(
+            .turnEnd(turn: 1, reason: .string("completed"), time: 2),
+            sessionID: sessionID
+        )
+        let envelope = try await source.makeSyncEnvelope(
+            sessionID: sessionID,
+            baseSequence: .max,
+            metadata: ["source": "device-a"]
+        )
+
+        XCTAssertEqual(envelope.events.map(\.seq), [0, 1])
+        let admitted = try await destination.admitSyncEnvelope(envelope)
+        let destinationEvents = try await destination.allEvents(sessionID: sessionID)
+        XCTAssertEqual(admitted, envelope.events)
+        XCTAssertEqual(destinationEvents, envelope.events)
+
+        let emptySuffix = try await source.makeSyncEnvelope(sessionID: sessionID, baseSequence: 1)
+        XCTAssertTrue(emptySuffix.events.isEmpty)
+    }
+
+    func testSyncAdmissionRejectsConcurrentBaseMismatchWithoutOverwritingHistory() async throws {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sessionID = UUID()
+        let source = SessionTrajectoryRepository(root: root.appendingPathComponent("source"))
+        let destination = SessionTrajectoryRepository(root: root.appendingPathComponent("destination"))
+
+        _ = try await source.append(.turnStart(turn: 1, time: 1), sessionID: sessionID)
+        let envelope = try await source.makeSyncEnvelope(sessionID: sessionID, baseSequence: .max)
+        _ = try await destination.append(.turnStart(turn: 99, time: 99), sessionID: sessionID)
+
+        do {
+            _ = try await destination.admitSyncEnvelope(envelope)
+            XCTFail("A concurrent local append must reject the remote suffix")
+        } catch let error as SessionTrajectoryRepositoryError {
+            XCTAssertEqual(error, .syncBaseMismatch(expected: 1, actual: 0))
+        }
+        let events = try await destination.allEvents(sessionID: sessionID)
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(events[0].turnStartData?.turn, 99)
+    }
+
+    func testSyncAdmissionRejectsAssetsAndTombstonesUntilPoliciesExist() async throws {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sessionID = UUID()
+        let destination = SessionTrajectoryRepository(root: root)
+        let event = try SessionEvent(
+            type: SessionEventVocabulary.turnStart,
+            seq: 0,
+            time: 1,
+            data: .object(["turn": .number(1)])
+        )
+        let asset = try HarnessSyncAssetReference(
+            key: "attachment",
+            relativePath: "attachments/a.txt",
+            byteCount: 1
+        )
+        let assetEnvelope = try HarnessSyncEnvelope(
+            sessionID: sessionID,
+            baseSequence: .max,
+            events: [event],
+            assets: [asset]
+        )
+        let tombstone = try HarnessSyncTombstone(eventID: 1, deletedAt: 1)
+        let tombstoneEnvelope = try HarnessSyncEnvelope(
+            sessionID: sessionID,
+            baseSequence: .max,
+            events: [event],
+            tombstones: [tombstone]
+        )
+
+        do {
+            _ = try await destination.admitSyncEnvelope(assetEnvelope)
+            XCTFail("Assets need an explicit transfer policy")
+        } catch let error as SessionTrajectoryRepositoryError {
+            XCTAssertEqual(error, .syncAssetsUnsupported)
+        }
+        do {
+            _ = try await destination.admitSyncEnvelope(tombstoneEnvelope)
+            XCTFail("Tombstones need an explicit reconciliation policy")
+        } catch let error as SessionTrajectoryRepositoryError {
+            XCTAssertEqual(error, .syncTombstonesUnsupported)
+        }
+        let destinationEvents = try await destination.allEvents(sessionID: sessionID)
+        XCTAssertTrue(destinationEvents.isEmpty)
+    }
     func testSessionsKeepIndependentStreamsAndIncrementalCursors() async throws {
         let root = makeRoot()
         defer { try? FileManager.default.removeItem(at: root) }

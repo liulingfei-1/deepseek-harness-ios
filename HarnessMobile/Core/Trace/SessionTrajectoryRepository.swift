@@ -13,6 +13,10 @@ enum SessionTrajectoryRepositoryError: Error, Sendable, Equatable, LocalizedErro
     case sessionUnavailable(UUID)
     case resetInProgress
     case turnNumberExhausted
+    case syncBaseUnavailable(UInt64)
+    case syncBaseMismatch(expected: UInt64, actual: UInt64)
+    case syncAssetsUnsupported
+    case syncTombstonesUnsupported
 
     var errorDescription: String? {
         switch self {
@@ -22,6 +26,14 @@ enum SessionTrajectoryRepositoryError: Error, Sendable, Equatable, LocalizedErro
             return "会话轨迹正在重置。"
         case .turnNumberExhausted:
             return "会话 Turn 编号已达到上限。"
+        case let .syncBaseUnavailable(baseSequence):
+            return "本地轨迹中不存在同步基线 \(baseSequence)。"
+        case let .syncBaseMismatch(expected, actual):
+            return "同步 suffix 基线冲突：本地期待 \(expected)，收到 \(actual)。"
+        case .syncAssetsUnsupported:
+            return "当前 canonical event log 尚不接纳同步 asset 引用。"
+        case .syncTombstonesUnsupported:
+            return "当前 append-only canonical event log 尚不接纳同步 tombstone。"
         }
     }
 }
@@ -94,6 +106,67 @@ actor SessionTrajectoryRepository: SessionPersistence {
     /// the lossless JSONL history explicitly.
     func allEvents(sessionID: UUID) async throws -> [SessionEvent] {
         try await store(for: sessionID).allEvents()
+    }
+
+    /// Exports a bounded, immutable suffix from the durable canonical JSONL
+    /// stream. The caller supplies the last sequence already acknowledged by
+    /// its peer; `UInt64.max` represents the virtual position before seq 0.
+    func makeSyncEnvelope(
+        sessionID: UUID,
+        baseSequence: UInt64,
+        metadata: [String: String] = [:]
+    ) async throws -> HarnessSyncEnvelope {
+        let sessionStore = try store(for: sessionID)
+        let events = try await sessionStore.allEvents()
+        let firstSequence = baseSequence &+ 1
+        let suffix: [SessionEvent]
+
+        if events.isEmpty, firstSequence == 0 {
+            suffix = []
+        } else if let lastSequence = events.last?.seq,
+                  firstSequence == lastSequence &+ 1 {
+            suffix = []
+        } else if let start = events.firstIndex(where: { $0.seq == firstSequence }) {
+            suffix = Array(events[start...].prefix(HarnessSyncEnvelope.maximumEvents))
+        } else {
+            throw SessionTrajectoryRepositoryError.syncBaseUnavailable(baseSequence)
+        }
+
+        return try HarnessSyncEnvelope(
+            sessionID: sessionID,
+            baseSequence: baseSequence,
+            events: suffix,
+            metadata: metadata
+        )
+    }
+
+    /// Admits only a remote suffix that starts exactly at this durable log's
+    /// next sequence. This prevents LWW replacement, reordering, and mutation
+    /// of already accepted history. Asset copying and tombstone reconciliation
+    /// need separate, explicit policies and are rejected until then.
+    @discardableResult
+    func admitSyncEnvelope(_ envelope: HarnessSyncEnvelope) async throws -> [SessionEvent] {
+        guard envelope.assets.isEmpty else {
+            throw SessionTrajectoryRepositoryError.syncAssetsUnsupported
+        }
+        guard envelope.tombstones.isEmpty else {
+            throw SessionTrajectoryRepositoryError.syncTombstonesUnsupported
+        }
+
+        let sessionStore = try store(for: envelope.sessionID)
+        try await sessionStore.flush()
+        let localNextSequence = try await sessionStore.persistenceRevision().nextSequence
+        let incomingFirstSequence = envelope.baseSequence &+ 1
+        guard localNextSequence == incomingFirstSequence else {
+            throw SessionTrajectoryRepositoryError.syncBaseMismatch(
+                expected: localNextSequence,
+                actual: incomingFirstSequence
+            )
+        }
+
+        let admitted = try await sessionStore.append(envelope.events)
+        try await sessionStore.flush()
+        return admitted
     }
 
     func replacementRangeForSurfacePrefix(
