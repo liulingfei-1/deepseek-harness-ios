@@ -166,6 +166,82 @@ final class HarnessBrowserServiceTests: XCTestCase {
         XCTAssertEqual(text.provenance?.byteCount, text.text?.utf8.count)
     }
 
+    func testModelVisibleURLsStripQueryAndFragmentCanaries() async throws {
+        let canary = "browser-secret-canary-7f3b"
+        let backend = RecordingBrowserBackend()
+        let service = HarnessBrowserService(backend: backend)
+        let result = try await service.execute(
+            sessionID: "session-a",
+            action: .open,
+            url: URL(string: "https://example.com/path?token=\(canary)#\(canary)")!
+        )
+        XCTAssertEqual(result.pageURL?.absoluteString, "https://example.com/path")
+        XCTAssertEqual(result.provenance?.pageURL?.absoluteString, "https://example.com/path")
+        let json = try String(decoding: JSONEncoder().encode(result), as: UTF8.self)
+        XCTAssertFalse(json.contains(canary))
+
+        let descriptors = try await service.descriptors(sessionID: "session-a")
+        XCTAssertEqual(descriptors.count, 1)
+        XCTAssertEqual(descriptors.first?.pageURL?.absoluteString, "https://example.com/path")
+    }
+
+    func testDownloadsAreRestrictedToBoundSessionWorkspaceDirectory() async throws {
+        let directory = WorkspaceBrowserDownloadDirectory(
+            url: FileManager.default.temporaryDirectory,
+            workspacePath: "Downloads/session-test"
+        )
+        let backend = RecordingBrowserBackend()
+        await backend.setDownloads([
+            HarnessBrowserDownloadedFile(
+                fileName: "report.pdf",
+                workspacePath: "Downloads/session-test/report.pdf",
+                state: .completed,
+                byteCount: 512
+            )
+        ])
+        let service = HarnessBrowserService(
+            backend: backend,
+            downloadDirectoryProvider: { _ in directory }
+        )
+        let result = try await service.execute(
+            sessionID: "session-a", action: .open, url: URL(string: "https://example.com/download")!
+        )
+        XCTAssertEqual(result.downloads.count, 1)
+        XCTAssertEqual(result.downloads.first?.workspacePath, "Downloads/session-test/report.pdf")
+
+        await backend.setDownloads([
+            HarnessBrowserDownloadedFile(
+                fileName: "outside.pdf",
+                workspacePath: "Downloads/session-other/outside.pdf",
+                state: .completed,
+                byteCount: 512
+            )
+        ])
+        await XCTAssertThrowsErrorAsync {
+            try await service.execute(
+                sessionID: "session-a", action: .readText, tabID: result.tabID!
+            )
+        } verify: { error in
+            XCTAssertEqual(error as? HarnessBrowserServiceError, .backendFailure)
+        }
+
+        await backend.setDownloads([
+            HarnessBrowserDownloadedFile(
+                fileName: "nested.pdf",
+                workspacePath: "Downloads/session-test/subdirectory/nested.pdf",
+                state: .completed,
+                byteCount: 512
+            )
+        ])
+        await XCTAssertThrowsErrorAsync {
+            try await service.execute(
+                sessionID: "session-a", action: .readText, tabID: result.tabID!
+            )
+        } verify: { error in
+            XCTAssertEqual(error as? HarnessBrowserServiceError, .backendFailure)
+        }
+    }
+
     func testToolSchemaDoesNotAcceptCookiesHeadersOrJavaScript() throws {
         let tool = HarnessBrowserTool(sessionID: "session-a")
         XCTAssertEqual(tool.definition.name, "browser_use")
@@ -186,6 +262,7 @@ final class HarnessBrowserServiceTests: XCTestCase {
 private actor RecordingBrowserBackend: HarnessBrowserBackend {
     private var text = "page text"
     private var terminateNext = false
+    private var downloads: [HarnessBrowserDownloadedFile] = []
     private(set) var discardedCount = 0
 
     func discard(sessionID _: String, tabID _: UUID) async {
@@ -200,12 +277,17 @@ private actor RecordingBrowserBackend: HarnessBrowserBackend {
         terminateNext = true
     }
 
+    func setDownloads(_ downloads: [HarnessBrowserDownloadedFile]) {
+        self.downloads = downloads
+    }
+
     func perform(_ request: HarnessBrowserRequest) async throws -> HarnessBrowserResult {
         switch request.action {
         case .open, .navigate:
             return HarnessBrowserResult(
                 tabID: request.tabID, action: request.action, pageURL: request.url,
-                title: "Example", text: nil, screenshotBase64: nil, tabIDs: [], evictedTabID: nil
+                title: "Example", text: nil, screenshotBase64: nil, tabIDs: [], evictedTabID: nil,
+                downloads: downloads
             )
         case .readText:
             if terminateNext {
@@ -214,7 +296,8 @@ private actor RecordingBrowserBackend: HarnessBrowserBackend {
             }
             return HarnessBrowserResult(
                 tabID: request.tabID, action: request.action, pageURL: nil,
-                title: "Example", text: text, screenshotBase64: nil, tabIDs: [], evictedTabID: nil
+                title: "Example", text: text, screenshotBase64: nil, tabIDs: [], evictedTabID: nil,
+                downloads: downloads
             )
         case .screenshot:
             return HarnessBrowserResult(

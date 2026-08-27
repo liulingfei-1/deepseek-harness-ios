@@ -14,6 +14,22 @@ struct HarnessBrowserRequest: Codable, Sendable, Equatable {
     let tabID: UUID
     let action: HarnessBrowserAction
     let url: URL?
+    let downloadDirectory: WorkspaceBrowserDownloadDirectory?
+}
+
+enum HarnessBrowserDownloadState: String, Codable, Sendable, Equatable {
+    case started
+    case completed
+    case failed
+}
+
+/// Download metadata is intentionally limited to a generated workspace path.
+/// It never includes the response URL, headers, or an on-device absolute path.
+struct HarnessBrowserDownloadedFile: Codable, Sendable, Equatable {
+    let fileName: String
+    let workspacePath: String
+    let state: HarnessBrowserDownloadState
+    let byteCount: Int?
 }
 
 struct HarnessBrowserProvenance: Codable, Sendable, Equatable {
@@ -57,6 +73,7 @@ struct HarnessBrowserResult: Codable, Sendable, Equatable {
     let tabIDs: [UUID]
     let evictedTabID: UUID?
     let provenance: HarnessBrowserProvenance?
+    let downloads: [HarnessBrowserDownloadedFile]
 
     init(
         tabID: UUID?,
@@ -67,7 +84,8 @@ struct HarnessBrowserResult: Codable, Sendable, Equatable {
         screenshotBase64: String?,
         tabIDs: [UUID],
         evictedTabID: UUID?,
-        provenance: HarnessBrowserProvenance? = nil
+        provenance: HarnessBrowserProvenance? = nil,
+        downloads: [HarnessBrowserDownloadedFile] = []
     ) {
         self.tabID = tabID
         self.action = action
@@ -78,6 +96,7 @@ struct HarnessBrowserResult: Codable, Sendable, Equatable {
         self.tabIDs = tabIDs
         self.evictedTabID = evictedTabID
         self.provenance = provenance
+        self.downloads = downloads
     }
 }
 
@@ -95,6 +114,7 @@ enum HarnessBrowserServiceError: Error, LocalizedError, Sendable, Equatable {
     case invalidURL
     case tabNotFound
     case webContentTerminated
+    case downloadStorageUnavailable
     case resultTooLarge
     case backendFailure
 
@@ -106,6 +126,7 @@ enum HarnessBrowserServiceError: Error, LocalizedError, Sendable, Equatable {
         case .invalidURL: "浏览器仅允许不含凭据的 HTTP/HTTPS 地址。"
         case .tabNotFound: "找不到当前会话的浏览器标签页。"
         case .webContentTerminated: "浏览器页面进程已终止，标签页已关闭。"
+        case .downloadStorageUnavailable: "浏览器下载目录当前不可用。"
         case .resultTooLarge: "浏览器结果超过本机输出上限。"
         case .backendFailure: "本机浏览器页面未能完成动作。"
         }
@@ -141,13 +162,21 @@ actor HarnessBrowserService {
         let sessionID: String
         var pageURL: URL?
         var lastUsedAt: Date
+        let downloadDirectory: WorkspaceBrowserDownloadDirectory
     }
 
     private let backend: any HarnessBrowserBackend
+    private let downloadDirectoryProvider: @Sendable (String) async throws -> WorkspaceBrowserDownloadDirectory
     private var tabs: [UUID: Tab] = [:]
 
-    init(backend: any HarnessBrowserBackend = HarnessBrowserPlatformBackend()) {
+    init(
+        backend: any HarnessBrowserBackend = HarnessBrowserPlatformBackend(),
+        downloadDirectoryProvider: @escaping @Sendable (String) async throws -> WorkspaceBrowserDownloadDirectory = { sessionID in
+            try WorkspaceStore().browserDownloadDirectory(forSessionID: sessionID)
+        }
+    ) {
         self.backend = backend
+        self.downloadDirectoryProvider = downloadDirectoryProvider
     }
 
     func execute(
@@ -182,6 +211,12 @@ actor HarnessBrowserService {
         case .open:
             guard tabID == nil, let url else { throw HarnessBrowserServiceError.invalidAction }
             let pageURL = try Self.validateURL(url)
+            let downloadDirectory: WorkspaceBrowserDownloadDirectory
+            do {
+                downloadDirectory = try await downloadDirectoryProvider(sessionID)
+            } catch {
+                throw HarnessBrowserServiceError.downloadStorageUnavailable
+            }
             let evictedTabID = evictIfNeeded(for: sessionID, now: now)
             if let evictedTabID {
                 await backend.discard(sessionID: sessionID, tabID: evictedTabID)
@@ -190,18 +225,23 @@ actor HarnessBrowserService {
             tabs[newTabID] = Tab(
                 id: newTabID,
                 sessionID: sessionID,
-                pageURL: pageURL,
-                lastUsedAt: now
+                pageURL: Self.sanitizedModelURL(pageURL),
+                lastUsedAt: now,
+                downloadDirectory: downloadDirectory
             )
             let request = HarnessBrowserRequest(
                 sessionID: sessionID,
                 tabID: newTabID,
                 action: action,
-                url: pageURL
+                url: pageURL,
+                downloadDirectory: downloadDirectory
             )
             do {
                 let result = try await backend.perform(request)
-                return try Self.validatedResult(Self.withEviction(result, evictedTabID: evictedTabID))
+                return try Self.validatedResult(
+                    Self.withEviction(result, evictedTabID: evictedTabID),
+                    expectedDownloadDirectory: downloadDirectory
+                )
             } catch {
                 tabs.removeValue(forKey: newTabID)
                 throw Self.mapBackendError(error)
@@ -211,7 +251,7 @@ actor HarnessBrowserService {
             guard let tabID, let url else { throw HarnessBrowserServiceError.invalidAction }
             let pageURL = try Self.validateURL(url)
             var tab = try tab(for: tabID, sessionID: sessionID)
-            tab.pageURL = pageURL
+            tab.pageURL = Self.sanitizedModelURL(pageURL)
             tab.lastUsedAt = now
             tabs[tabID] = tab
             do {
@@ -220,10 +260,14 @@ actor HarnessBrowserService {
                         sessionID: sessionID,
                         tabID: tabID,
                         action: action,
-                        url: pageURL
+                        url: pageURL,
+                        downloadDirectory: tab.downloadDirectory
                     )
                 )
-                return try Self.validatedResult(result)
+                return try Self.validatedResult(
+                    result,
+                    expectedDownloadDirectory: tab.downloadDirectory
+                )
             } catch {
                 let mapped = Self.mapBackendError(error)
                 if mapped == .webContentTerminated {
@@ -244,9 +288,11 @@ actor HarnessBrowserService {
                             sessionID: sessionID,
                             tabID: tabID,
                             action: action,
-                            url: nil
+                            url: nil,
+                            downloadDirectory: tab.downloadDirectory
                         )
-                    )
+                    ),
+                    expectedDownloadDirectory: tab.downloadDirectory
                 )
             } catch {
                 let mapped = Self.mapBackendError(error)
@@ -265,7 +311,8 @@ actor HarnessBrowserService {
                         sessionID: sessionID,
                         tabID: tabID,
                         action: action,
-                        url: nil
+                        url: nil,
+                        downloadDirectory: nil
                     )
                 )
                 tabs.removeValue(forKey: tabID)
@@ -337,7 +384,10 @@ actor HarnessBrowserService {
         return url
     }
 
-    private static func validatedResult(_ result: HarnessBrowserResult) throws -> HarnessBrowserResult {
+    private static func validatedResult(
+        _ result: HarnessBrowserResult,
+        expectedDownloadDirectory: WorkspaceBrowserDownloadDirectory? = nil
+    ) throws -> HarnessBrowserResult {
         if let text = result.text, text.utf8.count > HarnessBrowserResult.maximumTextUTF8Bytes {
             throw HarnessBrowserServiceError.resultTooLarge
         }
@@ -351,23 +401,45 @@ actor HarnessBrowserService {
         guard result.tabIDs.count <= maximumTabsPerSession else {
             throw HarnessBrowserServiceError.resultTooLarge
         }
-        let result = result.provenance == nil
-            ? HarnessBrowserResult(
-                tabID: result.tabID,
-                action: result.action,
-                pageURL: result.pageURL,
-                title: result.title,
-                text: result.text,
-                screenshotBase64: result.screenshotBase64,
-                tabIDs: result.tabIDs,
-                evictedTabID: result.evictedTabID,
-                provenance: HarnessBrowserProvenance.forResult(result)
-            )
-            : result
-        guard result.provenance?.source == "on_device_browser" else {
-            throw HarnessBrowserServiceError.backendFailure
+        guard result.downloads.count <= 8 else {
+            throw HarnessBrowserServiceError.resultTooLarge
         }
-        return result
+        for download in result.downloads {
+            guard let expectedDownloadDirectory,
+                  download.workspacePath == expectedDownloadDirectory.workspacePath + "/" + download.fileName,
+                  download.workspacePath.utf8.count <= 512,
+                  download.fileName.utf8.count <= 120,
+                  !download.fileName.isEmpty,
+                  !download.fileName.contains("/"),
+                  !download.fileName.contains("\\"),
+                  !download.fileName.unicodeScalars.contains(where: { $0.value == 0 }),
+                  download.byteCount == nil || (download.byteCount! >= 0 && download.byteCount! <= WorkspaceStore.maximumFileAttachmentBytes) else {
+                throw HarnessBrowserServiceError.backendFailure
+            }
+        }
+        let sanitized = HarnessBrowserResult(
+            tabID: result.tabID,
+            action: result.action,
+            pageURL: sanitizedModelURL(result.pageURL),
+            title: result.title,
+            text: result.text,
+            screenshotBase64: result.screenshotBase64,
+            tabIDs: result.tabIDs,
+            evictedTabID: result.evictedTabID,
+            downloads: result.downloads
+        )
+        return HarnessBrowserResult(
+            tabID: sanitized.tabID,
+            action: sanitized.action,
+            pageURL: sanitized.pageURL,
+            title: sanitized.title,
+            text: sanitized.text,
+            screenshotBase64: sanitized.screenshotBase64,
+            tabIDs: sanitized.tabIDs,
+            evictedTabID: sanitized.evictedTabID,
+            provenance: HarnessBrowserProvenance.forResult(sanitized),
+            downloads: sanitized.downloads
+        )
     }
 
     private static func withEviction(
@@ -383,12 +455,24 @@ actor HarnessBrowserService {
             screenshotBase64: result.screenshotBase64,
             tabIDs: result.tabIDs,
             evictedTabID: evictedTabID,
-            provenance: result.provenance
+            provenance: result.provenance,
+            downloads: result.downloads
         )
     }
 
     private static func mapBackendError(_ error: Error) -> HarnessBrowserServiceError {
         if let typed = error as? HarnessBrowserServiceError { return typed }
         return .backendFailure
+    }
+
+    private static func sanitizedModelURL(_ url: URL?) -> URL? {
+        guard var components = url.flatMap({ URLComponents(url: $0, resolvingAgainstBaseURL: false) }) else {
+            return url
+        }
+        components.user = nil
+        components.password = nil
+        components.query = nil
+        components.fragment = nil
+        return components.url
     }
 }

@@ -1,4 +1,5 @@
 @preconcurrency import ImageIO
+import CryptoKit
 import Foundation
 import UniformTypeIdentifiers
 
@@ -8,6 +9,14 @@ struct WorkspaceAdmittedImage: Sendable, Equatable {
     let height: Int
     let originalWidth: Int?
     let originalHeight: Int?
+}
+
+/// A browser-owned directory within the local workspace. The folder name is a
+/// digest, so an arbitrary session identifier cannot become a filesystem path
+/// or be disclosed through a downloaded file's workspace path.
+struct WorkspaceBrowserDownloadDirectory: Codable, Sendable, Equatable {
+    let url: URL
+    let workspacePath: String
 }
 
 /// The result of admitting one complete Share handoff. It is persisted as a
@@ -921,6 +930,25 @@ actor WorkspaceStore {
     func rootURL() throws -> URL {
         try ensureRoot()
         return root
+    }
+
+    func browserDownloadDirectory(forSessionID sessionID: String) throws -> WorkspaceBrowserDownloadDirectory {
+        try ensureRoot()
+        let digest = SHA256.hash(data: Data(sessionID.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        let workspacePath = "Downloads/session-\(digest.prefix(24))"
+        let directory = root
+            .appendingPathComponent(workspacePath, isDirectory: true)
+            .standardizedFileURL
+        guard Self.isContained(directory, in: root) else {
+            throw WorkspaceError.pathEscapesWorkspace
+        }
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        return WorkspaceBrowserDownloadDirectory(
+            url: directory,
+            workspacePath: workspacePath
+        )
     }
 
     func fileSystemResolve(path: String, cwd: String?) throws -> HarnessFsTarget {

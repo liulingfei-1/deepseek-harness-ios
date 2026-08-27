@@ -10,6 +10,19 @@ import XCTest
 #endif
 
 final class WorkspaceStoreTests: XCTestCase {
+    func testBrowserDownloadsUseHashedSessionDirectoryInsideWorkspace() async throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = WorkspaceStore(root: root)
+        let directory = try await store.browserDownloadDirectory(forSessionID: "session/with-secret-canary")
+
+        XCTAssertTrue(directory.workspacePath.hasPrefix("Downloads/session-"))
+        XCTAssertFalse(directory.workspacePath.contains("session/with-secret-canary"))
+        XCTAssertTrue(directory.url.path.hasPrefix(root.standardizedFileURL.path + "/"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: directory.url.path))
+    }
+
     func testReadWriteStaysInsideWorkspace() async throws {
         let root = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
