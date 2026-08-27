@@ -100,6 +100,8 @@ $(SRCROOT)/HarnessMobile/Core/Storage/SessionStore.swift
 $(SRCROOT)/HarnessMobile/Core/Storage/WorkspaceStore.swift
 $(SRCROOT)/HarnessMobile/Core/Storage/ShareHandoff.swift
 $(SRCROOT)/HarnessMobile/Core/Storage/HarnessWidgetProjection.swift
+$(SRCROOT)/HarnessMobile/Core/Browser/HarnessBrowserService.swift
+$(SRCROOT)/HarnessMobile/Core/Browser/HarnessBrowserWebKitBackend.swift
 $(SRCROOT)/HarnessMobile/Core/Jobs/HarnessJobs.swift
 $(SRCROOT)/HarnessMobile/Core/Jobs/HarnessSchedules.swift
 $(SRCROOT)/HarnessMobile/Core/Trace/HarnessTrace.swift
@@ -145,6 +147,7 @@ $(SRCROOT)/HarnessMobile/Core/Tools/CodeModeTool.swift
 $(SRCROOT)/HarnessMobile/Core/Tools/SkillTools.swift
 $(SRCROOT)/HarnessMobile/Core/Tools/UserInteractionTools.swift
 $(SRCROOT)/HarnessMobile/Core/Tools/WebFetchTool.swift
+$(SRCROOT)/HarnessMobile/Core/Tools/HarnessBrowserTool.swift
 $(SRCROOT)/HarnessMobile/Core/Tools/WorkStateTools.swift
 $(SRCROOT)/HarnessMobile/Core/Tools/WorkflowTool.swift
 $(SRCROOT)/HarnessMobile/Core/Tools/WorkspaceTools.swift
@@ -259,6 +262,8 @@ $(SRCROOT)/HarnessMobileTests/RuntimeResourceGovernorTests.swift
 $(SRCROOT)/HarnessMobileTests/SSEEventDecoderTests.swift
 $(SRCROOT)/HarnessMobileTests/SessionStoreTests.swift
 $(SRCROOT)/HarnessMobileTests/ShareHandoffTests.swift
+$(SRCROOT)/HarnessMobileTests/HarnessBrowserServiceTests.swift
+$(SRCROOT)/HarnessMobileTests/WidgetProjectionTests.swift
 $(SRCROOT)/HarnessMobileTests/SessionTitleSettingsTests.swift
 $(SRCROOT)/HarnessMobileTests/SessionEventTrajectoryTests.swift
 $(SRCROOT)/HarnessMobileTests/SessionQueryReadModelTests.swift

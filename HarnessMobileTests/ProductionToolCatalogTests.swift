@@ -58,6 +58,7 @@ final class ProductionToolCatalogTests: XCTestCase {
                 "terminal_close",
                 "web_fetch",
                 "web_search",
+                "browser_use",
                 "workflow",
                 "work_state_replace_plan",
                 "work_state_replace_todos",

@@ -66,6 +66,7 @@ scan_files() {
       # does not construct requests or perform model I/O itself.
       outside-network:*/Core/Network/HarnessLLMSessionRegistry.swift) continue ;;
       outside-network:*/Core/Tools/WebFetchTool.swift) continue ;;
+      outside-network:*/Core/Browser/HarnessBrowserWebKitBackend.swift) continue ;;
       outside-network:*/Core/Tools/ISH/ISHGuestNetworkMonitor.swift) continue ;;
       # MCP is a byte-framed client over the already audited on-device iSH
       # stdio bridge. It contains protocol names such as MCP and connect(), but
@@ -75,6 +76,10 @@ scan_files() {
       # network primitive despite sharing the method name.
       outside-network:*/Core/Background/BackgroundAudioKeepAlive.swift) continue ;;
       outside-network:*/Core/Agent/MobileHarnessPrompt.swift) continue ;;
+      # This is the sole audited iOS WebKit boundary. It uses a non-persistent
+      # store and one fixed DOM text expression; the model-facing tool cannot
+      # pass arbitrary JavaScript, cookies, headers, or a request executor.
+      all:*/Core/Browser/HarnessBrowserWebKitBackend.swift) continue ;;
       # URLProtocol is used here only to provide an in-process fixture for the
       # native web-fetch tests; it does not create a production network path.
       outside-network:*/HarnessMobileTests/WebFetchToolTests.swift) continue ;;
