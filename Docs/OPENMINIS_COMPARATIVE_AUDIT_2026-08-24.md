@@ -126,7 +126,7 @@ flowchart LR
 
 ### 2.4 真机验收矩阵
 
-保活没有真机证据只能保持 `VERIFY`。目标机先按项目要求使用 iPhone 16 Pro：
+10/30/60 分钟保活矩阵没有真机证据只能保持 `VERIFY`；单次签名、安装或启动首页证据不能替代持续运行验收。目标机先按项目要求使用 iPhone 16 Pro：
 
 | 场景 | 10 分钟 | 30 分钟 | 60 分钟 | 必查结果 |
 | --- | --- | --- | --- | --- |
@@ -299,8 +299,14 @@ P2：
 ### 尚不能声称
 
 - OpenMinis 本轮可运行对照：Vendor 缺 provider customization 配置及原生预构建依赖，`xcodebuild` 以 exit 65 失败。
-- iPhone 16 Pro 后台 10/30/60 分钟通过：本轮无真机证据。
+- iPhone 16 Pro 后台 10/30/60 分钟通过：截至本报告原始记录尚无真机证据。
 - 强制结束 App 后仍持续运行：不作为保证；必须保证状态诚实和冷启恢复。
+
+### 8.1 后续设备证据（2026-08-28）
+
+- Harness 已在 iPhone 16 Pro 上完成真实签名构建、安装和启动首页复验；此前启动时的 `EXC_BREAKPOINT/SIGTRAP` 已由 `251b70e` 修复，修复后主 App 与 Live Activity 进程保持运行，首页截图和完整门禁记录见 `Docs/RELEASE_VERIFICATION_2026-08-28.md`。
+- 这只证明启动路径和短时进程存活，不证明后台保活。设备 UI 测试尝试因 Xcode Beta XCTest 观察器报告 `xcrun: error: unable to find utility "devicectl"` 在 runner 建通道前退出，未执行到断言。
+- 因此本节不改变原有结论：后台 Wi-Fi/蜂窝、低电量、音频/定位、系统 expiration、冷启恢复及 10/30/60 分钟矩阵仍须在 iPhone 16 Pro 上逐项实测后才能改为 `DONE`。
 
 ## 9. 建议的第一批实际改动范围
 
