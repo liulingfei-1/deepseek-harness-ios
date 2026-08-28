@@ -1,10 +1,10 @@
 # DeepSeek Harness Mobile 三方对比与 AI 执行进度
 
 > 建立日期：2026-08-24
-> 当前 Harness Mobile HEAD：`a9fef03334a3a388ce20438cda0ee50e2e16a5c8`（审计对象包含当前未提交工作树）
+> Harness Mobile 初始审计基线：`a9fef03334a3a388ce20438cda0ee50e2e16a5c8`（2026-08-24；后续实现与验收以文末日志和版本化报告为准）
 > DeepSeek Harness 上游：`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`（`0.1.1-rc.2`）
 > OpenMinis：`9cf3a855fecd27bb5735b84cacbd56852a3ab8dd`
-> 当前状态：**`UI-009` / `PLUGIN-011` 自动/模拟器门已闭合；iPhone 16 Pro 的失败重试、真实安装、日志导出、VoiceOver、触控、旋转和性能边界仍保留。**
+> 当前状态：**`UI-009` / `PLUGIN-011` 自动/模拟器门已闭合；iPhone 16 Pro 已完成签名构建、安装和启动首页复验；失败重试、诊断日志导出、VoiceOver、触控、旋转、后台和性能边界仍保留。**
 
 ## 0. 这份文档怎么用
 

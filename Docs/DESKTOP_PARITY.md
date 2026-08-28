@@ -74,15 +74,16 @@ The product boundary is fixed:
 - Live Activities and background APIs project real local work. They do not
   turn an iPhone app into a permanently scheduled daemon.
 
-## 当前 iOS 模拟器验证（iPhone 16 Pro 真机另验）
+## 当前 iOS 验证（2026-08-28；完整后台/功能真机另验）
 
 | Check | Result | Coverage and boundary |
 | --- | --- | --- |
-| Toolchain and target | Passed | Xcode Beta arm64 iOS 27 Simulator build passed on booted iPhone 17 Pro simulator; this does not substitute for iPhone 16 Pro physical-device verification |
-| App lifecycle and UI automation | Passed | 最新 App 已重新安装到 arm64 Simulator，冷启动加载本地会话后稳定显示会话列表；专用工具投影聚焦测试 19/19，先前 MCP/LSP/catalog 聚焦测试 11/11 |
+| Toolchain and target | Passed | Xcode Beta arm64 generic iOS Simulator build and signed arm64 iPhone 16 Pro build passed; the physical-device build includes the embedded extensions |
+| App lifecycle and UI automation | Partial | Simulator cold-launch and focused UI evidence remain valid; the physical iPhone 16 Pro app was reinstalled and launched without a new crash, but the device XCTest runner stopped before assertions because the Xcode Beta diagnostic observer could not resolve `devicectl` |
+| Physical iPhone 16 Pro launch | Passed | `com.llf.harnessmobile` and its Live Activity process remained alive after reinstall; the launch screenshot and crash follow-up are recorded in `Docs/RELEASE_VERIFICATION_2026-08-28.md` |
 | Local terminal XCUITest | Passed | `HarnessMobileISHTerminalUITests/testLocalTerminalExecutesStreamsAndStopsCommands` verified rootfs readiness, the guest-network switch, `uname -m`, separate stdout/stderr rendering, and stopping `sleep 30` |
 | Marketplace failure state | Passed | A marketplace error stays local to the open page and exposes retry and close actions instead of collapsing the whole settings flow |
-| Swift test suite | Passed | Latest full `swift test --parallel`: 594 tests enumerated, 3 opt-in/live tests skipped, 0 failed. Latest full Xcode result bundle remains 539 total / 534 passed / 5 skipped / 0 failed; newer focused slices include Workspace hierarchy, long conversation, Markdown tables, specialized tool presentation, Host command lifecycle, and Provider/Wire compatibility, while live-provider tests remain opt-in |
+| Swift test suite | Passed | Latest full `DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build`: 812 tests, 3 skipped, 0 failures; `Scripts/upgrade-check.sh` repeats the same result. Xcode generic Simulator and physical-device builds also pass; live-provider and physical UI assertions remain unexecuted |
 | Live DeepSeek integration | Not run in this revision | No API key was written or used by the verification commands |
 | Node Plugin Host | Passed | `npm run check` completed successfully |
 | No-remote-execution audit | Passed | `Scripts/audit-no-remote-execution.sh` completed successfully |
@@ -90,8 +91,9 @@ The product boundary is fixed:
 The UI test used DerivedData under `/tmp`. DerivedData inside the current File
 Provider workspace inherited FinderInfo extended attributes that caused a
 codesign failure; that was a local build-environment issue, not an app runtime
-failure. Physical iPhone 16 Pro background expiration, heat, memory pressure,
-entitlements, and signing remain unverified.
+failure. The physical iPhone 16 Pro app is now signed, installed, and launched;
+physical background expiration, heat, memory pressure, entitlement behavior,
+real provider/API, iSH, plugin, and long-session behavior remain unverified.
 
 ## Current native surface
 
