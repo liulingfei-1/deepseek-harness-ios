@@ -471,11 +471,14 @@ struct HarnessDiagnosticReportInput: Sendable {
     let pluginPackageVersions: [String: String]
     let toolContributionNames: [String]
     let nativeClientFailures: [String]
+    let runtimeTelemetryRecords: [RuntimeTelemetryRecord]
     let traceEvents: [HarnessTraceEvent]
     let sessionEvents: [SessionEvent]
 }
 
 enum HarnessDiagnosticReportBuilder {
+    private static let maximumRuntimeTelemetryRows = 128
+    private static let maximumRuntimeTelemetryUTF8Bytes = 64 * 1_024
     private static let maximumTraceRows = 800
     private static let maximumTraceUTF8Bytes = 384 * 1_024
     private static let maximumSessionRows = 1_600
@@ -526,6 +529,16 @@ enum HarnessDiagnosticReportBuilder {
             section += input.nativeClientFailures.isEmpty
                 ? "(none)\n"
                 : input.nativeClientFailures.joined(separator: "\n") + "\n"
+        }
+
+        try appendSection("RUNTIME TELEMETRY JSONL", to: &report) { section in
+            section += try boundedJSONLines(
+                input.runtimeTelemetryRecords,
+                maximumRows: maximumRuntimeTelemetryRows,
+                maximumUTF8Bytes: maximumRuntimeTelemetryUTF8Bytes,
+                filteredCount: 0,
+                transform: { $0 }
+            )
         }
 
         try appendSection("HARNESS TRACE JSONL", to: &report) { section in

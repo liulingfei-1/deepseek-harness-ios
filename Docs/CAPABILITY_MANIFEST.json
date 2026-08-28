@@ -156,9 +156,48 @@
         "HarnessMobileTests/SessionTrajectoryRepositoryTests.swift"
       ],
       "unit": true
+    },
+    {
+      "boundaryPaths": [
+        "HarnessMobile/Core/Performance/RuntimeTelemetry.swift",
+        "HarnessMobile/Core/Storage/WorkspaceStore.swift"
+      ],
+      "compiled": true,
+      "device": false,
+      "entitlement": {
+        "names": [],
+        "required": false
+      },
+      "experimental": false,
+      "id": "runtime-observability",
+      "lastVerified": "2026-08-28",
+      "simulator": true,
+      "sourcePaths": [
+        "HarnessMobile/App/AppModel.swift",
+        "HarnessMobile/Core/Background/BackgroundPreferences.swift",
+        "HarnessMobile/Core/Performance/RuntimeTelemetry.swift",
+        "HarnessMobile/Core/Storage/WorkspaceStore.swift",
+        "HarnessMobile/Core/Trace/HarnessTrace.swift",
+        "HarnessMobile/Features/Settings/SettingsView.swift"
+      ],
+      "state": "VERIFY",
+      "surfaces": [
+        "production",
+        "ui",
+        "lifecycle",
+        "persistence",
+        "boundary",
+        "diagnostics"
+      ],
+      "testPaths": [
+        "HarnessMobileTests/BackgroundPreferencesTests.swift",
+        "HarnessMobileTests/HarnessTraceStoreTests.swift",
+        "HarnessMobileTests/RuntimeTelemetryTests.swift"
+      ],
+      "unit": true
     }
   ],
-  "generatedAt": "2026-08-27",
+  "generatedAt": "2026-08-28",
   "repository": "deepseek-harness-ios",
   "schemaVersion": 1
 }

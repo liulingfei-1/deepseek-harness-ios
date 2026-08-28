@@ -185,8 +185,11 @@ private struct DiagnosticLogView: View {
     @State private var isFileExporterPresented = false
     @State private var exportDocument: ConversationExportFileDocument?
     @State private var exportFilename = "Harness-Diagnostics"
+    @State private var workspaceExportPath: String?
 
     var body: some View {
+        @Bindable var preferences = model.backgroundPreferences
+
         Form {
             Section("当前运行") {
                 LabeledContent("Agent", value: model.isRunning ? "运行中" : "空闲")
@@ -259,7 +262,30 @@ private struct DiagnosticLogView: View {
                     }
                 }
             } footer: {
-                Text("导出包含设备与运行状态、Cordis 插件、Plugin Host stderr、Harness Trace 和当前会话完整轨迹。API Key、Authorization 及常见密码/Secret 字段会在手机上脱敏后再写入文件。")
+                Text("导出包含设备与运行状态、Cordis 插件、Plugin Host stderr、有限 runtime telemetry、Harness Trace 和当前会话完整轨迹。API Key、Authorization 及常见密码/Secret 字段会在手机上脱敏后再写入文件；同时会写入当前会话的本地 Downloads 工作区。")
+            }
+
+            Section {
+                Toggle("记录有限性能/资源样本", isOn: $preferences.isPerformanceResourceSamplingEnabled)
+                    .onChange(of: preferences.isPerformanceResourceSamplingEnabled) { _, _ in
+                        Task { await model.configureRuntimePerformanceSampling() }
+                    }
+            } header: {
+                Text("性能与资源采样")
+            } footer: {
+                Text("默认关闭。开启后仅记录有界的热状态、低电量和前后台数值标记；不记录提示词、工具参数或输出、URL、请求头、Cookie、环境变量和调用栈。")
+            }
+
+            if let workspaceExportPath {
+                Section {
+                    Text(workspaceExportPath)
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                } header: {
+                    Text("本地副本")
+                } footer: {
+                    Text("这是当前会话哈希隔离的工作区相对路径，不包含会话原始 ID。")
+                }
             }
         }
         .navigationTitle("详细日志")
@@ -292,8 +318,9 @@ private struct DiagnosticLogView: View {
         Task { @MainActor in
             defer { isPreparingExport = false }
             do {
-                let data = try await model.diagnosticReportData()
-                exportDocument = ConversationExportFileDocument(data: data)
+                let export = try await model.diagnosticReportExport()
+                exportDocument = ConversationExportFileDocument(data: export.data)
+                workspaceExportPath = export.workspacePath
                 exportFilename = "Harness-Diagnostics-\(Self.filenameTimestamp())"
                 isFileExporterPresented = true
             } catch {

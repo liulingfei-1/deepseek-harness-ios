@@ -140,6 +140,7 @@ final class HarnessTraceStoreTests: XCTestCase {
                 pluginPackageVersions: [:],
                 toolContributionNames: [],
                 nativeClientFailures: [],
+                runtimeTelemetryRecords: [],
                 traceEvents: [],
                 sessionEvents: events
             )
@@ -224,6 +225,7 @@ final class HarnessTraceStoreTests: XCTestCase {
                 pluginPackageVersions: [:],
                 toolContributionNames: [],
                 nativeClientFailures: [],
+                runtimeTelemetryRecords: [],
                 traceEvents: traces,
                 sessionEvents: sessionEvents
             )
@@ -233,6 +235,44 @@ final class HarnessTraceStoreTests: XCTestCase {
         XCTAssertLessThan(report.count, 1 * 1_024 * 1_024)
         XCTAssertTrue(text.contains("terminal diagnostic sentinel"))
         XCTAssertTrue(text.contains("boundedOmissionCount"))
+    }
+
+    func testDiagnosticReportIncludesStructuredRuntimeTelemetryOnly() throws {
+        let record = RuntimeTelemetryRecord(
+            id: UUID(),
+            timestamp: Date(timeIntervalSince1970: 1),
+            kind: .performanceSample,
+            code: "resource_signals",
+            sessionID: nil,
+            runID: nil,
+            generation: nil,
+            attributes: [
+                "thermal_level": 2,
+                "low_power_mode": 1,
+                "is_backgrounded": 0
+            ]
+        )
+        let report = try HarnessDiagnosticReportBuilder.build(
+            HarnessDiagnosticReportInput(
+                metadata: [:],
+                pluginHostStderr: "",
+                pluginSnapshots: [],
+                pluginHostInventory: [],
+                pluginPackageVersions: [:],
+                toolContributionNames: [],
+                nativeClientFailures: [],
+                runtimeTelemetryRecords: [record],
+                traceEvents: [],
+                sessionEvents: []
+            )
+        )
+        let text = String(decoding: report, as: UTF8.self)
+
+        XCTAssertTrue(text.contains("RUNTIME TELEMETRY JSONL"))
+        XCTAssertTrue(text.contains("resource_signals"))
+        XCTAssertTrue(text.contains("thermal_level"))
+        XCTAssertFalse(text.contains("prompt"))
+        XCTAssertFalse(text.contains("callStackTree"))
     }
 
     func testSummaryLeavesCacheHitRateUnavailableWhenProviderOmitsCacheFields() async {

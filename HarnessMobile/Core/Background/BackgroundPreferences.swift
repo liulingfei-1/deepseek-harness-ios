@@ -7,13 +7,15 @@ struct BackgroundPreferences: Codable, Equatable, Sendable {
     var isLiveActivityEnabled: Bool
     var areTaskNotificationsEnabled: Bool
     var isPrivacyModeEnabled: Bool
+    var isPerformanceResourceSamplingEnabled: Bool
 
     static let defaults = BackgroundPreferences(
         isEnhancedBackgroundEnabled: false,
         isBackgroundLocationKeepAliveEnabled: false,
         isLiveActivityEnabled: true,
         areTaskNotificationsEnabled: false,
-        isPrivacyModeEnabled: true
+        isPrivacyModeEnabled: true,
+        isPerformanceResourceSamplingEnabled: false
     )
 
     init(
@@ -21,13 +23,15 @@ struct BackgroundPreferences: Codable, Equatable, Sendable {
         isBackgroundLocationKeepAliveEnabled: Bool = false,
         isLiveActivityEnabled: Bool = true,
         areTaskNotificationsEnabled: Bool,
-        isPrivacyModeEnabled: Bool
+        isPrivacyModeEnabled: Bool,
+        isPerformanceResourceSamplingEnabled: Bool = false
     ) {
         self.isEnhancedBackgroundEnabled = isEnhancedBackgroundEnabled
         self.isBackgroundLocationKeepAliveEnabled = isBackgroundLocationKeepAliveEnabled
         self.isLiveActivityEnabled = isLiveActivityEnabled
         self.areTaskNotificationsEnabled = areTaskNotificationsEnabled
         self.isPrivacyModeEnabled = isPrivacyModeEnabled
+        self.isPerformanceResourceSamplingEnabled = isPerformanceResourceSamplingEnabled
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -36,6 +40,7 @@ struct BackgroundPreferences: Codable, Equatable, Sendable {
         case isLiveActivityEnabled
         case areTaskNotificationsEnabled
         case isPrivacyModeEnabled
+        case isPerformanceResourceSamplingEnabled
     }
 
     init(from decoder: Decoder) throws {
@@ -60,6 +65,10 @@ struct BackgroundPreferences: Codable, Equatable, Sendable {
             Bool.self,
             forKey: .isPrivacyModeEnabled
         ) ?? Self.defaults.isPrivacyModeEnabled
+        isPerformanceResourceSamplingEnabled = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .isPerformanceResourceSamplingEnabled
+        ) ?? Self.defaults.isPerformanceResourceSamplingEnabled
     }
 }
 
@@ -139,6 +148,13 @@ final class BackgroundPreferencesModel {
         }
     }
 
+    var isPerformanceResourceSamplingEnabled: Bool {
+        didSet {
+            guard isPerformanceResourceSamplingEnabled != oldValue else { return }
+            persist()
+        }
+    }
+
     private(set) var persistenceErrorDescription: String?
 
     @ObservationIgnored private let store: BackgroundPreferencesStore
@@ -151,6 +167,7 @@ final class BackgroundPreferencesModel {
         isLiveActivityEnabled = preferences.isLiveActivityEnabled
         areTaskNotificationsEnabled = preferences.areTaskNotificationsEnabled
         isPrivacyModeEnabled = preferences.isPrivacyModeEnabled
+        isPerformanceResourceSamplingEnabled = preferences.isPerformanceResourceSamplingEnabled
     }
 
     var value: BackgroundPreferences {
@@ -159,7 +176,8 @@ final class BackgroundPreferencesModel {
             isBackgroundLocationKeepAliveEnabled: isBackgroundLocationKeepAliveEnabled,
             isLiveActivityEnabled: isLiveActivityEnabled,
             areTaskNotificationsEnabled: areTaskNotificationsEnabled,
-            isPrivacyModeEnabled: isPrivacyModeEnabled
+            isPrivacyModeEnabled: isPrivacyModeEnabled,
+            isPerformanceResourceSamplingEnabled: isPerformanceResourceSamplingEnabled
         )
     }
 
@@ -170,6 +188,7 @@ final class BackgroundPreferencesModel {
         isLiveActivityEnabled = preferences.isLiveActivityEnabled
         areTaskNotificationsEnabled = preferences.areTaskNotificationsEnabled
         isPrivacyModeEnabled = preferences.isPrivacyModeEnabled
+        isPerformanceResourceSamplingEnabled = preferences.isPerformanceResourceSamplingEnabled
         persistenceErrorDescription = nil
     }
 
@@ -180,6 +199,7 @@ final class BackgroundPreferencesModel {
         isLiveActivityEnabled = BackgroundPreferences.defaults.isLiveActivityEnabled
         areTaskNotificationsEnabled = BackgroundPreferences.defaults.areTaskNotificationsEnabled
         isPrivacyModeEnabled = BackgroundPreferences.defaults.isPrivacyModeEnabled
+        isPerformanceResourceSamplingEnabled = BackgroundPreferences.defaults.isPerformanceResourceSamplingEnabled
         persistenceErrorDescription = nil
     }
 

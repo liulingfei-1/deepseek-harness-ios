@@ -538,6 +538,9 @@ final class AppModel {
     @ObservationIgnored let scheduleStore: any HarnessScheduleManaging = HarnessScheduleStore()
     @ObservationIgnored let sessionRunRegistry = SessionRunRegistry()
     @ObservationIgnored let runtimeInvariantRegistry = RuntimeInvariantRegistry()
+    @ObservationIgnored let runtimeTelemetryStore = RuntimeTelemetryStore()
+    @ObservationIgnored private let runtimeHangWatchdog: RuntimeHangWatchdog
+    @ObservationIgnored private let runtimeMetricKitSubscriber: RuntimeMetricKitSubscriber
     @ObservationIgnored private let backgroundResumeCoordinator = SessionBackgroundResumeCoordinator()
     @ObservationIgnored let terminalProvider: any ISHTerminalProviding
     @ObservationIgnored let mcpRegistry: MCPClientRegistry
@@ -648,6 +651,8 @@ final class AppModel {
         self.backgroundRunJournal = backgroundRunJournal
         let traceStore = HarnessTraceStore()
         self.traceStore = traceStore
+        runtimeHangWatchdog = RuntimeHangWatchdog(telemetryStore: runtimeTelemetryStore)
+        runtimeMetricKitSubscriber = RuntimeMetricKitSubscriber(telemetryStore: runtimeTelemetryStore)
         agentServices = CordisAgentServices()
         pluginRuntime = CordisPluginRuntime { draft in
             await traceStore.record(draft)
@@ -735,6 +740,12 @@ final class AppModel {
 
     func bootstrap() async {
         guard !isReady else { return }
+        await runtimeTelemetryStore.beginBootstrap()
+        await runtimeTelemetryStore.configurePerformanceSampling(
+            enabled: backgroundPreferences.isPerformanceResourceSamplingEnabled
+        )
+        runtimeMetricKitSubscriber.start()
+        runtimeHangWatchdog.setApplicationActive(appIsActive && !appIsBackgrounded)
         await auditBackgroundRunJournalOnLaunch()
         do {
             agentPresets = try await agentPresetStore.load()
@@ -798,6 +809,7 @@ final class AppModel {
         stagedShareAdmission = nil
         await refreshPluginInventory()
         isReady = true
+        await runtimeTelemetryStore.markBootstrapCompleted()
         await refreshAppIntentRunningSessionProjection()
         if let activeSessionID {
             await deliverPendingJobCompletions(for: activeSessionID)
@@ -2583,6 +2595,12 @@ final class AppModel {
     func updateApplicationActivity(isActive: Bool, isBackgrounded: Bool = false) {
         appIsActive = isActive
         appIsBackgrounded = isBackgrounded
+        runtimeHangWatchdog.setApplicationActive(isActive && !isBackgrounded)
+        Task { [runtimeTelemetryStore] in
+            await runtimeTelemetryStore.recordPerformanceSample(
+                RuntimeResourceGovernor.currentSignals(isBackgrounded: isBackgrounded)
+            )
+        }
         Task { [weak self, sessionRunRegistry] in
             let aggregate = await sessionRunRegistry.aggregate()
             await self?.refreshSessionRunProjection()
@@ -6371,6 +6389,7 @@ final class AppModel {
         } else {
             persistedSessionEvents = []
         }
+        let runtimeTelemetryRecords = await runtimeTelemetryStore.snapshot()
         return try HarnessDiagnosticReportBuilder.build(
             HarnessDiagnosticReportInput(
                 metadata: metadata,
@@ -6384,9 +6403,34 @@ final class AppModel {
                 nativeClientFailures: ishNativeClientFailures.map {
                     "\($0.pluginID): \($0.message)"
                 },
+                runtimeTelemetryRecords: runtimeTelemetryRecords,
                 traceEvents: allTraceEvents,
                 sessionEvents: persistedSessionEvents
             )
+        )
+    }
+
+    func diagnosticReportExport() async throws -> (data: Data, workspacePath: String?) {
+        let data = try await diagnosticReportData()
+        guard let activeSessionID else { return (data, nil) }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let filename = "Harness-Diagnostics-\(formatter.string(from: .now)).log"
+        let export = try await workspaceStore.writeDiagnosticExport(
+            data,
+            forSessionID: activeSessionID.uuidString,
+            filename: filename
+        )
+        return (data, export.workspacePath)
+    }
+
+    func configureRuntimePerformanceSampling() async {
+        await runtimeTelemetryStore.configurePerformanceSampling(
+            enabled: backgroundPreferences.isPerformanceResourceSamplingEnabled
+        )
+        await runtimeTelemetryStore.recordPerformanceSample(
+            RuntimeResourceGovernor.currentSignals(isBackgrounded: appIsBackgrounded)
         )
     }
 
@@ -7032,6 +7076,10 @@ final class AppModel {
         let finiteLeaseToken = legacyBackgroundTaskLease.acquire(identity: identity) { [weak self] expiredIdentity in
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                await self.runtimeTelemetryStore.recordBackgroundTimeout(
+                    identity: expiredIdentity,
+                    source: .finiteBackgroundLease
+                )
                 _ = try? await self.sessionRunRegistry.cancel(expiredIdentity)
             }
         }
@@ -7334,6 +7382,10 @@ final class AppModel {
         reason: ContinuedProcessingCancellationReason
     ) async {
         guard reason == .systemExpiration else { return }
+        await runtimeTelemetryStore.recordBackgroundTimeout(
+            identity: identity,
+            source: .continuedProcessing
+        )
         guard await state.proposeTerminalOutcome(.interrupted, for: identity) else { return }
         await backgroundResumeCoordinator.markSystemExpiration(identity)
         let presentation = await state.snapshot()

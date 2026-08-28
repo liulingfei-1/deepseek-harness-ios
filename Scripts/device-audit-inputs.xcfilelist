@@ -65,6 +65,7 @@ $(SRCROOT)/HarnessMobile/Core/Network/OpenAICompatibleWireProfile.swift
 $(SRCROOT)/HarnessMobile/Core/Network/ProviderRequestLifecycle.swift
 $(SRCROOT)/HarnessMobile/Core/Network/SSEEventDecoder.swift
 $(SRCROOT)/HarnessMobile/Core/Performance/RuntimeResourceGovernor.swift
+$(SRCROOT)/HarnessMobile/Core/Performance/RuntimeTelemetry.swift
 $(SRCROOT)/HarnessMobile/Core/Plugins/AgentLoopCheckpoints.swift
 $(SRCROOT)/HarnessMobile/Core/Plugins/CordisAgentServices.swift
 $(SRCROOT)/HarnessMobile/Core/Plugins/CordisHarnessTraceProjection.swift
@@ -260,6 +261,7 @@ $(SRCROOT)/HarnessMobileTests/RalphToolTests.swift
 $(SRCROOT)/HarnessMobileTests/ModelRetryPolicyTests.swift
 $(SRCROOT)/HarnessMobileTests/CustomOpenAICompatibleWireTests.swift
 $(SRCROOT)/HarnessMobileTests/RuntimeResourceGovernorTests.swift
+$(SRCROOT)/HarnessMobileTests/RuntimeTelemetryTests.swift
 $(SRCROOT)/HarnessMobileTests/SSEEventDecoderTests.swift
 $(SRCROOT)/HarnessMobileTests/SessionStoreTests.swift
 $(SRCROOT)/HarnessMobileTests/ShareHandoffTests.swift

@@ -19,6 +19,13 @@ struct WorkspaceBrowserDownloadDirectory: Codable, Sendable, Equatable {
     let workspacePath: String
 }
 
+/// An explicitly requested local diagnostic export, stored alongside other
+/// bounded session downloads without exposing the source session identifier.
+struct WorkspaceDiagnosticExport: Codable, Sendable, Equatable {
+    let workspacePath: String
+    let byteCount: Int
+}
+
 /// The result of admitting one complete Share handoff. It is persisted as a
 /// small manifest keyed by the handoff ID so a force-closed app can retry the
 /// same claim without creating duplicate attachment objects.
@@ -152,6 +159,7 @@ actor WorkspaceStore {
     private let fileManager = FileManager.default
     private let maximumReadableBytes = 1 * 1_024 * 1_024
     private let maximumWritableBytes = 256 * 1_024
+    private let maximumDiagnosticExportBytes = 2 * 1_024 * 1_024
     private let maximumImageBytes = ImageAttachmentAdmission.maximumInputBytes
     private let maximumPluginArchiveBytes = 64 * 1_024 * 1_024
     private let maximumSkillBytes = 64 * 1_024
@@ -948,6 +956,37 @@ actor WorkspaceStore {
         return WorkspaceBrowserDownloadDirectory(
             url: directory,
             workspacePath: workspacePath
+        )
+    }
+
+    /// A diagnostic export is produced only after a user-selected export
+    /// action. Its filename is fixed-format and its target remains inside the
+    /// hashed active-session download directory.
+    func writeDiagnosticExport(
+        _ data: Data,
+        forSessionID sessionID: String,
+        filename: String
+    ) throws -> WorkspaceDiagnosticExport {
+        guard data.count <= maximumDiagnosticExportBytes else {
+            throw WorkspaceError.fileTooLarge(maximumDiagnosticExportBytes)
+        }
+        guard filename.range(
+            of: "^Harness-Diagnostics-[0-9]{8}-[0-9]{6}\\.log$",
+            options: .regularExpression
+        ) != nil else {
+            throw WorkspaceError.invalidPath
+        }
+        let directory = try browserDownloadDirectory(forSessionID: sessionID)
+        let destination = directory.url
+            .appendingPathComponent(filename, isDirectory: false)
+            .standardizedFileURL
+        guard Self.isContained(destination, in: directory.url) else {
+            throw WorkspaceError.pathEscapesWorkspace
+        }
+        try data.write(to: destination, options: Self.protectedWritingOptions)
+        return WorkspaceDiagnosticExport(
+            workspacePath: "\(directory.workspacePath)/\(filename)",
+            byteCount: data.count
         )
     }
 

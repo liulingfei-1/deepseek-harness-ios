@@ -19,6 +19,7 @@ final class BackgroundPreferencesTests: XCTestCase {
         XCTAssertTrue(store.load().isLiveActivityEnabled)
         XCTAssertFalse(store.load().areTaskNotificationsEnabled)
         XCTAssertTrue(store.load().isPrivacyModeEnabled)
+        XCTAssertFalse(store.load().isPerformanceResourceSamplingEnabled)
     }
 
     func testStoreRoundTripsCodablePreferences() throws {
@@ -29,7 +30,8 @@ final class BackgroundPreferencesTests: XCTestCase {
             isBackgroundLocationKeepAliveEnabled: true,
             isLiveActivityEnabled: false,
             areTaskNotificationsEnabled: true,
-            isPrivacyModeEnabled: false
+            isPrivacyModeEnabled: false,
+            isPerformanceResourceSamplingEnabled: true
         )
 
         try store.save(expected)
@@ -47,6 +49,7 @@ final class BackgroundPreferencesTests: XCTestCase {
         model.isLiveActivityEnabled = false
         model.areTaskNotificationsEnabled = true
         model.isPrivacyModeEnabled = false
+        model.isPerformanceResourceSamplingEnabled = true
 
         XCTAssertEqual(store.load(), model.value)
         XCTAssertNil(model.persistenceErrorDescription)
@@ -61,7 +64,8 @@ final class BackgroundPreferencesTests: XCTestCase {
                 isBackgroundLocationKeepAliveEnabled: true,
                 isLiveActivityEnabled: false,
                 areTaskNotificationsEnabled: true,
-                isPrivacyModeEnabled: false
+                isPrivacyModeEnabled: false,
+                isPerformanceResourceSamplingEnabled: true
             )
         )
 
@@ -85,6 +89,7 @@ final class BackgroundPreferencesTests: XCTestCase {
         XCTAssertTrue(loaded.isLiveActivityEnabled)
         XCTAssertTrue(loaded.areTaskNotificationsEnabled)
         XCTAssertFalse(loaded.isPrivacyModeEnabled)
+        XCTAssertFalse(loaded.isPerformanceResourceSamplingEnabled)
     }
 
     private func makeDefaults() -> UserDefaults {
