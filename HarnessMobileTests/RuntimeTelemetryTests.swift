@@ -112,6 +112,19 @@ final class RuntimeTelemetryTests: XCTestCase {
         XCTAssertNil(suspendedStall)
     }
 
+    @MainActor
+    func testLifecycleWatchdogMonitorDoesNotTrapOnItsPrivateQueue() async throws {
+        let store = RuntimeTelemetryStore(markerURL: temporaryMarkerURL())
+        let watchdog = RuntimeHangWatchdog(telemetryStore: store, threshold: 1)
+
+        watchdog.setApplicationActive(true)
+        try await Task.sleep(for: .milliseconds(1_250))
+        watchdog.setApplicationActive(false)
+
+        let records = await store.snapshot()
+        XCTAssertTrue(records.allSatisfy { $0.kind == .hang })
+    }
+
     func testBackgroundTimeoutKeepsIdentityAndDeduplicatesWithinWindow() async {
         let store = RuntimeTelemetryStore(markerURL: temporaryMarkerURL())
         let identity = RunIdentity(sessionID: UUID(), runID: UUID(), generation: 9)

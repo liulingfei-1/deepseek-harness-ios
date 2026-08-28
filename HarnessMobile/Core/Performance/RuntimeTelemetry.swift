@@ -401,12 +401,16 @@ final class RuntimeHangWatchdog {
             queue: DispatchQueue(label: "com.llf.harnessmobile.runtime-watchdog")
         )
         monitor.schedule(deadline: .now() + 1, repeating: 1)
-        monitor.setEventHandler {
-            Task {
+        let monitorHandler: @Sendable () -> Void = { [gate, telemetryStore] in
+            // DispatchSource invokes this handler on its private queue. Do not
+            // inherit the surrounding MainActor here: Swift's executor check
+            // would trap before the child task can hop to the gate actor.
+            Task.detached(priority: .utility) {
                 guard let observation = await gate.check() else { return }
                 await telemetryStore.recordHang(observation)
             }
         }
+        monitor.setEventHandler(handler: monitorHandler)
         monitor.resume()
         monitorTimer = monitor
     }
