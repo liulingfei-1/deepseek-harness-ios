@@ -537,6 +537,7 @@ final class AppModel {
     )
     @ObservationIgnored let scheduleStore: any HarnessScheduleManaging = HarnessScheduleStore()
     @ObservationIgnored let sessionRunRegistry = SessionRunRegistry()
+    @ObservationIgnored let runtimeInvariantRegistry = RuntimeInvariantRegistry()
     @ObservationIgnored private let backgroundResumeCoordinator = SessionBackgroundResumeCoordinator()
     @ObservationIgnored let terminalProvider: any ISHTerminalProviding
     @ObservationIgnored let mcpRegistry: MCPClientRegistry
@@ -6408,6 +6409,16 @@ final class AppModel {
             event.type != SessionEventVocabulary.assistantChunk
                 || event.assistantChunkData?.usage != nil
         }
+        let durableSessionEvents: [SessionEvent] = if let activeSessionID {
+            (try? await trajectoryRepository.allEvents(sessionID: activeSessionID)) ?? trajectoryEvents
+        } else {
+            []
+        }
+        _ = await refreshRuntimeInvariantRegistry(
+            traceEvents: traceEvents,
+            sessionEvents: durableSessionEvents
+        )
+        let invariantSnapshot = await runtimeInvariantRegistry.snapshot()
         let errorTraceEvents = traceEvents.filter { event in
             event.error != nil
                 || event.kind == .error
@@ -6466,11 +6477,18 @@ final class AppModel {
                 "traceEventCount": .number(Double(traceEvents.count)),
                 "sessionEventCount": .number(Double(trajectoryEventCount)),
                 "inMemorySessionEventCount": .number(Double(trajectoryEvents.count)),
-                "recentErrorCount": .number(Double(recentErrors.count))
+                "recentErrorCount": .number(Double(recentErrors.count)),
+                "runtimeInvariantViolationCount": .number(Double(invariantSnapshot.count))
             ])
         ]
 
-        if query.scope == .summary || query.scope == .errors || query.scope == .full {
+        result["runtimeInvariants"] = .object([
+            "healthy": .bool(invariantSnapshot.isEmpty),
+            "checked": .array(RuntimeInvariantKind.allCases.map { .string($0.rawValue) }),
+            "violations": .array(invariantSnapshot.map { Self.redactedDiagnosticJSON($0) })
+        ])
+
+        if query.scope == .errors || query.scope == .full {
             result["errors"] = .array(recentErrors.map {
                 HarnessTraceRedactor.json($0, maximumDepth: 20)
             })
@@ -6533,6 +6551,68 @@ final class AppModel {
         return Self.boundedDiagnosticSnapshot(
             HarnessTraceRedactor.json(.object(result), maximumDepth: 24)
         )
+    }
+
+    private func refreshRuntimeInvariantRegistry(
+        traceEvents: [HarnessTraceEvent],
+        sessionEvents: [SessionEvent]
+    ) async -> [RuntimeInvariantViolationRecord] {
+        var records = (await sessionRunRegistry.invariantViolations()).map(\.runtimeRecord)
+        let aggregate = await sessionRunRegistry.aggregate()
+        let registeredOwners = aggregate.runs.reduce(into: [SessionRunBackgroundLeaseToken: RunIdentity]()) {
+            result, snapshot in
+            for token in snapshot.backgroundLeaseTokens {
+                result[token] = snapshot.identity
+            }
+        }
+        for (token, owner) in legacyBackgroundTaskLease.ownershipSnapshot {
+            guard let registeredOwner = registeredOwners[token], registeredOwner == owner else {
+                records.append(RuntimeInvariantViolationRecord(
+                    module: "legacy_background_task_lease",
+                    kind: .leaseOwnerExists,
+                    sessionID: owner.sessionID,
+                    runID: owner.runID,
+                    code: "orphan_owner"
+                ))
+                continue
+            }
+        }
+        for (token, owner) in registeredOwners where legacyBackgroundTaskLease.ownershipSnapshot[token] == nil {
+            records.append(RuntimeInvariantViolationRecord(
+                module: "session_run_registry",
+                kind: .leaseOwnerExists,
+                sessionID: owner.sessionID,
+                runID: owner.runID,
+                code: "missing_background_owner"
+            ))
+        }
+
+        if let event = traceEvents.last(where: { $0.name == "model-visible-invariant" }) {
+            records.append(RuntimeInvariantViolationRecord(
+                module: "agent_runtime",
+                kind: .modelVisibleRecorded,
+                sessionID: event.sessionID ?? activeSessionID,
+                runID: event.runID,
+                code: "audit_rejected_request"
+            ))
+        }
+
+        let orderedEvents = sessionEvents.sorted { $0.seq < $1.seq }
+        for (index, event) in orderedEvents.enumerated() {
+            let expected = UInt64(index)
+            guard event.seq == expected else {
+                records.append(RuntimeInvariantViolationRecord(
+                    module: "session_event_trajectory",
+                    kind: .contiguousSequence,
+                    sessionID: activeSessionID,
+                    runID: nil,
+                    code: "expected_\(expected)_found_\(event.seq)"
+                ))
+                break
+            }
+        }
+        await runtimeInvariantRegistry.replace(records)
+        return records
     }
 
     /// The model/tool bridge has a hard response-size limit. Trace rows can

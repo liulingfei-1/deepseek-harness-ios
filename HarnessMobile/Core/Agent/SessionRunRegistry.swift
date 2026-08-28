@@ -156,6 +156,79 @@ enum SessionRunInvariantViolation: Sendable, Equatable {
     )
 }
 
+/// Stable, content-free identifiers for the cross-module runtime checks.
+/// Records intentionally carry only identity and a short code so diagnostics
+/// can be shared with the model without exposing prompts or tool payloads.
+enum RuntimeInvariantKind: String, Codable, CaseIterable, Sendable, Equatable {
+    case oneRootPerSession = "one_root_per_session"
+    case modelVisibleRecorded = "model_visible_recorded"
+    case leaseOwnerExists = "lease_owner_exists"
+    case terminalHasNoResources = "terminal_has_no_resources"
+    case contiguousSequence = "contiguous_sequence"
+}
+
+struct RuntimeInvariantViolationRecord: Codable, Sendable, Equatable, Identifiable {
+    let module: String
+    let kind: RuntimeInvariantKind
+    let sessionID: UUID?
+    let runID: UUID?
+    let code: String
+
+    var id: String {
+        [module, kind.rawValue, sessionID?.uuidString ?? "none", runID?.uuidString ?? "none", code]
+            .joined(separator: "|")
+    }
+}
+
+/// Actor-isolated registry used by diagnostics and module-owned audits.
+/// Replacing the snapshot keeps stale failures from surviving a later healthy
+/// audit and makes the output deterministic for tests and support reports.
+actor RuntimeInvariantRegistry {
+    private var violations: [String: RuntimeInvariantViolationRecord] = [:]
+
+    func replace(_ records: [RuntimeInvariantViolationRecord]) {
+        violations = Dictionary(uniqueKeysWithValues: records.map { ($0.id, $0) })
+    }
+
+    func snapshot() -> [RuntimeInvariantViolationRecord] {
+        violations.values.sorted { lhs, rhs in
+            if lhs.kind.rawValue == rhs.kind.rawValue { return lhs.id < rhs.id }
+            return lhs.kind.rawValue < rhs.kind.rawValue
+        }
+    }
+}
+
+extension SessionRunInvariantViolation {
+    var runtimeRecord: RuntimeInvariantViolationRecord {
+        switch self {
+        case let .trajectorySessionMismatch(identity, trajectorySessionID):
+            return RuntimeInvariantViolationRecord(
+                module: "session_run_registry",
+                kind: .oneRootPerSession,
+                sessionID: identity.sessionID,
+                runID: identity.runID,
+                code: "trajectory_session_mismatch:\(trajectorySessionID.uuidString)"
+            )
+        case let .createdGenerationMismatch(identity, createdGeneration):
+            return RuntimeInvariantViolationRecord(
+                module: "session_run_registry",
+                kind: .oneRootPerSession,
+                sessionID: identity.sessionID,
+                runID: identity.runID,
+                code: "created_generation_mismatch:\(createdGeneration)"
+            )
+        case let .terminalEntryRetainsBackgroundLeases(identity, tokens):
+            return RuntimeInvariantViolationRecord(
+                module: "session_run_registry",
+                kind: .terminalHasNoResources,
+                sessionID: identity.sessionID,
+                runID: identity.runID,
+                code: "background_lease_count:\(tokens.count)"
+            )
+        }
+    }
+}
+
 /// Actor-isolated registry of live top-level mobile Agent runs.
 ///
 /// The durable session UUID is the single key, so one session can publish at

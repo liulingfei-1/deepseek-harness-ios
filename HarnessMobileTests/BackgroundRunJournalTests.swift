@@ -2,6 +2,20 @@ import XCTest
 @testable import HarnessMobileCore
 
 final class BackgroundRunJournalTests: XCTestCase {
+    func testLegacyLeaseOwnershipSnapshotContainsOnlyIdentity() async {
+        await MainActor.run {
+            let run = RunIdentity(sessionID: UUID(), runID: UUID(), generation: 1)
+            let lease = LegacyBackgroundTaskLease(
+                beginSystemTask: { _ in nil },
+                endSystemTask: { _ in }
+            )
+            let token = lease.acquire(identity: run, onExpiration: { _ in })
+            XCTAssertEqual(lease.ownershipSnapshot[token], run)
+            lease.release(token)
+            XCTAssertTrue(lease.ownershipSnapshot.isEmpty)
+        }
+    }
+
     private func temporaryURL() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("harness-journal-(UUID().uuidString)", isDirectory: true)

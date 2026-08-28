@@ -7,6 +7,41 @@ import XCTest
 #endif
 
 final class SessionRunRegistryTests: XCTestCase {
+    func testRuntimeInvariantRegistryReplacesStaleRecordsAndSortsDeterministically() async throws {
+        let registry = RuntimeInvariantRegistry()
+        let sessionID = UUID()
+        let runID = UUID()
+        let first = RuntimeInvariantViolationRecord(
+            module: "agent_runtime",
+            kind: .modelVisibleRecorded,
+            sessionID: sessionID,
+            runID: runID,
+            code: "audit_rejected_request"
+        )
+        let second = RuntimeInvariantViolationRecord(
+            module: "session_event_trajectory",
+            kind: .contiguousSequence,
+            sessionID: sessionID,
+            runID: nil,
+            code: "expected_2_found_4"
+        )
+
+        await registry.replace([first, second])
+        let snapshot = await registry.snapshot()
+        XCTAssertEqual(snapshot, [second, first])
+
+        let encoded = try JSONEncoder().encode(snapshot)
+        let decoded = try JSONDecoder().decode(
+            [RuntimeInvariantViolationRecord].self,
+            from: encoded
+        )
+        XCTAssertEqual(decoded, snapshot)
+
+        await registry.replace([])
+        let cleared = await registry.snapshot()
+        XCTAssertTrue(cleared.isEmpty)
+    }
+
     func testAllocatedGenerationIsMonotonicEvenWhenEarlierIdentityIsNeverPublished() async {
         let registry = SessionRunRegistry()
         let sessionID = UUID()

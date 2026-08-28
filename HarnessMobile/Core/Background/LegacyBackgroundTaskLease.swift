@@ -66,6 +66,11 @@ final class LegacyBackgroundTaskLease {
 
     var hasSystemTask: Bool { systemTaskIdentifier != nil }
 
+    /// Content-free ownership projection for runtime invariant audits.
+    var ownershipSnapshot: [SessionRunBackgroundLeaseToken: RunIdentity] {
+        owners.mapValues(\.identity)
+    }
+
     private func beginSharedSystemTask() {
         guard systemTaskIdentifier == nil else { return }
         systemTaskIdentifier = beginSystemTask { [weak self] in
