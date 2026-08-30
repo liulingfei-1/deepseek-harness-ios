@@ -40,3 +40,10 @@
 - 构建：arm64 iOS Simulator build succeeded（`/tmp/hm-user-question`）。
 - 专项测试：`HarnessMobilePlanReviewUITests/testPlanReviewPresentsAllDesktopActions` 1/1 通过（`/tmp/hm-user-question-tests/Logs/Test/Test-HarnessMobile-2026.08.30_16-57-17-+0800.xcresult`）。
 - 裸启动参数只能准备会话，必须由 UI 测试打开会话后才会出现 Plan Review；因此未把冷启动空白页截图冒充弹层证据。弹层深色、大字、横屏和真机触控仍为 `VERIFY`。
+
+## 设置页首屏复核（本轮）
+
+- 真实模拟器截图：`/tmp/harness-ui-settings-progressive.png`。
+- 设置页首屏按“模型 / 后台 / 工具与插件”分组，视觉主题已统一；在当前字号下结构清楚，但信息密度偏高。
+- 本轮不继续拆分设置摘要：这些摘要值能帮助用户确认当前配置，且已有对应子页承载详细操作。后续只在 Dynamic Type、横屏或真机截图证明发生遮挡时再调整。
+- 可靠夹具下设置分组路由专项测试：1/1 通过（`/tmp/hm-settings-progress2/Logs/Test/Test-HarnessMobile-2026.08.30_17-21-11-+0800.xcresult`）。此前无夹具运行停在 onboarding，不能作为设置页布局证据。
