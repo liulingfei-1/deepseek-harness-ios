@@ -22,15 +22,6 @@ struct WorkStateView: View {
                 )
             }
 
-            if !hasStructuredState {
-                ContentUnavailableView(
-                    "暂无任务状态",
-                    systemImage: "checklist",
-                    description: Text("多步骤任务开始后，Agent 会在本机维护目标、计划和待办。")
-                )
-                .listRowSeparator(.hidden)
-            }
-
             if let goal = model.workState.goal {
                 Section {
                     WorkStateGoalRow(
@@ -115,11 +106,6 @@ struct WorkStateView: View {
         }
     }
 
-    private var hasStructuredState: Bool {
-        model.workState.goal != nil
-            || !model.workState.plan.isEmpty
-            || !model.workState.todos.isEmpty
-    }
 }
 
 private struct WorkStateGoalRow: View {
