@@ -8,13 +8,15 @@ struct PluginManagementView: View {
     var body: some View {
         List {
             Section {
-                LabeledContent("已安装", value: "\(model.pluginSnapshots.count)")
-                LabeledContent("正在运行", value: "\(activePluginCount)")
-                LabeledContent("动态工具", value: "\(model.pluginToolContributions.count)")
-                LabeledContent("Prompt 贡献", value: "\(model.pluginPromptContributions.count)")
-                LabeledContent("原生 Client", value: "\(model.ishNativeClientPlugins.count)")
+                PluginRuntimeSummary(
+                    installedCount: model.pluginSnapshots.count,
+                    activeCount: activePluginCount,
+                    hostCount: model.ishPluginHostInventory.count,
+                    contributionSummary: "工具 \(model.pluginToolContributions.count) · Prompt \(model.pluginPromptContributions.count) · Client \(model.ishNativeClientPlugins.count)"
+                )
+                .accessibilityIdentifier("plugin-runtime-summary")
             } header: {
-                Text("Cordis Runtime")
+                Label("Cordis Runtime", systemImage: "cpu")
             } footer: {
                 Text("原生插件可热启停和回滚；社区 JavaScript 插件由手机内 iSH Host 承载。")
             }
@@ -22,7 +24,7 @@ struct PluginManagementView: View {
             ISHPluginHostSection()
 
             if !filteredHostInventory.isEmpty {
-                Section("iSH 动态插件") {
+                Section {
                     ForEach(filteredHostInventory, id: \.pluginId) { entry in
                         NavigationLink {
                             ISHPluginDetailView(pluginID: entry.pluginId)
@@ -60,14 +62,15 @@ struct PluginManagementView: View {
                                     Label("卸载", systemImage: "trash")
                                 }
                             }
+                            .harnessCardListRow()
                     }
-                }
+                } header: { Label("iSH 动态插件", systemImage: "terminal") }
             }
 
             if filteredSnapshots.isEmpty {
                 ContentUnavailableView.search(text: query)
             } else {
-                Section("插件") {
+                Section {
                     ForEach(filteredSnapshots, id: \.id) { snapshot in
                         NavigationLink {
                             PluginDetailView(pluginID: snapshot.id)
@@ -82,8 +85,9 @@ struct PluginManagementView: View {
                             }
                             .tint(.blue)
                         }
+                        .harnessCardListRow()
                     }
-                }
+                } header: { Label("插件", systemImage: "puzzlepiece.extension") }
             }
         }
         .harnessCompactListChrome()
@@ -161,6 +165,53 @@ struct PluginManagementView: View {
             ].joined(separator: " ").lowercased()
             return searchable.contains(normalized)
         }
+    }
+}
+
+private struct PluginRuntimeSummary: View {
+    let installedCount: Int
+    let activeCount: Int
+    let hostCount: Int
+    let contributionSummary: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: HarnessTheme.Spacing.medium) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: HarnessTheme.Spacing.small) {
+                    summaryItem("已安装", value: installedCount, icon: "puzzlepiece.extension", tint: .accentColor)
+                    summaryItem("运行中", value: activeCount, icon: "bolt.fill", tint: .green)
+                    summaryItem("Host 插件", value: hostCount, icon: "terminal.fill", tint: .orange)
+                }
+
+                VStack(alignment: .leading, spacing: HarnessTheme.Spacing.small) {
+                    HStack(spacing: HarnessTheme.Spacing.small) {
+                        summaryItem("已安装", value: installedCount, icon: "puzzlepiece.extension", tint: .accentColor)
+                        summaryItem("运行中", value: activeCount, icon: "bolt.fill", tint: .green)
+                    }
+                    summaryItem("Host 插件", value: hostCount, icon: "terminal.fill", tint: .orange)
+                }
+            }
+            Text(contributionSummary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, HarnessTheme.Spacing.xSmall)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("插件运行时摘要：已安装 \(installedCount) 个，运行中 \(activeCount) 个，Host 插件 \(hostCount) 个。\(contributionSummary)")
+    }
+
+    private func summaryItem(_ title: String, value: Int, icon: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HarnessIconTile(systemImage: icon, tint: tint, size: 28)
+            Text("\(value)")
+                .font(.headline.monospacedDigit())
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -321,9 +372,10 @@ private struct ISHPluginInventoryRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: entry.activeRun == nil ? "shippingbox" : "shippingbox.fill")
-                .foregroundStyle(entry.activeRun == nil ? Color.secondary : Color.green)
-                .frame(width: 24)
+            HarnessIconTile(
+                systemImage: entry.activeRun == nil ? "shippingbox" : "shippingbox.fill",
+                tint: entry.activeRun == nil ? .secondary : .green
+            )
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(entry.pluginId)
@@ -345,8 +397,7 @@ private struct ISHPluginInventoryRow: View {
             }
             Spacer(minLength: 8)
             if entry.nextPackageId != nil {
-                Image(systemName: "arrow.triangle.2.circlepath")
-                    .foregroundStyle(.orange)
+                HarnessStatusPill(title: "待切换", systemImage: "arrow.triangle.2.circlepath", tint: .orange)
                     .accessibilityLabel("有待切换版本")
             }
         }
@@ -363,10 +414,18 @@ private struct ISHPluginDetailView: View {
         Group {
             if let entry {
                 Form {
-                    Section("生命周期") {
+                    Section {
                         LabeledContent("插件", value: entry.pluginId)
                         LabeledContent("会话 Agent", value: entry.agentId)
-                        LabeledContent("状态", value: entry.activeRun == nil ? "已停止" : "运行中")
+                        HStack {
+                            Text("状态")
+                            Spacer(minLength: 8)
+                            HarnessStatusPill(
+                                title: entry.activeRun == nil ? "已停止" : "运行中",
+                                systemImage: entry.activeRun == nil ? "pause.circle" : "bolt.fill",
+                                tint: entry.activeRun == nil ? .secondary : .green
+                            )
+                        }
                         if let packageID = entry.currentPackageId {
                             LabeledContent("当前版本", value: packageID)
                         }
@@ -401,9 +460,9 @@ private struct ISHPluginDetailView: View {
                         } label: {
                             Label("Host 设置命名空间", systemImage: "slider.horizontal.3")
                         }
-                    }
+                    } header: { Label("生命周期", systemImage: "arrow.clockwise") }
 
-                    Section("Packages") {
+                    Section {
                         ForEach(entry.packages, id: \.packageId) { package in
                             VStack(alignment: .leading, spacing: 7) {
                                 HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -417,15 +476,13 @@ private struct ISHPluginDetailView: View {
                                 Text(package.purpose)
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
-                                HStack(spacing: 12) {
-                                    Label(
-                                        package.hasHostHalf ? "Host" : "无 Host",
-                                        systemImage: package.hasHostHalf ? "terminal.fill" : "terminal"
-                                    )
-                                    Label(
-                                        package.hasClientHalf ? "Client" : "无 Client",
-                                        systemImage: package.hasClientHalf ? "rectangle.on.rectangle" : "iphone"
-                                    )
+                                ViewThatFits(in: .horizontal) {
+                                    HStack(spacing: 12) {
+                                        packageCapabilityLabels(for: package)
+                                    }
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        packageCapabilityLabels(for: package)
+                                    }
                                 }
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -442,14 +499,14 @@ private struct ISHPluginDetailView: View {
                             }
                             .padding(.vertical, 3)
                         }
-                    }
+                    } header: { Label("Packages", systemImage: "shippingbox") }
 
                     if let latestRun = entry.latestRun {
-                        Section("最近一次运行") {
+                        Section {
                             Text(latestRun.displayText)
                                 .font(.caption.monospaced())
                                 .textSelection(.enabled)
-                        }
+                        } header: { Label("最近一次运行", systemImage: "clock.arrow.circlepath") }
                     }
 
                     Section {
@@ -505,6 +562,20 @@ private struct ISHPluginDetailView: View {
         case stop
         case undefine
     }
+
+    @ViewBuilder
+    private func packageCapabilityLabels(
+        for package: ISHPluginHostPackageSummary
+    ) -> some View {
+        Label(
+            package.hasHostHalf ? "Host" : "无 Host",
+            systemImage: package.hasHostHalf ? "terminal.fill" : "terminal"
+        )
+        Label(
+            package.hasClientHalf ? "Client" : "无 Client",
+            systemImage: package.hasClientHalf ? "rectangle.on.rectangle" : "iphone"
+        )
+    }
 }
 
 private struct PluginInventoryRow: View {
@@ -512,9 +583,7 @@ private struct PluginInventoryRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: snapshot.state.iconName)
-                .foregroundStyle(snapshot.state.tint)
-                .frame(width: 24)
+            HarnessIconTile(systemImage: snapshot.state.iconName, tint: snapshot.state.tint)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(snapshot.id.rawValue)
@@ -535,13 +604,9 @@ private struct PluginInventoryRow: View {
             Spacer(minLength: 8)
 
             if !snapshot.isEnabled {
-                Image(systemName: "pause.circle.fill")
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel("已停用")
+                HarnessStatusPill(title: "已停用", systemImage: "pause.circle.fill", tint: .secondary)
             } else if !snapshot.missingDependencies.isEmpty {
-                Image(systemName: "link.badge.plus")
-                    .foregroundStyle(.orange)
-                    .accessibilityLabel("等待依赖")
+                HarnessStatusPill(title: "等待依赖", systemImage: "link.badge.plus", tint: .orange)
             }
         }
         .padding(.vertical, 2)
@@ -556,7 +621,7 @@ private struct PluginDetailView: View {
         Group {
             if let snapshot {
                 Form {
-                    Section("生命周期") {
+                    Section {
                         LabeledContent("状态", value: snapshot.state.title)
                         LabeledContent("版本", value: snapshot.version)
                         LabeledContent("代次", value: "\(snapshot.generation)")
@@ -576,7 +641,7 @@ private struct PluginDetailView: View {
                         } label: {
                             Label("重启 Fiber", systemImage: "arrow.clockwise")
                         }
-                    }
+                    } header: { Label("生命周期", systemImage: "arrow.clockwise") }
 
                     if !snapshot.dependencies.isEmpty {
                         StringListSection(title: "依赖", values: snapshot.dependencies)
@@ -594,35 +659,35 @@ private struct PluginDetailView: View {
 
                     let tools = model.pluginToolContributions.filter { $0.pluginID == pluginID }
                     if !tools.isEmpty {
-                        Section("工具") {
+                        Section {
                             ForEach(tools, id: \.definition.name) { contribution in
                                 LabeledContent(
                                     contribution.definition.name,
                                     value: contribution.risk.rawValue
                                 )
                             }
-                        }
+                        } header: { Label("工具", systemImage: "wrench.and.screwdriver") }
                     }
 
                     let prompts = model.pluginPromptContributions.filter { $0.pluginID == pluginID }
                     if !prompts.isEmpty {
-                        Section("Prompt") {
+                        Section {
                             ForEach(prompts, id: \.stableID) { contribution in
                                 LabeledContent(
                                     contribution.name,
                                     value: contribution.kind.rawValue
                                 )
                             }
-                        }
+                        } header: { Label("Prompt", systemImage: "text.quote") }
                     }
 
                     if let error = snapshot.error {
-                        Section("故障隔离") {
+                        Section {
                             Text(error)
                                 .font(.footnote.monospaced())
                                 .foregroundStyle(.red)
                                 .textSelection(.enabled)
-                        }
+                        } header: { Label("故障隔离", systemImage: "exclamationmark.triangle") }
                     }
 
                     if pluginID.rawValue.hasPrefix("memory.") || pluginID.rawValue.hasPrefix("ish.") {
@@ -659,13 +724,13 @@ private struct StringListSection: View {
     var tint: Color = .secondary
 
     var body: some View {
-        Section(title) {
+        Section {
             ForEach(values, id: \.self) { value in
                 Text(value)
                     .font(.body.monospaced())
                     .foregroundStyle(tint)
             }
-        }
+        } header: { Label(title, systemImage: "list.bullet.rectangle") }
     }
 }
 
@@ -686,7 +751,7 @@ private struct ExperimentalPromptPluginSheet: View {
                     TextEditor(text: $instruction)
                         .frame(minHeight: 160)
                 } header: {
-                    Text("内存插件")
+                    Label("内存插件", systemImage: "text.badge.plus")
                 } footer: {
                     Text("插件只存在于当前 App 进程，重启后消失；启用后会在下一步请求中加入 Prompt。")
                 }
@@ -746,7 +811,7 @@ private struct ISHHostPluginSheet: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                 } header: {
-                    Text("Host-half JavaScript")
+                    Label("Host-half JavaScript", systemImage: "terminal")
                 } footer: {
                     Text("代码只在本机 iSH Cordis Host 的内存中定义和运行。")
                 }

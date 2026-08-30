@@ -23,7 +23,7 @@ struct MemoryManagementView: View {
                     }
                 }
             } header: {
-                Text("已保存的记忆")
+                Label("已保存的记忆", systemImage: "brain.head.profile")
             } footer: {
                 Text("记忆只会在本机保存。模型通过 memory_write 显式保存的内容才会写入；不会自动复制整段对话。读取或注入的内容可能会发送给你配置的模型服务商。")
             }
@@ -37,9 +37,10 @@ struct MemoryManagementView: View {
                 .disabled(isPreparingExport)
                 .accessibilityIdentifier("memory-export-json")
             } header: {
-                Text("导出")
+                Label("导出", systemImage: "square.and.arrow.up")
             }
         }
+        .harnessCompactListChrome()
         .navigationTitle("记忆")
         .navigationBarTitleDisplayMode(.inline)
         .task(id: model.activeSessionID) {
@@ -100,7 +101,7 @@ struct MemoryManagementView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         } header: {
-            Text("当前会话")
+            Label("当前会话", systemImage: "bubble.left.and.bubble.right")
         }
     }
 
@@ -138,21 +139,38 @@ private struct MemoryRecordRow: View {
     let onDelete: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(record.content)
-                .lineLimit(4)
-            HStack(spacing: 8) {
-                Text(scopeLabel)
-                Text(record.provenance == .explicitModelWrite ? "模型显式保存" : "用户管理")
-                Text(record.createdAt, format: .dateTime.year().month().day().hour().minute())
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
+        HStack(alignment: .top, spacing: HarnessTheme.Spacing.medium) {
+            HarnessIconTile(
+                systemImage: record.scope == .global ? "globe" : "bubble.left.and.bubble.right",
+                tint: record.scope == .global ? .accentColor : .secondary
+            )
 
-            Button("删除", role: .destructive, action: onDelete)
-                .accessibilityLabel("删除记忆")
-                .accessibilityHint("删除这条已保存的记忆。")
+            VStack(alignment: .leading, spacing: HarnessTheme.Spacing.small) {
+                Text(record.content)
+                    .lineLimit(4)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: HarnessTheme.Spacing.small) {
+                        metadataPill
+                        metadataText
+                    }
+
+                    VStack(alignment: .leading, spacing: HarnessTheme.Spacing.xSmall) {
+                        metadataPill
+                        metadataText
+                    }
+                }
+            }
+
+            Spacer(minLength: HarnessTheme.Spacing.small)
+
+            Button(role: .destructive, action: onDelete) {
+                Image(systemName: "trash")
+                    .frame(width: 44, height: 44)
+            }
+            .accessibilityLabel("删除记忆")
+            .accessibilityHint("删除这条已保存的记忆。")
         }
+        .padding(.vertical, HarnessTheme.Spacing.xSmall)
         .accessibilityElement(children: .contain)
     }
 
@@ -163,5 +181,20 @@ private struct MemoryRecordRow: View {
         case .session:
             "会话范围"
         }
+    }
+
+    private var metadataPill: some View {
+        HarnessStatusPill(
+            title: scopeLabel,
+            systemImage: record.scope == .global ? "globe" : "bubble.left",
+            tint: record.scope == .global ? .accentColor : .secondary
+        )
+    }
+
+    private var metadataText: some View {
+        Text("\(record.provenance == .explicitModelWrite ? "模型显式保存" : "用户管理") · \(record.createdAt, format: .dateTime.year().month().day().hour().minute())")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }

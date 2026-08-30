@@ -230,7 +230,6 @@ struct SetupView: View {
                 guard !didLoad else { return }
                 loadDraft()
                 didLoad = true
-                focusedField = mode == .onboarding ? .apiKey : nil
 
                 if existingProfile != nil,
                    existingProfile.map(model.credentialStatus(for:)) == .configured,
@@ -296,9 +295,11 @@ struct SetupView: View {
                     .focused($focusedField, equals: .profileID)
             }
 
-            TextField("显示名称", text: $displayName)
-                .accessibilityIdentifier("provider-display-name-field")
-                .focused($focusedField, equals: .displayName)
+            if mode != .onboarding || isCustomProfile {
+                TextField("显示名称", text: $displayName)
+                    .accessibilityIdentifier("provider-display-name-field")
+                    .focused($focusedField, equals: .displayName)
+            }
 
             if isCustomProfile {
                 LabeledContent("API 协议", value: "OpenAI Chat Completions")
@@ -308,9 +309,13 @@ struct SetupView: View {
                     .foregroundStyle(.secondary)
             }
         } header: {
-            Text("服务商身份")
+            Text("服务商")
         } footer: {
-            Text("Provider ID 会写入会话和凭据引用，保存后不能改名；显示名称、地址、密钥和模型目录仍可编辑。")
+            if mode == .onboarding {
+                Text("稍后可以在设置中修改名称、地址、密钥和模型。")
+            } else {
+                Text("Provider ID 会写入会话和凭据引用，保存后不能改名；显示名称、地址、密钥和模型目录仍可编辑。")
+            }
         }
     }
 
@@ -402,7 +407,7 @@ struct SetupView: View {
     }
 
     private var inferenceSection: some View {
-        Section("推理") {
+        Section {
             Picker("思考模式", selection: $draft.reasoningMode) {
                 ForEach(ReasoningMode.supportedModes(for: draft.providerID)) { mode in
                     Text(mode.title).tag(mode)
@@ -482,6 +487,8 @@ struct SetupView: View {
             Text("单次模型响应建议最多调用 8 个工具，手机同时执行最多 2 个并发安全工具，其余自动排队。Anthropic 扩展思考需保存签名块，当前仅开放服务默认和关闭。")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+        } header: {
+            Label("推理", systemImage: "cpu")
         }
     }
 

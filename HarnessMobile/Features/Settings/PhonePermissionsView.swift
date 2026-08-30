@@ -71,13 +71,23 @@ struct PhonePermissionsView: View {
         _ title: String,
         capabilities: [DevicePermissionCapability]
     ) -> some View {
-        Section(title) {
+        Section {
             ForEach(capabilities) { capability in
                 DevicePermissionRow(
                     capability: capability,
                     status: status(for: capability)
                 )
             }
+        } header: {
+            Label(title, systemImage: sectionIcon(for: title))
+        }
+    }
+
+    private func sectionIcon(for title: String) -> String {
+        switch title {
+        case "隐私访问": return "hand.raised"
+        case "系统连接": return "point.3.connected.trianglepath.dotted"
+        default: return "sparkles"
         }
     }
 
@@ -99,29 +109,38 @@ private struct DevicePermissionRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: capability.systemImage)
-                .frame(width: 24, height: 24)
-                .foregroundStyle(capability.tint)
-                .accessibilityHidden(true)
+            HarnessIconTile(systemImage: capability.systemImage, tint: capability.tint)
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(capability.title)
-                Text(capability.purpose(for: status))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 8) {
+                    permissionDescription
+                    Spacer(minLength: 8)
+                    statusPill
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    permissionDescription
+                    statusPill
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, HarnessTheme.Spacing.xSmall)
+        .accessibilityElement(children: .combine)
+    }
 
-            Spacer(minLength: 8)
-
-            Label(status.title, systemImage: status.systemImage)
+    private var permissionDescription: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(capability.title)
+            Text(capability.purpose(for: status))
                 .font(.caption)
-                .foregroundStyle(status.tint)
-                .labelStyle(.titleAndIcon)
-                .multilineTextAlignment(.trailing)
+                .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .accessibilityElement(children: .combine)
+    }
+
+    private var statusPill: some View {
+        HarnessStatusPill(title: status.title, systemImage: status.systemImage, tint: status.tint)
     }
 }
 
@@ -169,7 +188,7 @@ private extension DevicePermissionCapability {
             case .unavailable:
                 "此设备不支持 HealthKit。"
             default:
-                "已编译 OpenMinis HealthKit；具体数据类型的读取或写入由健康 App 管理授权。"
+                "已接入 typed Swift HealthKit 查询；具体数据类型仍由健康 App 管理授权。"
             }
         case .homeKit: "当前未配置 HomeKit capability。"
         case .nfc: "没有永久授权；每次扫描使用系统会话。"

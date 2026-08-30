@@ -32,22 +32,33 @@ struct CommunityPluginMarketView: View {
 
     var body: some View {
         List {
-            Picker("插件视图", selection: $mode) {
-                ForEach(CommunityPluginMarketMode.allCases) { item in
-                    Text(item.title).tag(item)
+            HStack(spacing: 8) {
+                Picker("插件视图", selection: $mode) {
+                    ForEach(CommunityPluginMarketMode.allCases) { item in
+                        Text(item.title).tag(item)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .accessibilityIdentifier("community-plugin-market-mode")
+                .controlSize(.small)
+
+                Button {
+                    isActionsPresented = true
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("community-plugin-market-actions")
+                .accessibilityLabel("插件操作")
+                .disabled(model.isISHPluginMarketplaceWorking)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .accessibilityIdentifier("community-plugin-market-mode")
-            .controlSize(.small)
             .padding(.vertical, 0)
             .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
             .listRowSeparator(.hidden)
 
-            CommunityPluginMarketHeader {
-                isActionsPresented = true
-            }
+            CommunityPluginMarketHeader()
             CommunityPluginMarketplaceStateSections()
             if let trace = model.nativePluginCompilationTrace {
                 CommunityPluginCompilationTraceSection(trace: trace)
@@ -78,6 +89,7 @@ struct CommunityPluginMarketView: View {
                 .accessibilityLabel("刷新插件目录")
                 .disabled(model.isISHPluginMarketplaceWorking)
             }
+
         }
         .confirmationDialog(
             "插件操作",
@@ -202,7 +214,7 @@ struct CommunityPluginMarketView: View {
                 systemImage: query.isEmpty ? "shippingbox" : "magnifyingglass"
             )
         } else {
-            Section("已安装") {
+            Section {
                 ForEach(filteredInstalledPlugins) { plugin in
                     NavigationLink {
                         CommunityInstalledPluginDetailView(pluginID: plugin.id)
@@ -211,6 +223,8 @@ struct CommunityPluginMarketView: View {
                     }
                     .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 12))
                 }
+            } header: {
+                Label("已安装", systemImage: "shippingbox.fill")
             }
         }
     }
@@ -251,9 +265,7 @@ private struct CommunityPluginMarketplaceStateSections: View {
     var body: some View {
         if let operation = model.ishPluginMarketplaceOperation {
             HStack(alignment: .top, spacing: 11) {
-                ProgressView()
-                    .controlSize(.small)
-                    .padding(.top, 2)
+                HarnessIconTile(systemImage: "arrow.triangle.2.circlepath", tint: .accentColor)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(operation.title(hostState: model.ishPluginHostState))
                         .font(.subheadline.weight(.semibold))
@@ -263,9 +275,8 @@ private struct CommunityPluginMarketplaceStateSections: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .padding(.vertical, 4)
-            .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
-            .listRowBackground(Color.accentColor.opacity(0.07))
+            .padding(.vertical, 6)
+            .harnessCardListRow()
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("community-plugin-market-status")
         }
@@ -273,9 +284,7 @@ private struct CommunityPluginMarketplaceStateSections: View {
         if let failure = model.ishPluginMarketplaceFailure {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .top, spacing: 11) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                        .padding(.top, 1)
+                    HarnessIconTile(systemImage: "exclamationmark.triangle.fill", tint: .orange)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("操作失败")
                             .font(.subheadline.weight(.semibold))
@@ -287,7 +296,7 @@ private struct CommunityPluginMarketplaceStateSections: View {
                     }
                 }
 
-                HStack(spacing: 18) {
+                HStack(spacing: 10) {
                     if failure.canRetry {
                         Button {
                             Task { await model.retryISHPluginMarketplaceOperation() }
@@ -295,19 +304,20 @@ private struct CommunityPluginMarketplaceStateSections: View {
                             Label("重试", systemImage: "arrow.clockwise")
                         }
                         .accessibilityIdentifier("community-plugin-market-retry")
+                        .frame(minHeight: 44)
                     }
                     Button {
                         model.clearISHPluginMarketplaceFailure()
                     } label: {
                         Label("关闭", systemImage: "xmark")
                     }
+                    .frame(minHeight: 44)
                 }
                 .font(.subheadline)
                 .buttonStyle(.borderless)
             }
-            .padding(.vertical, 4)
-            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-            .listRowBackground(Color.orange.opacity(0.08))
+            .padding(.vertical, 6)
+            .harnessCardListRow()
             .accessibilityIdentifier("community-plugin-market-error")
         }
     }
@@ -359,8 +369,11 @@ private struct CommunityPluginCompilationTraceSection: View {
                 if let diagnostic = trace.diagnostic {
                     VStack(alignment: .leading, spacing: 5) {
                         HStack(spacing: 6) {
-                            Image(systemName: diagnostic.retryable ? "arrow.triangle.2.circlepath" : "hand.raised.fill")
-                                .foregroundStyle(diagnostic.retryable ? .orange : .red)
+                            HarnessStatusPill(
+                                title: diagnostic.retryable ? "可重试" : "需要处理",
+                                systemImage: diagnostic.retryable ? "arrow.triangle.2.circlepath" : "hand.raised.fill",
+                                tint: diagnostic.retryable ? .orange : .red
+                            )
                             Text("结构化诊断 · \(diagnostic.code)")
                                 .font(.caption.weight(.semibold))
                         }
@@ -379,8 +392,10 @@ private struct CommunityPluginCompilationTraceSection: View {
                 }
             } label: {
                 HStack(spacing: 10) {
-                    Image(systemName: trace.isFinished ? "checklist.checked" : "hammer.fill")
-                        .foregroundStyle(trace.isFinished ? Color.green : Color.accentColor)
+                    HarnessIconTile(
+                        systemImage: trace.isFinished ? "checklist.checked" : "hammer.fill",
+                        tint: trace.isFinished ? .green : .accentColor
+                    )
                     VStack(alignment: .leading, spacing: 2) {
                         Text(trace.isFinished ? "最近一次编译结果" : "手机 Agent 编译中")
                             .font(.subheadline.weight(.semibold))
@@ -389,13 +404,23 @@ private struct CommunityPluginCompilationTraceSection: View {
                             .foregroundStyle(.secondary)
                         .lineLimit(2)
                     }
+                    Spacer(minLength: 4)
+                    HarnessStatusPill(
+                        title: trace.isFinished ? "已结束" : "进行中",
+                        systemImage: trace.isFinished ? "checkmark" : "ellipsis",
+                        tint: trace.isFinished ? .green : .accentColor
+                    )
                 }
                 .accessibilityIdentifier("community-plugin-compilation-summary")
             }
         } header: {
             Text("Agent 原生编译")
         } footer: {
-            Text(trace.source)
+            Label {
+                Text(trace.source)
+            } icon: {
+                Image(systemName: "shippingbox")
+            }
                 .fontDesign(.monospaced)
                 .textSelection(.enabled)
                 .accessibilityIdentifier("community-plugin-compilation-source")
@@ -420,15 +445,11 @@ private struct CommunityPluginCompilationStepRow: View {
         HStack(alignment: .top, spacing: 10) {
             Group {
                 if step.state == .running {
-                    ProgressView()
-                        .controlSize(.mini)
+                    HarnessIconTile(systemImage: "ellipsis", tint: .accentColor, size: 28)
                 } else {
-                    Image(systemName: step.state.iconName)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(step.state.tint)
+                    HarnessIconTile(systemImage: step.state.iconName, tint: step.state.tint, size: 28)
                 }
             }
-            .frame(width: 18, height: 18)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(step.stage.title)
@@ -439,8 +460,13 @@ private struct CommunityPluginCompilationStepRow: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            HarnessStatusPill(
+                title: step.state.title,
+                systemImage: step.state.iconName,
+                tint: step.state.tint
+            )
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 7)
     }
 }
 
@@ -463,71 +489,53 @@ private extension NativePluginCompilationStageState {
         case .failed: .red
         }
     }
+
+    var title: String {
+        switch self {
+        case .pending: "等待"
+        case .running: "进行中"
+        case .succeeded: "完成"
+        case .failed: "失败"
+        case .skipped: "跳过"
+        }
+    }
 }
 
 /// A compact, Minis-style summary sits above the catalog so the page remains
 /// useful while the Host is starting or the remote catalog is unavailable.
 private struct CommunityPluginMarketHeader: View {
     @Environment(AppModel.self) private var model
-    let onOpenActions: () -> Void
 
     var body: some View {
         Section {
             HStack(spacing: 12) {
-                Image(systemName: "puzzlepiece.extension.fill")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 36, height: 36)
-                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 10))
+                HarnessIconTile(
+                    systemImage: "puzzlepiece.extension.fill",
+                    tint: .accentColor,
+                    size: 36
+                )
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("手机插件生态")
+                    Text("原生优先")
                         .font(.headline)
-                    Text("Host 插件在 iSH 内运行，模型密钥留在原生层")
+                    Text("目录 \(catalogCount) · 已原生 \(model.nativeInstalledMarketplaceCount) · iSH \(model.ishFallbackMarketplaceCount)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                        .lineLimit(1)
                 }
 
                 Spacer(minLength: 8)
                 hostStatus
             }
-
-            HStack(spacing: 8) {
-                summaryPill(
-                    title: "目录",
-                    value: model.ishPluginMarketplaceCatalog.map { "\($0.items.count)" } ?? "-",
-                    tint: .blue
-                )
-                summaryPill(
-                    title: "已安装",
-                    value: "\(model.ishMarketplacePlugins.count)",
-                    tint: .green
-                )
-                summaryPill(
-                    title: "原生扩展",
-                    value: "\(model.ishNativeClientPlugins.count)",
-                    tint: .orange
-                )
-            }
-
-            Button(action: onOpenActions) {
-                Label("插件操作", systemImage: "ellipsis.circle")
-                    .font(.subheadline.weight(.medium))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .disabled(model.isISHPluginMarketplaceWorking)
-            .accessibilityIdentifier("community-plugin-market-actions")
-            .accessibilityLabel("插件操作")
-        } header: {
-            Text("插件中心")
         } footer: {
-            Text("支持市场目录、GitHub 仓库和本地 ZIP；不兼容的桌面 Client 插件会在安装前标记。")
+            Text("安装先尝试原生编译，不兼容时才转入手机内 iSH。")
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("community-plugin-market-summary")
+    }
+
+    private var catalogCount: String {
+        model.ishPluginMarketplaceCatalog.map { "\($0.items.count)" } ?? "-"
     }
 
     private var hostStatus: some View {
@@ -542,20 +550,6 @@ private struct CommunityPluginMarketHeader: View {
         .frame(minWidth: 54)
     }
 
-    private func summaryPill(title: String, value: String, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(value)
-                .font(.headline.monospacedDigit())
-                .foregroundStyle(tint)
-            Text(title)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 9))
-    }
 }
 
 private struct CommunityPluginEmptyRow<Actions: View>: View {
@@ -669,11 +663,7 @@ private struct CommunityPluginCatalogRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 11) {
-            Image(systemName: item.compatibility.iconName)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white)
-                .frame(width: 32, height: 32)
-                .background(item.compatibility.tint, in: Circle())
+            HarnessIconTile(systemImage: item.compatibility.iconName, tint: item.compatibility.tint)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.name)
@@ -691,9 +681,10 @@ private struct CommunityPluginCatalogRow: View {
                     Text(item.category)
                     Text("·")
                         .accessibilityHidden(true)
-                    Text(item.repositoryKey)
-                        .fontDesign(.monospaced)
-                        .truncationMode(.middle)
+                    Label(
+                        item.nativeInstallStrategy?.title ?? ISHMarketplaceNativeInstallStrategy.nativeFirst.title,
+                        systemImage: item.nativeInstallStrategy?.iconName ?? ISHMarketplaceNativeInstallStrategy.nativeFirst.iconName
+                    )
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -716,11 +707,7 @@ private struct CommunityInstalledPluginRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 11) {
-            Image(systemName: plugin.state.iconName)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white)
-                .frame(width: 32, height: 32)
-                .background(plugin.state.tint, in: Circle())
+            HarnessIconTile(systemImage: plugin.state.iconName, tint: plugin.state.tint)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(plugin.name)
@@ -736,6 +723,13 @@ private struct CommunityInstalledPluginRow: View {
 
                 HStack(spacing: 6) {
                     Text(plugin.state.title)
+                    Text("·")
+                        .accessibilityHidden(true)
+                    Text(
+                        plugin.id.hasPrefix(NativeAgentCompiledPlugin.idPrefix)
+                            ? "原生"
+                            : "iSH 回退"
+                    )
                     Text("·")
                         .accessibilityHidden(true)
                     Text("v\(plugin.version)")
@@ -765,32 +759,44 @@ private struct CommunityPluginCatalogDetailView: View {
                 List {
                     CommunityPluginMarketplaceStateSections()
 
-                    Section("插件") {
+                    Section {
                         LabeledContent("名称", value: item.name)
                         LabeledContent("分类", value: item.category)
                         LabeledContent("兼容性", value: item.compatibility.title)
                         if let installedVersion = item.installedVersion {
                             LabeledContent("已安装", value: installedVersion)
                         }
+                        LabeledContent(
+                            "安装路径",
+                            value: (item.nativeInstallStrategy ?? .nativeFirst).title
+                        )
+                    } header: {
+                        Label("插件", systemImage: "puzzlepiece.extension")
                     }
 
                     if !item.description.isEmpty {
-                        Section("说明") {
+                        Section {
                             Text(item.description)
                                 .textSelection(.enabled)
+                        } header: {
+                            Label("说明", systemImage: "text.alignleft")
                         }
                     }
 
-                    Section("来源") {
+                    Section {
                         Text(item.repositoryURL)
                             .font(.footnote.monospaced())
                             .textSelection(.enabled)
+                    } header: {
+                        Label("来源", systemImage: "link")
                     }
 
                     if let reason = item.unsupportedReason {
-                        Section("手机兼容性") {
+                        Section {
                             Label(reason, systemImage: "exclamationmark.triangle.fill")
                                 .foregroundStyle(item.compatibility == .unsupported ? .orange : .secondary)
+                        } header: {
+                            Label("手机兼容性", systemImage: "iphone.gen3")
                         }
                     }
 
@@ -799,7 +805,7 @@ private struct CommunityPluginCatalogDetailView: View {
                             isConfirmationPresented = true
                         } label: {
                             Label(
-                                item.installed ? "重新安装" : "安装到 iSH",
+                                item.installed ? "重新安装" : "原生优先安装",
                                 systemImage: "arrow.down.app"
                             )
                         }
@@ -807,7 +813,7 @@ private struct CommunityPluginCatalogDetailView: View {
                             model.isISHPluginMarketplaceWorking
                         )
                     } footer: {
-                        Text("插件分类不会阻止安装；源码、依赖下载和执行均留在手机 iSH 内完成。")
+                        Text("安装会先在手机内分析源码并尝试注册签名原生工具；只有不适配时才在 iSH 中运行。")
                     }
                 }
                 .communityPluginListChrome()
@@ -828,7 +834,7 @@ private struct CommunityPluginCatalogDetailView: View {
                         }
                     }
                 } message: {
-                    Text("第三方插件会在 iSH 沙箱中读写工作区，但无法获取原生模型 API Key。")
+                    Text("插件不会获得模型密钥。可安全映射的能力走原生工具，其余能力明确标记为 iSH 回退。")
                 }
             } else {
                 ContentUnavailableView("插件不可用", systemImage: "shippingbox")
@@ -860,7 +866,7 @@ private struct CommunityInstalledPluginDetailView: View {
                 List {
                     CommunityPluginMarketplaceStateSections()
 
-                    Section("运行状态") {
+                    Section {
                         LabeledContent("状态", value: plugin.state.title)
                         LabeledContent("版本", value: plugin.version)
                         LabeledContent("Loader entries", value: "\(plugin.entryCount)")
@@ -883,10 +889,12 @@ private struct CommunityInstalledPluginDetailView: View {
                             )
                         )
                         .disabled(model.isISHPluginMarketplaceWorking)
+                    } header: {
+                        Label("运行状态", systemImage: "power")
                     }
 
                     if let nativeClient {
-                        Section("原生扩展") {
+                        Section {
                             NavigationLink {
                                 NativeClientContributionsView(pluginID: pluginID)
                             } label: {
@@ -906,51 +914,61 @@ private struct CommunityInstalledPluginDetailView: View {
                                 }
                             }
                             .accessibilityIdentifier("native-client-open-\(pluginID)")
+                        } header: {
+                            Label("原生扩展", systemImage: "puzzlepiece.extension")
                         }
                     }
 
                     if nativeAgentPlugin?.settings != nil {
-                        Section("原生插件") {
+                        Section {
                             NavigationLink {
                                 NativeAgentPluginSettingsView(pluginID: pluginID)
                             } label: {
                                 Label("插件设置", systemImage: "slider.horizontal.3")
                             }
                             .accessibilityIdentifier("native-agent-settings-\(pluginID)")
+                        } header: {
+                            Label("原生插件", systemImage: "swift")
                         }
                     }
 
                     if !nativeClientFailures.isEmpty {
-                        Section("原生扩展加载失败") {
+                        Section {
                             ForEach(nativeClientFailures) { failure in
                                 Text(failure.message)
                                     .font(.footnote.monospaced())
                                     .foregroundStyle(.red)
                                     .textSelection(.enabled)
                             }
+                        } header: {
+                            Label("原生扩展加载失败", systemImage: "exclamationmark.triangle")
                         }
                     }
 
                     if let description = plugin.description, !description.isEmpty {
-                        Section("说明") {
+                        Section {
                             Text(description)
                                 .textSelection(.enabled)
+                        } header: {
+                            Label("说明", systemImage: "text.alignleft")
                         }
                     }
 
                     if let notes = nativeAgentPlugin?.compatibilityNotes,
                        !notes.isEmpty {
-                        Section("兼容性说明") {
+                        Section {
                             ForEach(notes, id: \.self) { note in
                                 Label(note, systemImage: "info.circle")
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
                                     .textSelection(.enabled)
                             }
+                        } header: {
+                            Label("兼容性说明", systemImage: "info.circle")
                         }
                     }
 
-                    Section("来源") {
+                    Section {
                         LabeledContent("类型", value: plugin.source.kind.title)
                         Text(plugin.source.location)
                             .font(.footnote.monospaced())
@@ -958,18 +976,22 @@ private struct CommunityInstalledPluginDetailView: View {
                         if let license = plugin.license {
                             LabeledContent("许可证", value: license)
                         }
+                    } header: {
+                        Label("来源", systemImage: "link")
                     }
 
                     if let error = plugin.lastError {
-                        Section("加载失败") {
+                        Section {
                             Text(error)
                                 .font(.footnote.monospaced())
                                 .foregroundStyle(.red)
                                 .textSelection(.enabled)
+                        } header: {
+                            Label("加载失败", systemImage: "exclamationmark.triangle")
                         }
                     }
 
-                    Section("管理") {
+                    Section {
                         if plugin.source.kind != .localZip {
                             Button {
                                 pendingAction = .reinstall
@@ -984,6 +1006,8 @@ private struct CommunityInstalledPluginDetailView: View {
                             Label("卸载插件", systemImage: "trash")
                         }
                         .disabled(model.isISHPluginMarketplaceWorking)
+                    } header: {
+                        Label("管理", systemImage: "slider.horizontal.3")
                     }
                 }
                 .communityPluginListChrome()
@@ -1075,12 +1099,14 @@ private struct CommunityPluginGitHubInstallSheet: View {
             List {
                 CommunityPluginMarketplaceStateSections()
 
-                Section("GitHub") {
+                Section {
                     TextField("https://github.com/owner/repository", text: $location)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
                     Toggle("覆盖同名插件", isOn: $replaceExisting)
+                } header: {
+                    Label("GitHub", systemImage: "link")
                 }
             }
             .listStyle(.insetGrouped)

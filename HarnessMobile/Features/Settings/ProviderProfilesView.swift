@@ -74,75 +74,30 @@ struct ProviderProfilesView: View {
                     }
                 }
             } header: {
-                Text("Provider Profiles")
+                Label("Provider Profiles", systemImage: "server.rack")
             } footer: {
                 Text("默认 Profile 用于新请求；当前正在运行的请求不会在中途切换。API Key 只保存在各自的本机 Keychain 项中。")
             }
 
             Section {
-                Picker("摘要模型", selection: compactionSummaryRouteBinding) {
-                    Text("跟随当前会话")
-                        .tag(nil as CompactionSummaryRoute?)
-                    ForEach(compactionSummaryRouteOptions) { option in
-                        Text("\(option.profileName) / \(option.route.model)")
-                            .tag(Optional(option.route))
+                NavigationLink {
+                    List {
+                        providerBehaviorSections
+                    }
+                    .navigationTitle("模型行为")
+                    .navigationBarTitleDisplayMode(.inline)
+                } label: {
+                    LabeledContent {
+                        Text("压缩、时间、标题")
+                            .foregroundStyle(.secondary)
+                    } label: {
+                        Label("模型行为", systemImage: "slider.horizontal.3")
                     }
                 }
-                .disabled(model.isRunning)
-            } header: {
-                Text("上下文压缩")
-            } footer: {
-                Text("可让压缩摘要使用独立 Profile 和模型。独立路由在尚未输出摘要时失败，会记录诊断并回退到当前会话模型；半截输出、取消、截断或工具调用不会静默重试。")
-            }
+                .accessibilityIdentifier("provider-behavior-settings")
+            } header: { Label("请求行为", systemImage: "slider.horizontal.3") }
 
             Section {
-                Toggle("向 Agent 提供当前时间", isOn: timeContextEnabledBinding)
-                    .disabled(model.isRunning)
-                if model.timeContextSettings.isEnabled {
-                    Picker("显示时区", selection: timeContextTimeZoneBinding) {
-                        Text("跟随 iPhone（\(TimeZone.current.identifier)）")
-                            .tag(nil as String?)
-                        Text("UTC")
-                            .tag(Optional("UTC"))
-                    }
-                    Picker("刷新间隔", selection: timeContextRefreshBinding) {
-                        Text("每个模型步骤").tag(0)
-                        Text("1 分钟").tag(60_000)
-                        Text("5 分钟").tag(300_000)
-                        Text("15 分钟").tag(900_000)
-                    }
-                }
-            } header: {
-                Text("时间上下文")
-            } footer: {
-                Text("默认关闭。开启后时间会作为带来源的持久快照追加到消息尾部，而不是修改系统提示；刷新间隔内不会重复注入，因此稳定前缀和模型缓存不会被每秒时间变化破坏。")
-            }
-
-            Section {
-                Picker("自动标题", selection: sessionTitleModeBinding) {
-                    ForEach(SessionTitleAutomaticMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
-                    }
-                }
-                .disabled(model.isRunning)
-                if model.sessionTitleSettings.automaticMode != .disabled {
-                    Picker("标题模型", selection: sessionTitleRouteBinding) {
-                        Text("跟随会话模型")
-                            .tag(nil as CompactionSummaryRoute?)
-                        ForEach(compactionSummaryRouteOptions) { option in
-                            Text("\(option.profileName) / \(option.route.model)")
-                                .tag(Optional(option.route))
-                        }
-                    }
-                    .disabled(model.isRunning)
-                }
-            } header: {
-                Text("会话标题")
-            } footer: {
-                Text("模型标题使用独立的受限请求，不带工具，API Key 仍只由本机 Keychain 解析。生成失败会保留首条提问的本机标题；手动重命名会固定标题，除非从会话菜单选择重新生成。")
-            }
-
-            Section("添加") {
                 ForEach(catalogProviders) { descriptor in
                     Button {
                         presentedEditor = .addCatalog(descriptor.id)
@@ -170,8 +125,9 @@ struct ProviderProfilesView: View {
                 } label: {
                     Label("自定义 OpenAI-compatible", systemImage: "plus.rectangle.on.rectangle")
                 }
-            }
+            } header: { Label("添加", systemImage: "plus.circle") }
         }
+        .harnessCompactListChrome()
         .navigationTitle("模型与服务商")
         .task {
             await model.refreshProviderCredentialStatuses()
@@ -199,6 +155,72 @@ struct ProviderProfilesView: View {
             }
         } message: {
             Text(operationError ?? "")
+        }
+    }
+
+    @ViewBuilder
+    private var providerBehaviorSections: some View {
+        Section {
+            Picker("摘要模型", selection: compactionSummaryRouteBinding) {
+                Text("跟随当前会话")
+                    .tag(nil as CompactionSummaryRoute?)
+                ForEach(compactionSummaryRouteOptions) { option in
+                    Text("\(option.profileName) / \(option.route.model)")
+                        .tag(Optional(option.route))
+                }
+            }
+            .disabled(model.isRunning)
+        } header: {
+            Text("上下文压缩")
+        } footer: {
+            Text("独立摘要路由只会在尚未输出内容时回退；半截输出、取消、截断或工具调用不会静默重试。")
+        }
+
+        Section {
+            Toggle("向 Agent 提供当前时间", isOn: timeContextEnabledBinding)
+                .disabled(model.isRunning)
+            if model.timeContextSettings.isEnabled {
+                Picker("显示时区", selection: timeContextTimeZoneBinding) {
+                    Text("跟随 iPhone（\(TimeZone.current.identifier)）")
+                        .tag(nil as String?)
+                    Text("UTC")
+                        .tag(Optional("UTC"))
+                }
+                Picker("刷新间隔", selection: timeContextRefreshBinding) {
+                    Text("每个模型步骤").tag(0)
+                    Text("1 分钟").tag(60_000)
+                    Text("5 分钟").tag(300_000)
+                    Text("15 分钟").tag(900_000)
+                }
+            }
+        } header: {
+            Text("时间上下文")
+        } footer: {
+            Text("时间以持久快照追加到消息尾部；刷新间隔内不会重复注入。")
+        }
+
+        Section {
+            Picker("自动标题", selection: sessionTitleModeBinding) {
+                ForEach(SessionTitleAutomaticMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .disabled(model.isRunning)
+            if model.sessionTitleSettings.automaticMode != .disabled {
+                Picker("标题模型", selection: sessionTitleRouteBinding) {
+                    Text("跟随会话模型")
+                        .tag(nil as CompactionSummaryRoute?)
+                    ForEach(compactionSummaryRouteOptions) { option in
+                        Text("\(option.profileName) / \(option.route.model)")
+                            .tag(Optional(option.route))
+                    }
+                }
+                .disabled(model.isRunning)
+            }
+        } header: {
+            Text("会话标题")
+        } footer: {
+            Text("标题请求不带工具；失败时保留首条提问生成的本机标题。")
         }
     }
 
@@ -436,11 +458,10 @@ private struct ProviderProfileListRow: View {
         HStack(spacing: 12) {
             Button(action: onEdit) {
                 HStack(spacing: 12) {
-                    Image(systemName: profile.descriptor.systemImage)
-                        .font(.title3)
-                        .frame(width: 28)
-                        .foregroundStyle(.tint)
-                        .accessibilityHidden(true)
+                    HarnessIconTile(
+                        systemImage: profile.descriptor.systemImage,
+                        tint: .accentColor
+                    )
 
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 6) {
@@ -452,10 +473,12 @@ private struct ProviderProfileListRow: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
-                        Text(profile.id)
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+                        if profile.isCustom {
+                            Text(profile.id)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
                         Text(profile.defaultModel)
                             .font(.caption)
                             .foregroundStyle(.tertiary)
@@ -477,12 +500,16 @@ private struct ProviderProfileListRow: View {
                     ProgressView()
                         .controlSize(.small)
                 } else if isActive {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                        .accessibilityLabel("默认服务商")
+                    HarnessStatusPill(
+                        title: "默认",
+                        systemImage: "checkmark.circle.fill",
+                        tint: .green
+                    )
+                    .accessibilityLabel("默认服务商")
                 } else {
                     Button(action: onActivate) {
                         Image(systemName: "circle")
+                            .frame(width: 44, height: 44)
                     }
                     .buttonStyle(.borderless)
                     .foregroundStyle(.secondary)
@@ -504,10 +531,11 @@ private struct ProviderCredentialStatusLabel: View {
     let supportsInference: Bool
 
     var body: some View {
-        Label(title, systemImage: systemImage)
-            .font(.caption2)
-            .foregroundStyle(foregroundStyle)
-            .labelStyle(.titleAndIcon)
+        HarnessStatusPill(
+            title: title,
+            systemImage: systemImage,
+            tint: foregroundColor
+        )
     }
 
     private var title: String {
@@ -538,17 +566,13 @@ private struct ProviderCredentialStatusLabel: View {
         }
     }
 
-    private var foregroundStyle: AnyShapeStyle {
-        guard supportsInference else { return AnyShapeStyle(.orange) }
+    private var foregroundColor: Color {
+        guard supportsInference else { return .orange }
         switch status {
-        case .unknown:
-            return AnyShapeStyle(.secondary)
-        case .configured:
-            return AnyShapeStyle(.green)
-        case .missing:
-            return AnyShapeStyle(.red)
-        case .originMismatch:
-            return AnyShapeStyle(.orange)
+        case .unknown: return .secondary
+        case .configured: return .green
+        case .missing: return .red
+        case .originMismatch: return .orange
         }
     }
 }

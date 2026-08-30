@@ -8,10 +8,28 @@ struct PluginSettingsView: View {
     var body: some View {
         List {
             if let snapshot = model.ishPluginSettingsSnapshot {
-                Section("Settings Provider") {
+                Section {
                     LabeledContent("命名空间", value: "\(snapshot.namespaces.count)")
-                    LabeledContent("写入", value: snapshot.writable ? "可用" : "只读")
-                    LabeledContent("配置文件", value: snapshot.hasDocument ? "已挂载" : "未挂载")
+                    HStack {
+                        Text("写入")
+                        Spacer()
+                        HarnessStatusPill(
+                            title: snapshot.writable ? "可用" : "只读",
+                            systemImage: snapshot.writable ? "pencil" : "lock.fill",
+                            tint: snapshot.writable ? .green : .secondary
+                        )
+                    }
+                    HStack {
+                        Text("配置文件")
+                        Spacer()
+                        HarnessStatusPill(
+                            title: snapshot.hasDocument ? "已挂载" : "未挂载",
+                            systemImage: snapshot.hasDocument ? "checkmark" : "minus",
+                            tint: snapshot.hasDocument ? .green : .secondary
+                        )
+                    }
+                } header: {
+                    Label("Settings Provider", systemImage: "slider.horizontal.3")
                 }
 
                 if filteredNamespaces.isEmpty {
@@ -25,7 +43,7 @@ struct PluginSettingsView: View {
                         )
                     )
                 } else {
-                    Section("命名空间") {
+                    Section {
                         ForEach(filteredNamespaces) { namespace in
                             NavigationLink {
                                 PluginSettingsNamespaceView(namespaceID: namespace.ns)
@@ -33,6 +51,8 @@ struct PluginSettingsView: View {
                                 PluginSettingsNamespaceRow(namespace: namespace)
                             }
                         }
+                    } header: {
+                        Label("命名空间", systemImage: "square.stack.3d.up")
                     }
                 }
             } else {
@@ -51,6 +71,7 @@ struct PluginSettingsView: View {
             }
         }
         .accessibilityIdentifier("ish-plugin-settings-list")
+        .harnessCompactListChrome()
         .navigationTitle("插件设置")
         .searchable(text: $query, prompt: "搜索 namespace")
         .toolbar {
@@ -109,9 +130,10 @@ private struct PluginSettingsNamespaceRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: namespace.editable ? "slider.horizontal.3" : "lock.fill")
-                .foregroundStyle(namespace.editable ? Color.accentColor : Color.secondary)
-                .frame(width: 24)
+            HarnessIconTile(
+                systemImage: namespace.editable ? "slider.horizontal.3" : "lock.fill",
+                tint: namespace.editable ? .accentColor : .secondary
+            )
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(namespace.ns)
@@ -136,12 +158,10 @@ private struct PluginSettingsNamespaceRow: View {
             Spacer(minLength: 8)
 
             if namespace.user?.objectValue?.isEmpty == false {
-                Text("已覆盖")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.tint)
+                HarnessStatusPill(title: "已覆盖", systemImage: "checkmark", tint: .accentColor)
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, HarnessTheme.Spacing.xSmall)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("ish-plugin-settings-namespace-\(namespace.ns)")
     }
@@ -170,8 +190,13 @@ struct PluginSettingsNamespaceView: View {
 
                     if let notice {
                         Section {
-                            Label(notice.message, systemImage: notice.systemImage)
-                                .foregroundStyle(notice.tint)
+                            HStack(alignment: .top, spacing: 10) {
+                                HarnessIconTile(systemImage: notice.systemImage, tint: notice.tint, size: 28)
+                                Text(notice.message)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                         }
                     }
 
@@ -184,7 +209,11 @@ struct PluginSettingsNamespaceView: View {
                             )
                         } else {
                             Section {
-                                ProgressView("读取 schema")
+                                HStack(spacing: 10) {
+                                    HarnessIconTile(systemImage: "arrow.triangle.2.circlepath", tint: .accentColor, size: 28)
+                                    Text("读取 schema")
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                         }
                     } else {
@@ -262,7 +291,7 @@ struct PluginSettingsNamespaceView: View {
 
     @ViewBuilder
     private func namespaceStatusSection(_ namespace: ISHPluginSettingsNamespace) -> some View {
-        Section("状态") {
+        Section {
             LabeledContent("Namespace", value: namespace.ns)
             LabeledContent("Revision", value: "\(namespace.revision)")
             LabeledContent("生效", value: namespace.applies.displayName)
@@ -270,6 +299,8 @@ struct PluginSettingsNamespaceView: View {
             if let draft {
                 LabeledContent("草稿覆盖", value: "\(draft.overriddenFieldCount)")
             }
+        } header: {
+            Label("状态", systemImage: "waveform.path.ecg")
         }
     }
 
@@ -289,7 +320,7 @@ struct PluginSettingsNamespaceView: View {
                 Label("放弃草稿并重新载入", systemImage: "trash")
             }
         } header: {
-            Text("Revision 冲突")
+            Label("Revision 冲突", systemImage: "exclamationmark.arrow.circlepath")
         }
     }
 
@@ -307,7 +338,7 @@ struct PluginSettingsNamespaceView: View {
                     .textSelection(.enabled)
             }
         } header: {
-            Text("只读配置")
+            Label("只读配置", systemImage: "lock.fill")
         }
     }
 
@@ -415,16 +446,23 @@ struct NativeAgentPluginSettingsView: View {
         Group {
             if let plugin, plugin.settings != nil {
                 Form {
-                    Section("运行方式") {
+                    Section {
                         LabeledContent("插件", value: plugin.name)
                         LabeledContent("生效", value: "立即替换运行时贡献")
                         LabeledContent("存储", value: "App 本地插件注册表")
+                    } header: {
+                        Label("运行方式", systemImage: "power")
                     }
 
                     if let notice {
                         Section {
-                            Label(notice.message, systemImage: notice.systemImage)
-                                .foregroundStyle(notice.tint)
+                            HStack(alignment: .top, spacing: 10) {
+                                HarnessIconTile(systemImage: notice.systemImage, tint: notice.tint, size: 28)
+                                Text(notice.message)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                         }
                     }
 
@@ -436,18 +474,24 @@ struct NativeAgentPluginSettingsView: View {
                         )
                     } else {
                         Section {
-                            ProgressView("读取原生设置 schema")
+                            HStack(spacing: 10) {
+                                HarnessIconTile(systemImage: "arrow.triangle.2.circlepath", tint: .accentColor, size: 28)
+                                Text("读取原生设置 schema")
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
 
                     if let defaults = plugin.settings?.defaults {
-                        Section("默认值") {
+                        Section {
                             Button {
                                 save(values: defaults, successMessage: "已恢复插件默认设置。")
                             } label: {
                                 Label("恢复全部默认值", systemImage: "arrow.counterclockwise")
                             }
                             .disabled(isSaving || plugin.settings?.values == defaults)
+                        } header: {
+                            Label("默认值", systemImage: "arrow.counterclockwise")
                         }
                     }
                 }
@@ -469,6 +513,7 @@ struct NativeAgentPluginSettingsView: View {
                         seed(force: true)
                     } label: {
                         Image(systemName: "arrow.uturn.backward")
+                            .frame(width: 44, height: 44)
                     }
                     .disabled(isSaving || draft?.isDirty != true)
                     .accessibilityLabel("放弃设置草稿")
@@ -478,6 +523,7 @@ struct NativeAgentPluginSettingsView: View {
                         saveDraft()
                     } label: {
                         Image(systemName: "checkmark")
+                            .frame(width: 44, height: 44)
                     }
                     .disabled(!canSave)
                     .accessibilityLabel("保存原生插件设置")
@@ -570,7 +616,7 @@ private struct PluginSettingsFormSections: View {
 
     var body: some View {
         if !form.rootFields.isEmpty {
-            Section("配置") {
+            Section {
                 ForEach(form.rootFields) { leaf in
                     PluginSettingsFieldEditor(
                         leaf: leaf,
@@ -578,6 +624,8 @@ private struct PluginSettingsFormSections: View {
                         isDisabled: isDisabled
                     )
                 }
+            } header: {
+                Label("配置", systemImage: "slider.horizontal.3")
             }
         }
 
@@ -591,7 +639,7 @@ private struct PluginSettingsFormSections: View {
                     )
                 }
             } header: {
-                Text(group.name)
+                Label(group.name, systemImage: "square.stack.3d.up")
             } footer: {
                 if let help = group.description ?? group.comment {
                     Text(help)
@@ -601,15 +649,26 @@ private struct PluginSettingsFormSections: View {
 
         let issues = draft.validationIssues(in: form)
         if !issues.isEmpty || draft.operations.count > 256 {
-            Section("校验") {
+            Section {
                 ForEach(issues, id: \.self) { issue in
-                    Label(issue, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
+                    HStack(alignment: .top, spacing: 10) {
+                        HarnessIconTile(systemImage: "exclamationmark.triangle.fill", tint: .red, size: 28)
+                        Text(issue)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 if draft.operations.count > 256 {
-                    Label("一次最多写入 256 个字段。", systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
+                    HStack(alignment: .top, spacing: 10) {
+                        HarnessIconTile(systemImage: "exclamationmark.triangle.fill", tint: .red, size: 28)
+                        Text("一次最多写入 256 个字段。")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
+            } header: {
+                Label("校验", systemImage: "checkmark.shield")
             }
         }
     }
@@ -627,12 +686,7 @@ private struct PluginSettingsFieldEditor: View {
                     .font(.subheadline.weight(.semibold))
                 Spacer(minLength: 8)
                 if draft.isOverridden(at: leaf.field.path) {
-                    Text("覆盖")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(Color.accentColor)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.accentColor.opacity(0.12), in: .rect(cornerRadius: 4))
+                    HarnessStatusPill(title: "覆盖", systemImage: "checkmark", tint: .accentColor)
                     Button {
                         var updated = draft
                         updated.reset(leaf.field.path)
@@ -645,9 +699,7 @@ private struct PluginSettingsFieldEditor: View {
                     .accessibilityLabel("重置 \(leaf.label)")
                     .help("重置为继承值")
                 } else {
-                    Text("继承")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                    HarnessStatusPill(title: "继承", systemImage: "arrow.down.left", tint: .secondary)
                 }
             }
 
@@ -786,7 +838,7 @@ private struct PluginSettingsSecretsSection: View {
     let secrets: [ISHPluginSettingsSecret]
 
     var body: some View {
-        Section("受保护字段") {
+        Section {
             ForEach(secrets, id: \.self) { secret in
                 LabeledContent(secret.path.joined(separator: " / ")) {
                     Label(
@@ -796,6 +848,8 @@ private struct PluginSettingsSecretsSection: View {
                     .foregroundStyle(secret.set ? Color.green : Color.secondary)
                 }
             }
+        } header: {
+            Label("受保护字段", systemImage: "key.fill")
         }
     }
 }

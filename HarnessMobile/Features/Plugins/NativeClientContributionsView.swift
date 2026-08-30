@@ -8,7 +8,7 @@ struct NativeClientContributionsView: View {
         Group {
             if let plugin {
                 List {
-                    Section("Native Client") {
+                    Section {
                         LabeledContent("Scope", value: plugin.scope.rawValue)
                         LabeledContent(
                             "Activation",
@@ -16,6 +16,13 @@ struct NativeClientContributionsView: View {
                         )
                         LabeledContent("Digest", value: String(plugin.sourceDigest.prefix(12)))
                             .font(.body.monospaced())
+                        HarnessStatusPill(
+                            title: "第 \(plugin.activationGeneration.formatted()) 代",
+                            systemImage: "arrow.triangle.2.circlepath",
+                            tint: .accentColor
+                        )
+                    } header: {
+                        Label("Native Client", systemImage: "puzzlepiece.extension")
                     }
 
                     ForEach(plugin.contributions.inspectors) { inspector in
@@ -26,7 +33,7 @@ struct NativeClientContributionsView: View {
                     }
 
                     if !plugin.contributions.settings.isEmpty {
-                        Section("Settings") {
+                        Section {
                             ForEach(plugin.contributions.settings) { contribution in
                                 NavigationLink {
                                     PluginSettingsNamespaceView(
@@ -41,29 +48,36 @@ struct NativeClientContributionsView: View {
                                                 .foregroundStyle(.secondary)
                                         }
                                     } icon: {
-                                        Image(systemName: "slider.horizontal.3")
+                                        HarnessIconTile(systemImage: "slider.horizontal.3", tint: .accentColor, size: 28)
                                     }
                                 }
                                 .accessibilityIdentifier(
                                     "native-client-settings-link-\(plugin.pluginId)-\(contribution.id)"
                                 )
                             }
+                        } header: {
+                            Label("Settings", systemImage: "slider.horizontal.3")
                         }
                     }
 
                     if !plugin.contributions.commands.isEmpty {
-                        Section("Commands") {
+                        Section {
                             ForEach(plugin.contributions.commands) { command in
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("/\(command.name)")
-                                        .font(.body.monospaced().weight(.semibold))
-                                    Text(command.description)
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                    if let inputHint = command.inputHint {
-                                        Text(inputHint)
-                                            .font(.caption.monospaced())
-                                            .foregroundStyle(.tertiary)
+                                HStack(alignment: .top, spacing: 10) {
+                                    HarnessIconTile(systemImage: "terminal", tint: .accentColor, size: 28)
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("/\(command.name)")
+                                            .font(.body.monospaced().weight(.semibold))
+                                        Text(command.description)
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                        if let inputHint = command.inputHint {
+                                            Text(inputHint)
+                                                .font(.caption.monospaced())
+                                                .foregroundStyle(.tertiary)
+                                                .textSelection(.enabled)
+                                        }
                                     }
                                 }
                                 .accessibilityElement(children: .combine)
@@ -71,10 +85,12 @@ struct NativeClientContributionsView: View {
                                     "native-client-command-\(plugin.pluginId)-\(command.name)"
                                 )
                             }
+                        } header: {
+                            Label("Commands", systemImage: "terminal")
                         }
                     }
                 }
-                .listStyle(.insetGrouped)
+                .harnessCompactListChrome()
                 .accessibilityIdentifier("native-client-plugin-\(plugin.pluginId)")
             } else {
                 ContentUnavailableView(
@@ -110,6 +126,7 @@ private struct NativeClientInspectorSection: View {
                     Task { await load() }
                 } label: {
                     Image(systemName: "arrow.clockwise")
+                        .frame(width: 44, height: 44)
                 }
                 .accessibilityLabel("刷新 \(inspector.title)")
                 .accessibilityIdentifier(
@@ -137,15 +154,26 @@ private struct NativeClientInspectorSection: View {
         switch state {
         case .idle, .loading:
             HStack(spacing: 10) {
-                ProgressView()
-                Text("正在读取")
-                    .foregroundStyle(.secondary)
+                HarnessIconTile(systemImage: "arrow.triangle.2.circlepath", tint: .accentColor, size: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("正在读取")
+                        .foregroundStyle(.secondary)
+                    Text("从本机插件贡献读取最新值")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
             }
         case let .loaded(value):
             NativeClientValueView(value: value, renderer: inspector.renderer)
         case let .failed(message):
-            Label(message, systemImage: "exclamationmark.triangle.fill")
-                .foregroundStyle(.red)
+            HStack(alignment: .top, spacing: 10) {
+                HarnessIconTile(systemImage: "exclamationmark.triangle.fill", tint: .orange, size: 28)
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 

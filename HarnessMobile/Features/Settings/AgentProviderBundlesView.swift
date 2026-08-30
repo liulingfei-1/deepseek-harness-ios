@@ -10,11 +10,21 @@ struct AgentProviderBundlesView: View {
                 ForEach(model.providerBundles) { bundle in
                     VStack(alignment: .leading, spacing: 8) {
                         Toggle(isOn: binding(for: bundle)) {
-                            Label(bundle.displayName, systemImage: bundle.id == .codex ? "terminal" : "text.bubble")
+                            Label {
+                                Text(bundle.displayName)
+                            } icon: {
+                                HarnessIconTile(
+                                    systemImage: bundle.id == .codex ? "terminal" : "text.bubble",
+                                    tint: bundle.enabled ? .accentColor : .secondary,
+                                    size: 28
+                                )
+                            }
                         }
-                        Text(bundle.enabled ? "已启用；调用只会使用手机 iSH 中的固定入口。" : "未启用")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                        HarnessStatusPill(
+                            title: bundle.enabled ? "已启用" : "未启用",
+                            systemImage: bundle.enabled ? "checkmark.circle.fill" : "pause.circle",
+                            tint: bundle.enabled ? .green : .secondary
+                        )
                         installStatus(for: bundle)
                         installActions(for: bundle)
                         Text("固定来源：\(bundle.installPayload.packageName)@\(bundle.installPayload.version)")
@@ -29,6 +39,7 @@ struct AgentProviderBundlesView: View {
                 Text("安装在手机 iSH 内完成：URL、SHA-256、npm 包身份、CLI 名称和命令均来自不可编辑的内置清单。下载会校验后原子替换；失败或取消会保留旧版本。安装器不会读取模型服务 API Key。")
             }
         }
+        .harnessCompactListChrome()
         .navigationTitle("Agent 编排")
         .alert("Bundle 设置失败", isPresented: Binding(
             get: { errorMessage != nil },
@@ -51,8 +62,11 @@ struct AgentProviderBundlesView: View {
                 ProgressView()
                     .controlSize(.small)
             } else {
-                Image(systemName: status.phase == .installed ? "checkmark.seal.fill" : "shippingbox")
-                    .foregroundStyle(status.phase == .installed ? .green : .secondary)
+                HarnessIconTile(
+                    systemImage: status.phase == .installed ? "checkmark.seal.fill" : "shippingbox",
+                    tint: status.phase == .installed ? .green : .secondary,
+                    size: 28
+                )
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(status.message)

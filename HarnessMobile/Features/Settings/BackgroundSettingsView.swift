@@ -116,19 +116,28 @@ private struct BackgroundSystemProjectionSection: View {
 
     var body: some View {
         Section {
-            LabeledContent("活动任务", value: "\(projection.activeRunCount) 个")
-            LabeledContent("保活层级", value: tierLabel)
-            LabeledContent("通知权限", value: projection.notificationAuthorization)
-            LabeledContent("定位权限", value: projection.locationAuthorization)
-            LabeledContent(
+            HStack(spacing: HarnessTheme.Spacing.medium) {
+                HarnessIconTile(systemImage: "bolt.horizontal.circle", tint: .accentColor)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("活动任务")
+                    Text("\(projection.activeRunCount) 个")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                HarnessStatusPill(title: tierLabel, systemImage: tierIcon, tint: tierTint)
+            }
+            statusRow("通知权限", value: projection.notificationAuthorization, icon: "bell.badge")
+            statusRow("定位权限", value: projection.locationAuthorization, icon: "location.fill")
+            statusRow(
                 "实时活动权限",
                 value: projection.liveActivitySupported
                     ? (projection.liveActivityEnabled ? "已启用" : "已关闭")
-                    : "不可用"
+                    : "不可用",
+                icon: "rectangle.topthird.inset.filled"
             )
             if !projection.degradedReasons.isEmpty {
-                LabeledContent("当前降级", value: degradedLabel)
-                    .foregroundStyle(.orange)
+                statusRow("当前降级", value: degradedLabel, icon: "exclamationmark.triangle", tint: .orange)
             }
             if !projection.degradedDetails.isEmpty {
                 LabeledContent("故障证据", value: projection.degradedDetails.joined(separator: "、"))
@@ -136,7 +145,7 @@ private struct BackgroundSystemProjectionSection: View {
                     .foregroundStyle(.secondary)
             }
         } header: {
-            Text("当前系统投影")
+            Label("当前系统投影", systemImage: "waveform.path.ecg")
         } footer: {
             Text("这里显示所有并行任务的汇总状态。不会显示提示词、工具参数、工具输出或模型正文；降级只表示对应系统能力当前不可用。")
         }
@@ -151,6 +160,44 @@ private struct BackgroundSystemProjectionSection: View {
         case .extendedLocation: "定位延展"
         case .degraded: "降级"
         }
+    }
+
+    private var tierIcon: String {
+        switch projection.survivalTier {
+        case .foreground: "iphone"
+        case .finiteBackgroundTask: "timer"
+        case .continuedProcessing: "arrow.clockwise.icloud"
+        case .extendedAudio: "speaker.wave.2"
+        case .extendedLocation: "location.fill"
+        case .degraded: "exclamationmark.triangle"
+        }
+    }
+
+    private var tierTint: Color {
+        switch projection.survivalTier {
+        case .foreground: .secondary
+        case .finiteBackgroundTask, .continuedProcessing: .blue
+        case .extendedAudio, .extendedLocation: .green
+        case .degraded: .orange
+        }
+    }
+
+    private func statusRow(
+        _ title: String,
+        value: String,
+        icon: String,
+        tint: Color = .secondary
+    ) -> some View {
+        HStack(spacing: HarnessTheme.Spacing.medium) {
+            HarnessIconTile(systemImage: icon, tint: tint, size: 28)
+            Text(title)
+            Spacer(minLength: 8)
+            Text(value)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.trailing)
+        }
+        .accessibilityElement(children: .combine)
     }
 
     private var degradedLabel: String {
@@ -183,7 +230,7 @@ private struct BackgroundLiveActivitySettingsSection: View {
                     .disabled(true)
             }
         } header: {
-            Text("锁屏与灵动岛")
+            Label("锁屏与灵动岛", systemImage: "rectangle.topthird.inset.filled")
         } footer: {
             if isSystemSupported {
                 Text("显示当前会话、步骤、工具和真实进度。它只投影任务状态，不会让 App 获得永久后台执行能力；关闭后会立即移除当前实时活动。")
@@ -207,12 +254,12 @@ private struct BackgroundExecutionSettingsSection: View {
                     .disabled(true)
             }
         } header: {
-            Text("后台执行")
+            Label("后台执行", systemImage: "arrow.clockwise.icloud")
         } footer: {
             if isSystemSupported {
-                Text("使用 iOS 26 Continued Processing。任务由用户在前台发起，系统允许时可在离开 App 后继续；iOS 仍可因资源、温度或用户操作而终止任务。")
+                Text("组合使用 iOS 26 Continued Processing 与任务期间的音频/定位延展。系统后台时间配额到期时，只要延展层仍健康，就结束旧 lease、续挂新的有限 lease，并继续同一个任务和上下文；这不是模型服务商额度续期，系统仍可因资源、温度或用户操作终止 App。")
             } else {
-                Text("当前系统不支持 Continued Processing。iOS 18–25 下，任务只能使用系统通常提供的短暂后台时间，不能保证持续运行。")
+                Text("当前系统不支持 Continued Processing。iOS 18–25 下只使用系统提供的短时后台时间，不承诺持续运行。")
             }
         }
     }
@@ -232,7 +279,7 @@ private struct BackgroundLocationKeepAliveSettingsSection: View {
             }
             LabeledContent("当前状态", value: phaseLabel)
         } header: {
-            Text("可选定位保活")
+            Label("可选定位保活", systemImage: "location.fill")
         } footer: {
             Text("仅在开启此开关、已允许 Always 定位、后台停留约 15 秒且仍有任务运行时使用约 3 公里精度的位置服务。不会保存、显示或上传坐标；普通一次定位工具不会触发此授权。")
         }
@@ -269,6 +316,8 @@ private struct BackgroundNotificationSettingsSection: View {
         Section {
             Toggle("任务通知", isOn: $isEnabled)
             LabeledContent("系统权限", value: authorizationLabel)
+        } header: {
+            Label("任务通知", systemImage: "bell.badge")
         } footer: {
             if let errorDescription {
                 Text("通知授权失败：\(errorDescription)")
@@ -300,6 +349,8 @@ private struct BackgroundPrivacySettingsSection: View {
     var body: some View {
         Section {
             Toggle("任务状态隐私", isOn: $isEnabled)
+        } header: {
+            Label("隐私显示", systemImage: "eye.slash")
         } footer: {
             Text("开启后，锁屏、灵动岛状态和完成通知只显示通用任务状态，不显示会话标题、工具名称或回复内容。")
         }
@@ -325,7 +376,7 @@ private struct BackgroundRuntimeStatusSection: View {
             )
             runtimeContent
         } header: {
-            Text("状态")
+            Label("状态", systemImage: "chart.bar.xaxis")
         } footer: {
             Text("Continued Processing 和实时活动都由 iOS 管理。实时活动只显示真实任务状态；两者都不是无限后台或常驻进程保证。")
         }
@@ -340,12 +391,13 @@ private struct BackgroundRuntimeStatusSection: View {
     private var runtimeContent: some View {
         switch status {
         case .idle:
-            LabeledContent("当前任务", value: "空闲")
+            HarnessStatusPill(title: "空闲", systemImage: "pause.circle", tint: .secondary)
         case let .running(progress):
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("当前任务")
                     Spacer()
+                    HarnessStatusPill(title: "运行中", systemImage: "bolt.fill", tint: .green)
                     Text("\(progress.completedUnitCount)/\(progress.totalUnitCount)")
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
@@ -368,19 +420,25 @@ private struct BackgroundRuntimeStatusSection: View {
             }
             .accessibilityElement(children: .combine)
         case let .completed(success):
-            LabeledContent("最近任务", value: success ? "已完成" : "未完成")
+            HarnessStatusPill(
+                title: success ? "已完成" : "未完成",
+                systemImage: success ? "checkmark.circle.fill" : "xmark.circle.fill",
+                tint: success ? .green : .red
+            )
         case .interrupted:
-            LabeledContent("最近任务", value: "已被系统中断")
+            HarnessStatusPill(title: "已被系统中断", systemImage: "pause.circle", tint: .orange)
         }
     }
 }
 
 private struct BackgroundSafetyBoundarySection: View {
     var body: some View {
-        Section("执行边界") {
-            Label("不会播放静音音频保活", systemImage: "speaker.slash")
-            Label("不会申请 Always Location 或伪造位置活动", systemImage: "location.slash")
+        Section {
+            Label("静音音频只在已开启、仍有任务且 App 位于后台时运行", systemImage: "speaker.wave.2")
+            Label("后台定位需单独开启并取得 Always 授权，不保存或上传坐标", systemImage: "location")
             Label("不会使用蓝牙或 VoIP 冒充后台业务", systemImage: "checkmark.shield")
+        } header: {
+            Label("执行边界", systemImage: "checkmark.shield")
         }
     }
 }

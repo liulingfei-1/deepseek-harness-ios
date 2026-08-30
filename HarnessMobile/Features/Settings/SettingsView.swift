@@ -8,7 +8,7 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            Section("模型") {
+            Section {
                 LabeledContent("服务商", value: activeProfileName)
                 LabeledContent("API", value: endpointHost)
                 LabeledContent("模型", value: model.configuration.model)
@@ -21,12 +21,12 @@ struct SettingsView: View {
                 NavigationLink {
                     ProviderProfilesView()
                 } label: {
-                    Label("模型与服务商", systemImage: "server.rack")
+                    SettingsLinkLabel(title: "模型与服务商", systemImage: "server.rack", tint: .blue)
                 }
                 .accessibilityIdentifier("settings-model-providers")
-            }
+            } header: { Label("模型", systemImage: "server.rack") }
 
-            Section("后台") {
+            Section {
                 NavigationLink {
                     BackgroundSettingsView(
                         runtimeStatus: model.backgroundRuntimeStatus,
@@ -35,54 +35,54 @@ struct SettingsView: View {
                         requestLocationAuthorization: model.requestBackgroundLocationAuthorization
                     )
                 } label: {
-                    Label("后台任务与恢复", systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90")
+                    SettingsLinkLabel(title: "后台任务与恢复", systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90", tint: .orange)
                 }
                 .accessibilityIdentifier("settings-background-tasks")
                 LabeledContent("当前状态", value: backgroundStatusLabel)
                 LabeledContent("活动任务", value: "\(model.backgroundSystemProjection.activeRunCount) 个")
-            }
+            } header: { Label("后台", systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90") }
 
-            Section("工具与插件") {
+            Section {
                 NavigationLink {
                     AgentProviderBundlesView()
                 } label: {
-                    Label("Agent 编排 Bundle", systemImage: "arrow.triangle.branch")
+                    SettingsLinkLabel(title: "Agent 编排 Bundle", systemImage: "arrow.triangle.branch", tint: .indigo)
                 }
                 NavigationLink {
                     PhonePermissionsView()
                 } label: {
-                    Label("手机权限", systemImage: "hand.raised")
+                    SettingsLinkLabel(title: "手机权限", systemImage: "hand.raised", tint: .green)
                 }
                 .accessibilityIdentifier("settings-phone-permissions")
                 NavigationLink {
                     PluginManagementView()
                 } label: {
-                    Label("Cordis 插件", systemImage: "puzzlepiece.extension")
+                    SettingsLinkLabel(title: "Cordis 插件", systemImage: "puzzlepiece.extension", tint: .purple)
                 }
                 NavigationLink {
                     ToolApprovalSettingsView()
                 } label: {
                     HStack {
-                        Label("工具授权", systemImage: "checkmark.shield")
+                        SettingsLinkLabel(title: "工具授权", systemImage: "checkmark.shield", tint: .teal)
                         Spacer()
                         Text("仅本次")
                             .foregroundStyle(.secondary)
                     }
                 }
                 LabeledContent("本机工具", value: "\(ProductionToolCatalog.approvedNames.count) 项")
-            }
+            } header: { Label("工具与插件", systemImage: "puzzlepiece.extension") }
 
-            Section("存储与同步") {
+            Section {
                 NavigationLink {
                     WorkspaceView()
                 } label: {
-                    Label("本机工作区", systemImage: "folder")
+                    SettingsLinkLabel(title: "本机工作区", systemImage: "folder", tint: .orange)
                 }
                 .accessibilityIdentifier("settings-workspace")
                 NavigationLink {
                     MemoryManagementView()
                 } label: {
-                    Label("记忆", systemImage: "brain")
+                    SettingsLinkLabel(title: "记忆", systemImage: "brain", tint: .purple)
                 }
                 .accessibilityIdentifier("settings-memory")
                 LabeledContent("会话存储", value: "本机持久化")
@@ -90,15 +90,29 @@ struct SettingsView: View {
                 Text("会话、轨迹和工作区文件保存在此 iPhone。当前版本不会把凭据或会话正文上传到同步服务。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                Button("清空当前会话", role: .destructive) {
+            } header: { Label("存储与同步", systemImage: "externaldrive") }
+
+            Section {
+                Button {
                     isResetConfirmationPresented = true
+                } label: {
+                    Label("清空当前会话", systemImage: "trash")
                 }
-                Button("重置全部模型连接", role: .destructive) {
+                .foregroundStyle(.red)
+
+                Button {
                     isRemoveConfirmationPresented = true
+                } label: {
+                    Label("重置全部模型连接", systemImage: "arrow.counterclockwise")
                 }
+                .foregroundStyle(.red)
+            } header: {
+                Label("危险操作", systemImage: "exclamationmark.triangle")
+            } footer: {
+                Text("这些操作只影响本机配置或当前会话；工作区文件不会被删除。")
             }
 
-            Section("隐私与诊断") {
+            Section {
                 DisclosureGroup("执行边界") {
                     LabeledContent("模型推理", value: "你配置的 API")
                     LabeledContent("Agent Loop", value: "本机")
@@ -112,7 +126,7 @@ struct SettingsView: View {
                 NavigationLink {
                     DiagnosticLogView()
                 } label: {
-                    Label("详细日志", systemImage: "doc.text.magnifyingglass")
+                    SettingsLinkLabel(title: "详细日志", systemImage: "doc.text.magnifyingglass", tint: .gray)
                 }
                 .accessibilityIdentifier("settings-diagnostics")
                 if let usage = model.latestUsage {
@@ -121,9 +135,11 @@ struct SettingsView: View {
                 Text("诊断导出会在本机先脱敏；默认不包含 API Key、Authorization、命令正文或模型提示词。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-            }
+            } header: { Label("隐私与诊断", systemImage: "checkmark.shield") }
         }
         .harnessCompactListChrome()
+        .scrollContentBackground(.hidden)
+        .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle("设置")
         .confirmationDialog(
             "清空当前会话？",
@@ -177,6 +193,22 @@ struct SettingsView: View {
     }
 }
 
+private struct SettingsLinkLabel: View {
+    let title: String
+    let systemImage: String
+    let tint: Color
+
+    var body: some View {
+        HStack(spacing: 11) {
+            HarnessIconTile(systemImage: systemImage, tint: tint, size: 30)
+            Text(title)
+                .foregroundStyle(.primary)
+            Spacer(minLength: 8)
+        }
+        .contentShape(Rectangle())
+    }
+}
+
 private struct DiagnosticLogView: View {
     @Environment(AppModel.self) private var model
 
@@ -191,14 +223,16 @@ private struct DiagnosticLogView: View {
         @Bindable var preferences = model.backgroundPreferences
 
         Form {
-            Section("当前运行") {
+            Section {
                 LabeledContent("Agent", value: model.isRunning ? "运行中" : "空闲")
                 LabeledContent("当前步骤", value: "\(model.currentStep)")
                 LabeledContent("会话轨迹", value: "\(model.trajectoryEvents.count) 条")
                 LabeledContent("Harness Trace", value: "\(model.harnessTraceEvents.count) 条")
+            } header: {
+                Label("当前运行", systemImage: "waveform.path.ecg")
             }
 
-            Section("Cordis Host") {
+            Section {
                 Text(model.diagnosticHostStateDescription)
                     .font(.footnote)
                     .textSelection(.enabled)
@@ -240,6 +274,8 @@ private struct DiagnosticLogView: View {
                         .foregroundStyle(.red)
                         .textSelection(.enabled)
                 }
+            } header: {
+                Label("Cordis Host", systemImage: "terminal")
             }
 
             Section {
@@ -288,6 +324,7 @@ private struct DiagnosticLogView: View {
                 }
             }
         }
+        .harnessCompactListChrome()
         .navigationTitle("详细日志")
         .navigationBarTitleDisplayMode(.inline)
         .fileExporter(
@@ -365,6 +402,7 @@ private struct ToolApprovalSettingsView: View {
                 }
             }
         }
+        .harnessCompactListChrome()
         .navigationTitle("工具授权")
         .confirmationDialog(
             "撤销全部工具授权？",
@@ -386,9 +424,11 @@ private struct ToolApprovalGrantRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: grant.scope.risk.systemImage)
-                .foregroundStyle(grant.scope.risk.tint)
-                .accessibilityHidden(true)
+            HarnessIconTile(
+                systemImage: grant.scope.risk.systemImage,
+                tint: grant.scope.risk.tint,
+                size: 30
+            )
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(grant.scope.toolName)
@@ -412,6 +452,7 @@ private struct ToolApprovalGrantRow: View {
                 Image(systemName: "trash")
             }
             .buttonStyle(.borderless)
+            .frame(minWidth: 44, minHeight: 44)
             .accessibilityLabel("撤销 \(grant.scope.toolName) 授权")
         }
         .accessibilityElement(children: .contain)
