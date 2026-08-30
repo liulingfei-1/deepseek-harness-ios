@@ -12,11 +12,11 @@ struct PluginManagementView: View {
                     installedCount: model.pluginSnapshots.count,
                     activeCount: activePluginCount,
                     hostCount: model.ishPluginHostInventory.count,
-                    contributionSummary: "工具 \(model.pluginToolContributions.count) · Prompt \(model.pluginPromptContributions.count) · Client \(model.ishNativeClientPlugins.count)"
+                    contributionSummary: "工具 \(model.pluginToolContributions.count) · 提示词 \(model.pluginPromptContributions.count) · 客户端 \(model.ishNativeClientPlugins.count)"
                 )
                 .accessibilityIdentifier("plugin-runtime-summary")
             } header: {
-                Label("Cordis Runtime", systemImage: "cpu")
+                Label("Cordis 运行时", systemImage: "cpu")
             } footer: {
                 Text("原生插件可热启停和回滚；社区 JavaScript 插件由手机内 iSH Host 承载。")
             }

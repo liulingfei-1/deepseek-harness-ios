@@ -104,3 +104,8 @@
 
 - 问题：页面分区标题仍使用 `Provider Profiles`，与中文导航和字段标签不一致。
 - 调整：改为“服务商配置”显示文案；provider ID、API Key、协议和路由保持不变。
+
+## 插件管理摘要复核（本轮）
+
+- 问题：运行时摘要使用 `Prompt / Client / Cordis Runtime` 英文标签，与中文页面主体不一致。
+- 调整：改为“提示词 / 客户端 / Cordis 运行时”；插件 ID、Host、Package 和运行状态值保持原样。
