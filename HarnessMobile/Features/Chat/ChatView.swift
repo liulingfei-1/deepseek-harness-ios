@@ -1365,7 +1365,7 @@ private struct JobsPanelView: View {
                             )
                         }
                     }
-                    .listStyle(.insetGrouped)
+                    .harnessCompactListChrome()
                 }
             }
             .safeAreaInset(edge: .top) {
