@@ -9,12 +9,12 @@ struct NativeClientContributionsView: View {
             if let plugin {
                 List {
                     Section {
-                        LabeledContent("Scope", value: plugin.scope.rawValue)
+                        LabeledContent("作用域", value: plugin.scope.rawValue)
                         LabeledContent(
-                            "Activation",
+                            "激活代次",
                             value: plugin.activationGeneration.formatted()
                         )
-                        LabeledContent("Digest", value: String(plugin.sourceDigest.prefix(12)))
+                        LabeledContent("源码摘要", value: String(plugin.sourceDigest.prefix(12)))
                             .font(.body.monospaced())
                         HarnessStatusPill(
                             title: "第 \(plugin.activationGeneration.formatted()) 代",
@@ -22,7 +22,7 @@ struct NativeClientContributionsView: View {
                             tint: .accentColor
                         )
                     } header: {
-                        Label("Native Client", systemImage: "puzzlepiece.extension")
+                        Label("原生客户端", systemImage: "puzzlepiece.extension")
                     }
 
                     ForEach(plugin.contributions.inspectors) { inspector in
@@ -56,7 +56,7 @@ struct NativeClientContributionsView: View {
                                 )
                             }
                         } header: {
-                            Label("Settings", systemImage: "slider.horizontal.3")
+                            Label("设置", systemImage: "slider.horizontal.3")
                         }
                     }
 
@@ -86,7 +86,7 @@ struct NativeClientContributionsView: View {
                                 )
                             }
                         } header: {
-                            Label("Commands", systemImage: "terminal")
+                            Label("命令", systemImage: "terminal")
                         }
                     }
                 }
