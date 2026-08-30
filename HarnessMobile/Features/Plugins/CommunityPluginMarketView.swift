@@ -900,7 +900,7 @@ private struct CommunityInstalledPluginDetailView: View {
                             } label: {
                                 Label {
                                     VStack(alignment: .leading, spacing: 3) {
-                                        Text("Native Client")
+                                        Text("原生客户端")
                                         Text(
                                             "\(nativeClient.contributions.inspectors.count) inspectors · "
                                                 + "\(nativeClient.contributions.settings.count) settings · "

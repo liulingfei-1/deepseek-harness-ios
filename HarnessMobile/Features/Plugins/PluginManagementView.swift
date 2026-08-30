@@ -99,7 +99,7 @@ struct PluginManagementView: View {
                     Button {
                         presentedSheet = .experimentalPrompt
                     } label: {
-                        Label("Prompt 插件", systemImage: "text.badge.plus")
+                        Label("提示词插件", systemImage: "text.badge.plus")
                     }
                     Button {
                         presentedSheet = .ishHostPlugin
@@ -678,7 +678,7 @@ private struct PluginDetailView: View {
                                     value: contribution.kind.rawValue
                                 )
                             }
-                        } header: { Label("Prompt", systemImage: "text.quote") }
+                        } header: { Label("提示词", systemImage: "text.quote") }
                     }
 
                     if let error = snapshot.error {
@@ -753,7 +753,7 @@ private struct ExperimentalPromptPluginSheet: View {
                 } header: {
                     Label("内存插件", systemImage: "text.badge.plus")
                 } footer: {
-                    Text("插件只存在于当前 App 进程，重启后消失；启用后会在下一步请求中加入 Prompt。")
+                    Text("插件只存在于当前 App 进程，重启后消失；启用后会在下一步请求中加入提示词。")
                 }
             }
             .navigationTitle("实验插件")

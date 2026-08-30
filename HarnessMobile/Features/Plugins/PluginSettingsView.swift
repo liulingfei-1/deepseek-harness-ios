@@ -29,7 +29,7 @@ struct PluginSettingsView: View {
                         )
                     }
                 } header: {
-                    Label("Settings Provider", systemImage: "slider.horizontal.3")
+                    Label("设置提供方", systemImage: "slider.horizontal.3")
                 }
 
                 if filteredNamespaces.isEmpty {
@@ -38,7 +38,7 @@ struct PluginSettingsView: View {
                         systemImage: "slider.horizontal.3",
                         description: Text(
                             query.isEmpty
-                                ? "启用注册 Settings namespace 的 Host 插件后会显示在这里。"
+                                ? "启用注册设置命名空间的 Host 插件后会显示在这里。"
                                 : "尝试搜索其他 namespace。"
                         )
                     )
@@ -57,7 +57,7 @@ struct PluginSettingsView: View {
                 }
             } else {
                 ContentUnavailableView {
-                    Label("Settings Host 未就绪", systemImage: "terminal")
+                    Label("设置 Host 未就绪", systemImage: "terminal")
                 } description: {
                     Text("启动本机 iSH Cordis Host 后可读取插件设置。")
                 } actions: {
