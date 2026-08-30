@@ -17,11 +17,13 @@
 - 将活动会话分区标题改为“项目”，归档筛选仍显示归档内容。
 - 复用现有 `ConversationSessionSummary.title` 作为项目名称，不新增 Project 抽象或持久化迁移。
 - 使用 `List.safeAreaInset(edge: .bottom)` 放置“新建会话”按钮，避免遮挡项目行。
+- 搜索改为系统自动展开，默认状态保留可发现的搜索入口但不强制占用首屏高度。
 
 ## 模拟器证据
 
 - 设备：`Harness UI Audit`（`C87C4D99-A29A-45EE-9214-5FDB7D1F6EAD`）
 - 首页截图：`/tmp/harness-ui-home-projects.png`
+- 搜索收口后截图：`/tmp/harness-home-projects-search-collapsed.png`
 - 调整前遮挡证据：`/tmp/harness-ui-chat-error-cold2.png`
 - 构建：arm64 iOS Simulator build succeeded（`/tmp/hm-ui-derived`）
 
