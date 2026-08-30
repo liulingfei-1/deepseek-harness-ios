@@ -109,3 +109,28 @@
 
 - 问题：运行时摘要使用 `Prompt / Client / Cordis Runtime` 英文标签，与中文页面主体不一致。
 - 调整：改为“提示词 / 客户端 / Cordis 运行时”；插件 ID、Host、Package 和运行状态值保持原样。
+
+## 全界面覆盖清单（截至本轮）
+
+| 界面 | 已检查内容 | 状态 |
+| --- | --- | --- |
+| 首页 / 项目列表 | 项目优先、搜索、新建会话、工具与设置入口 | DONE |
+| 聊天页 | 会话标题、输入栏、会话选项、轨迹切换、工作状态 Dock | VERIFY |
+| 模型选择 | 搜索、选中态、空结果 | VERIFY |
+| 工具总览 | 工作区、终端、任务/轨迹、插件、设置路由 | DONE |
+| Console | 任务 / 轨迹分段，移除重复插件入口 | DONE |
+| Work State | 目标、计划、待办、恢复和错误状态 | DONE |
+| Workspace | 挂载目录、文件列表、空态动作 | DONE |
+| iSH 终端 | 模式切换、状态卡、命令空态、底部输入栏 | DONE |
+| 轨迹 | 统计、Trace、Duration/Turns/Calls、搜索与折叠 | VERIFY |
+| 插件管理 | 运行时摘要、Host、插件库存和搜索 | DONE |
+| 原生客户端详情 | 分区标签、命令与设置入口 | DONE |
+| 社区插件市场 | 市场/已安装、搜索、目录行和操作菜单 | DONE |
+| 插件设置 | Host 状态、namespace 列表、编辑器和冲突态 | VERIFY |
+| 服务商配置 | Profile 列表、添加、模型行为和凭据状态 | DONE |
+| Setup / Onboarding | 服务商、连接、模型、保存开始 | VERIFY |
+| 后台任务设置 | 执行、定位、Live Activity、通知、隐私 | VERIFY |
+| 手机权限 | 权限分组、状态刷新和 iOS 设置入口 | VERIFY |
+| 记忆管理 | 当前会话开关、记忆列表、导出和删除 | VERIFY |
+
+`DONE` 表示已有代码调整并通过构建或专项证据；`VERIFY` 表示已检查结构但仍缺少完整的深色、极限 Dynamic Type、横屏、VoiceOver 或真机截图证据。当前未将 `VERIFY` 页面冒充为完成。
