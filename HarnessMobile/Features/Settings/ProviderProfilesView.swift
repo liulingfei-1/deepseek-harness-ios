@@ -74,7 +74,7 @@ struct ProviderProfilesView: View {
                     }
                 }
             } header: {
-                Label("Provider Profiles", systemImage: "server.rack")
+                Label("服务商配置", systemImage: "server.rack")
             } footer: {
                 Text("默认 Profile 用于新请求；当前正在运行的请求不会在中途切换。API Key 只保存在各自的本机 Keychain 项中。")
             }
