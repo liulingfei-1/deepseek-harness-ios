@@ -15,7 +15,7 @@ struct ConsoleView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .background(HarnessTheme.surface)
-            .accessibilityHint("在任务、插件和轨迹之间切换")
+            .accessibilityHint("在任务和轨迹之间切换")
 
             Divider()
 
@@ -23,8 +23,6 @@ struct ConsoleView: View {
                 switch selection {
                 case .tasks:
                     WorkStateView()
-                case .plugins:
-                    PluginManagementView()
                 case .trajectory:
                     TrajectoryView()
                 }
@@ -39,7 +37,6 @@ struct ConsoleView: View {
 
 private enum ConsoleSection: String, CaseIterable, Identifiable {
     case tasks
-    case plugins
     case trajectory
 
     var id: String { rawValue }
@@ -47,7 +44,6 @@ private enum ConsoleSection: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .tasks: "任务"
-        case .plugins: "插件"
         case .trajectory: "轨迹"
         }
     }
@@ -55,7 +51,6 @@ private enum ConsoleSection: String, CaseIterable, Identifiable {
     var navigationTitle: String {
         switch self {
         case .tasks: "任务状态"
-        case .plugins: "插件"
         case .trajectory: "轨迹"
         }
     }
@@ -63,7 +58,6 @@ private enum ConsoleSection: String, CaseIterable, Identifiable {
     var systemImage: String {
         switch self {
         case .tasks: "checklist"
-        case .plugins: "puzzlepiece.extension"
         case .trajectory: "point.3.connected.trianglepath.dotted"
         }
     }

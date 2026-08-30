@@ -71,3 +71,11 @@
 - 构建：arm64 iOS Simulator build succeeded（`/tmp/hm-workspace-ui-2`）。
 - 专项 UI 测试命令：`HarnessMobileWorkspaceHierarchyUITests/testWorkspaceRootExposesFilesMountsAndSessionStateFromHome`；测试启动阶段因环境报错 `xcrun: error: unable to find utility "simctl", not a developer tool or in PATH`，结果为失败，不能据此判断 Workspace 交互回归。
 - 当前状态：代码改造完成，布局截图需在 UI 自动化桥接恢复后重新采集；深色、Dynamic Type 极限字号、横屏、VoiceOver 和真机仍为 `VERIFY`。
+
+## 工具总览与 Console 复核（本轮）
+
+- 工具总览现状：工作区、终端、任务/轨迹、插件和设置均作为同级行展示；设置与插件仍保留独立入口，避免从首页或项目列表回流管理信息。
+- Console 问题：原控制台同时放入“任务”“插件”“轨迹”；插件管理与工具总览已有独立入口，重复出现会增加选择成本。
+- 调整：删除 Console 内置插件分段，仅保留“任务”和“轨迹”；复用原有 `Picker`、导航路由和插件管理页面，不新增抽象。
+- 视觉目标：控制台只承担运行观察职责，工具与插件管理回到工具总览的独立路径。
+- 当前状态：代码改造完成，深色、Dynamic Type 极限字号、横屏、VoiceOver 和真机仍为 `VERIFY`。
