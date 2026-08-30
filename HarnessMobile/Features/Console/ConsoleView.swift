@@ -14,7 +14,8 @@ struct ConsoleView: View {
             .pickerStyle(.segmented)
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .background(Color(uiColor: .secondarySystemBackground))
+            .background(HarnessTheme.surface)
+            .accessibilityHint("在任务、插件和轨迹之间切换")
 
             Divider()
 
@@ -30,6 +31,7 @@ struct ConsoleView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .background(HarnessTheme.pageBackground)
         .navigationTitle(selection.navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
     }

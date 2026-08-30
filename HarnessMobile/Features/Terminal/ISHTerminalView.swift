@@ -239,6 +239,7 @@ struct ISHTerminalView: View {
             .pickerStyle(.segmented)
             .padding(.horizontal)
             .padding(.vertical, 8)
+            .background(HarnessTheme.surface)
             .accessibilityIdentifier("ish-terminal-mode-picker")
 
             switch mode {
@@ -305,6 +306,7 @@ private struct ISHCommandConsoleView: View {
                     terminal.clearCompleted()
                 } label: {
                     Label("清除已完成记录", systemImage: "trash")
+                        .frame(minWidth: 44, minHeight: 44)
                 }
                 .disabled(terminal.records.allSatisfy { record in
                     if case .running = record.state { return true }
@@ -329,8 +331,7 @@ private struct ISHCommandConsoleView: View {
                 .font(.body.monospaced())
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
-                .background(Color(uiColor: .secondarySystemBackground))
-                .clipShape(.rect(cornerRadius: 8))
+                .background(HarnessTheme.surface, in: RoundedRectangle(cornerRadius: HarnessTheme.Radius.medium, style: .continuous))
                 .submitLabel(.send)
                 .onSubmit(runCommand)
 
@@ -358,8 +359,9 @@ private struct ISHCommandConsoleView: View {
             }
         }
         .padding(.horizontal)
-        .padding(.vertical, 8)
-        .background(.regularMaterial)
+        .padding(.vertical, HarnessTheme.Spacing.small)
+        .harnessFloatingSurface(radius: HarnessTheme.Radius.medium)
+        .padding(.horizontal, HarnessTheme.Spacing.small)
     }
 
     private var canRun: Bool {
@@ -415,9 +417,8 @@ private struct ISHSandboxStatusView: View {
             }
         }
         .font(.callout)
-        .padding(12)
-        .background(Color(uiColor: .secondarySystemBackground))
-        .clipShape(.rect(cornerRadius: 8))
+        .padding(HarnessTheme.Spacing.medium)
+        .harnessCardSurface(padding: 0, radius: HarnessTheme.Radius.medium)
     }
 }
 
@@ -448,9 +449,8 @@ private struct ISHConsoleRecordView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(12)
-        .background(Color(uiColor: .secondarySystemBackground))
-        .clipShape(.rect(cornerRadius: 8))
+        .padding(HarnessTheme.Spacing.medium)
+        .harnessCardSurface(padding: 0, radius: HarnessTheme.Radius.medium)
         .accessibilityElement(children: .contain)
     }
 

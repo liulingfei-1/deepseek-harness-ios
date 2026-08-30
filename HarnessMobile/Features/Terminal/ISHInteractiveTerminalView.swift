@@ -217,6 +217,7 @@ struct ISHInteractiveTerminalView: View {
                     terminal.clearScreen()
                 } label: {
                     Label("清屏", systemImage: "paintbrush")
+                        .frame(minWidth: 44, minHeight: 44)
                 }
                 .disabled(terminal.state != .ready)
                 .accessibilityIdentifier("ish-terminal-clear")
@@ -275,8 +276,7 @@ struct ISHInteractiveTerminalView: View {
             EmptyView()
         case let .failed(message):
             VStack(spacing: 12) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
+                HarnessIconTile(systemImage: "exclamationmark.triangle.fill", tint: .orange, size: 40)
                 Text(message)
                     .foregroundStyle(.white)
                     .multilineTextAlignment(.center)
@@ -317,13 +317,15 @@ private struct ISHInteractiveEnvironmentView: View {
 
     var body: some View {
         Form {
-            Section("运行环境") {
-                LabeledContent("系统", value: "Alpine Linux ARM64")
-                LabeledContent("工作目录", value: "/workspace")
-                LabeledContent("执行位置", value: "本机 iSH")
+            Section {
+                environmentRow("cpu", "系统", "Alpine Linux ARM64", .black)
+                environmentRow("folder", "工作目录", "/workspace", .blue)
+                environmentRow("iphone", "执行位置", "本机 iSH", .orange)
+            } header: {
+                Label("运行环境", systemImage: "terminal")
             }
 
-            Section("网络") {
+            Section {
                 Toggle(
                     "允许 Linux 命令联网",
                     isOn: Binding(
@@ -334,8 +336,11 @@ private struct ISHInteractiveEnvironmentView: View {
                 Text("模型 API 由原生网络层访问，不受这个开关影响。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+            } header: {
+                Label("网络", systemImage: "network")
             }
         }
+        .harnessCompactListChrome()
         .navigationTitle("iSH 环境")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -344,6 +349,34 @@ private struct ISHInteractiveEnvironmentView: View {
                     dismiss()
                 }
             }
+        }
+    }
+
+    private func environmentRow(
+        _ systemImage: String,
+        _ title: String,
+        _ value: String,
+        _ tint: Color
+    ) -> some View {
+        HStack(spacing: HarnessTheme.Spacing.medium) {
+            HarnessIconTile(systemImage: systemImage, tint: tint, size: 30)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: HarnessTheme.Spacing.small) {
+                    Text(title)
+                    Spacer(minLength: 8)
+                    Text(value)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                    Text(value)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }

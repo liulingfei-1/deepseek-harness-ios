@@ -66,15 +66,7 @@ private struct ConversationGoalBar: View {
             }
         }
         .frame(minHeight: 36)
-        .padding(.horizontal, 8)
-        .background(
-            Color(uiColor: .secondarySystemBackground),
-            in: RoundedRectangle(cornerRadius: 8)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(.quaternary, lineWidth: 0.5)
-        }
+        .harnessCardSurface(padding: 8, radius: HarnessTheme.Radius.small)
         .confirmationDialog(
             "清空当前目标？",
             isPresented: $isClearConfirmationPresented,
@@ -93,10 +85,7 @@ private struct ConversationGoalBar: View {
 
     private var summaryRow: some View {
         HStack(spacing: 7) {
-            Image(systemName: "scope")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
+            HarnessIconTile(systemImage: "scope", tint: .secondary, size: 28)
 
             Text(goal.status.title)
                 .font(.caption.weight(.semibold))
@@ -122,7 +111,7 @@ private struct ConversationGoalBar: View {
                     isEditFocused = true
                 } label: {
                     Image(systemName: "pencil")
-                        .frame(width: 28, height: 28)
+                        .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("编辑目标")
@@ -141,7 +130,7 @@ private struct ConversationGoalBar: View {
                 perform(.pause)
             } label: {
                 Image(systemName: "pause")
-                    .frame(width: 28, height: 28)
+                    .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("暂停目标")
@@ -151,7 +140,7 @@ private struct ConversationGoalBar: View {
                 perform(.resume)
             } label: {
                 Image(systemName: "play.fill")
-                    .frame(width: 28, height: 28)
+                    .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("恢复目标")
@@ -161,7 +150,7 @@ private struct ConversationGoalBar: View {
                 perform(.transition(to: .active))
             } label: {
                 Image(systemName: "play.fill")
-                    .frame(width: 28, height: 28)
+                    .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("开始目标")
@@ -192,7 +181,7 @@ private struct ConversationGoalBar: View {
             }
         } label: {
             Image(systemName: "ellipsis")
-                .frame(width: 28, height: 28)
+                .frame(width: 44, height: 44)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("更多目标操作")
@@ -217,7 +206,7 @@ private struct ConversationGoalBar: View {
             } else {
                 Button(action: saveEdit) {
                     Image(systemName: "checkmark")
-                        .frame(width: 28, height: 28)
+                        .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
                 .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -228,7 +217,7 @@ private struct ConversationGoalBar: View {
                     isEditing = false
                 } label: {
                     Image(systemName: "xmark")
-                        .frame(width: 28, height: 28)
+                        .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("取消编辑目标")
@@ -281,9 +270,7 @@ private struct ConversationTodoPanel: View {
                 }
             } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: "checklist")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                    HarnessIconTile(systemImage: "checklist", tint: .secondary, size: 28)
 
                     Text("待办")
                         .font(.caption.weight(.semibold))
@@ -336,16 +323,7 @@ private struct ConversationTodoPanel: View {
                 .frame(maxHeight: listMaximumHeight)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(
-            Color(uiColor: .secondarySystemBackground),
-            in: RoundedRectangle(cornerRadius: 8)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(.quaternary, lineWidth: 0.5)
-        }
+        .harnessCardSurface(padding: 10, radius: HarnessTheme.Radius.small)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("conversation-todo-panel")
     }

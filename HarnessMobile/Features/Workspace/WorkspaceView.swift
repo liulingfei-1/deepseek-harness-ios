@@ -22,7 +22,7 @@ struct WorkspaceView: View {
                 onRemove: requestRemoval
             )
 
-            Section("文件") {
+            Section {
                 if model.workspaceFiles.isEmpty {
                     ContentUnavailableView(
                         "还没有文件",
@@ -36,7 +36,7 @@ struct WorkspaceView: View {
                         )
                     }
                 }
-            }
+            } header: { Label("文件", systemImage: "doc.text") }
         }
         .harnessCompactListChrome()
         .navigationTitle("工作区")
@@ -171,7 +171,7 @@ private struct WorkspaceMountsSection: View {
     let onRemove: (WorkspaceStore.MountSnapshot) -> Void
 
     var body: some View {
-        Section("挂载目录") {
+        Section {
             if mounts.isEmpty {
                 Label("未挂载外部文件夹", systemImage: "externaldrive")
                     .foregroundStyle(.secondary)
@@ -185,7 +185,7 @@ private struct WorkspaceMountsSection: View {
                     )
                 }
             }
-        }
+        } header: { Label("挂载目录", systemImage: "externaldrive") }
     }
 }
 
@@ -197,17 +197,19 @@ private struct WorkspaceMountRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: statusIcon)
-                .foregroundStyle(statusColor)
-                .frame(width: 28, height: 28)
+            HarnessIconTile(systemImage: statusIcon, tint: statusColor)
 
             VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text(mount.name)
-                        .lineLimit(1)
-                    Text(mount.effectiveWritable ? "读写" : "只读")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 6) {
+                        Text(mount.name).lineLimit(1)
+                        accessPill
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(mount.name)
+                            .fixedSize(horizontal: false, vertical: true)
+                        accessPill
+                    }
                 }
                 Text(mount.guestPath)
                     .font(.caption.monospaced())
@@ -239,7 +241,7 @@ private struct WorkspaceMountRow: View {
                 }
             } label: {
                 Image(systemName: "ellipsis.circle")
-                    .frame(width: 32, height: 32)
+                    .frame(width: 44, height: 44)
             }
             .accessibilityLabel("管理挂载 \(mount.name)")
         }
@@ -278,6 +280,14 @@ private struct WorkspaceMountRow: View {
             mount.failureMessage ?? "文件夹当前不可用"
         }
     }
+
+    private var accessPill: some View {
+        HarnessStatusPill(
+            title: mount.effectiveWritable ? "读写" : "只读",
+            systemImage: mount.effectiveWritable ? "lock.open" : "lock",
+            tint: mount.effectiveWritable ? .green : .secondary
+        )
+    }
 }
 
 private struct WorkspaceFileRow: View {
@@ -286,8 +296,10 @@ private struct WorkspaceFileRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: file.path.hasPrefix("mounts/") ? "doc.on.doc" : "doc.text")
-                .foregroundStyle(.secondary)
+            HarnessIconTile(
+                systemImage: file.path.hasPrefix("mounts/") ? "doc.on.doc" : "doc.text",
+                tint: .secondary
+            )
             VStack(alignment: .leading, spacing: 2) {
                 Text(file.path)
                     .lineLimit(2)
@@ -305,7 +317,7 @@ private struct WorkspaceFileRow: View {
                 Button("导出文件", systemImage: "square.and.arrow.up", action: onExport)
             } label: {
                 Image(systemName: "ellipsis.circle")
-                    .frame(width: 32, height: 32)
+                    .frame(width: 44, height: 44)
             }
             .accessibilityLabel("导出 \(file.path)")
         }

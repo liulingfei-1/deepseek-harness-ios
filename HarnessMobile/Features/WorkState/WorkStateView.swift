@@ -32,7 +32,7 @@ struct WorkStateView: View {
             }
 
             if let goal = model.workState.goal {
-                Section("目标") {
+                Section {
                     WorkStateGoalRow(
                         goal: goal,
                         onEdit: {
@@ -53,35 +53,35 @@ struct WorkStateView: View {
                             isClearGoalConfirmationPresented = true
                         }
                     )
-                }
+                } header: { Label("目标", systemImage: "scope") }
             } else {
-                Section("目标") {
+                Section {
                     Button {
                         goalEditor = GoalEditorRequest(mode: .create)
                     } label: {
                         Label("创建会话目标", systemImage: "scope")
                     }
-                }
+                } header: { Label("目标", systemImage: "scope") }
             }
 
             if !model.workState.plan.isEmpty {
-                Section("计划") {
+                Section {
                     ForEach(model.workState.plan) { step in
                         WorkStateItemRow(title: step.title, status: step.status)
                     }
-                }
+                } header: { Label("计划", systemImage: "list.bullet.clipboard") }
             }
 
             if !model.workState.todos.isEmpty {
-                Section("待办") {
+                Section {
                     ForEach(model.workState.todos) { item in
                         WorkStateItemRow(title: item.title, status: item.status)
                     }
-                }
+                } header: { Label("待办", systemImage: "checklist") }
             }
 
             if model.omittedContextMessages > 0 {
-                Section("上下文治理") {
+                Section {
                     Label {
                         Text(
                             "发送模型前已省略 \(model.omittedContextMessages) 条较早消息，并保留本地任务状态摘要。"
@@ -91,9 +91,10 @@ struct WorkStateView: View {
                     }
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                }
+                } header: { Label("上下文治理", systemImage: "internaldrive") }
             }
         }
+        .harnessCompactListChrome()
         .navigationTitle("任务状态")
         .sheet(item: $goalEditor) { request in
             GoalEditorSheet(request: request)
@@ -130,16 +131,16 @@ private struct WorkStateGoalRow: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Image(systemName: goal.status.systemImage)
-                .foregroundStyle(goal.status.tint)
-                .accessibilityHidden(true)
+            HarnessIconTile(systemImage: goal.status.systemImage, tint: goal.status.tint)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(goal.title)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(goal.status.title)
-                    .font(.caption)
-                    .foregroundStyle(goal.status.tint)
+                HarnessStatusPill(
+                    title: goal.status.title,
+                    systemImage: goal.status.systemImage,
+                    tint: goal.status.tint
+                )
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -169,7 +170,7 @@ private struct WorkStateGoalRow: View {
                 }
             } label: {
                 Image(systemName: "ellipsis.circle")
-                    .frame(width: 32, height: 32)
+                    .frame(width: 44, height: 44)
             }
             .accessibilityLabel("目标操作")
             .accessibilityIdentifier("work-state-goal-menu")
@@ -211,10 +212,12 @@ private struct GoalEditorSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("目标") {
+                Section {
                     TextField("希望完成的结果", text: $title, axis: .vertical)
                         .lineLimit(2...5)
                         .accessibilityIdentifier("goal-editor-field")
+                } header: {
+                    Label("目标", systemImage: "scope")
                 }
             }
             .navigationTitle(request.mode == .create ? "创建目标" : "编辑目标")
@@ -284,10 +287,17 @@ private struct CurrentRunSection: View {
     let activeToolStatus: String?
 
     var body: some View {
-        Section("当前执行") {
+        Section {
             HStack(spacing: 12) {
                 ProgressView()
-                LabeledContent("Agent 步骤", value: "\(step)")
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Agent 步骤")
+                    Text("第 \(step) 步")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                HarnessStatusPill(title: "运行中", systemImage: "bolt.fill", tint: .green)
             }
 
             if let activeToolStatus {
@@ -296,7 +306,7 @@ private struct CurrentRunSection: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-        }
+        } header: { Label("当前执行", systemImage: "arrow.trianglehead.2.clockwise.rotate.90") }
     }
 }
 
@@ -306,20 +316,17 @@ private struct WorkStateItemRow: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Image(systemName: status.systemImage)
-                .foregroundStyle(status.tint)
-                .accessibilityHidden(true)
+            HarnessIconTile(systemImage: status.systemImage, tint: status.tint, size: 28)
 
             Text(title)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Text(status.title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(status.tint)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(status.tint.opacity(0.12), in: Capsule())
+            HarnessStatusPill(
+                title: status.title,
+                systemImage: status.systemImage,
+                tint: status.tint
+            )
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(title)
@@ -333,7 +340,7 @@ private struct WorkStateErrorSection: View {
     let message: String
 
     var body: some View {
-        Section("执行失败") {
+        Section {
             Label(message, systemImage: "exclamationmark.triangle.fill")
                 .foregroundStyle(.red)
                 .fixedSize(horizontal: false, vertical: true)
@@ -341,6 +348,8 @@ private struct WorkStateErrorSection: View {
             Button("关闭") {
                 model.errorMessage = nil
             }
+        } header: {
+            Label("执行失败", systemImage: "exclamationmark.triangle")
         }
     }
 }

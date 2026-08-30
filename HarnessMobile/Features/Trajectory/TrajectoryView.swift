@@ -206,7 +206,7 @@ struct TrajectoryView: View {
                 .padding(.bottom, 18)
             }
             .scrollDismissesKeyboard(.interactively)
-            .background(Color(uiColor: .systemBackground))
+            .background(HarnessTheme.pageBackground)
             .refreshable {
                 await refreshNow()
             }
@@ -381,11 +381,12 @@ private struct HarnessTraceStrip: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 10) {
-                Image(systemName: failureCount == 0
-                    ? "point.3.connected.trianglepath.dotted"
-                    : "exclamationmark.triangle.fill")
-                    .foregroundStyle(failureCount == 0 ? .teal : .red)
-                    .frame(width: 24)
+                HarnessIconTile(
+                    systemImage: failureCount == 0
+                        ? "point.3.connected.trianglepath.dotted"
+                        : "exclamationmark.triangle.fill",
+                    tint: failureCount == 0 ? .teal : .red
+                )
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Harness Runtime")
@@ -405,7 +406,7 @@ private struct HarnessTraceStrip: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .background(Color(uiColor: .tertiarySystemBackground))
+        .background(HarnessTheme.secondarySurface)
         .accessibilityIdentifier("harness-trace-strip")
         .accessibilityLabel("Harness Runtime 轨迹")
         .accessibilityValue(detail)
@@ -428,15 +429,21 @@ private struct TrajectoryMetricsHeader: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            HStack(spacing: 0) {
-                TrajectoryPrimaryMetric(
-                    title: "Duration",
-                    value: TrajectoryFormat.duration(summary.durationMilliseconds)
-                )
-                Divider().frame(height: 36)
-                TrajectoryPrimaryMetric(title: "Turns", value: String(summary.turns))
-                Divider().frame(height: 36)
-                TrajectoryPrimaryMetric(title: "Calls", value: String(summary.calls))
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 0) {
+                    primaryMetrics
+                }
+
+                VStack(spacing: 8) {
+                    HStack(spacing: 0) {
+                        durationMetric
+                        Divider().frame(height: 36)
+                        TrajectoryPrimaryMetric(title: "Turns", value: String(summary.turns))
+                    }
+                    HStack(spacing: 0) {
+                        TrajectoryPrimaryMetric(title: "Calls", value: String(summary.calls))
+                    }
+                }
             }
 
             ScrollView(.horizontal) {
@@ -467,9 +474,26 @@ private struct TrajectoryMetricsHeader: View {
             .scrollIndicators(.hidden)
         }
         .padding(.vertical, 10)
-        .background(Color(uiColor: .secondarySystemBackground))
+        .background(HarnessTheme.surface)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("轨迹统计")
+    }
+
+    private var primaryMetrics: some View {
+        HStack(spacing: 0) {
+            durationMetric
+            Divider().frame(height: 36)
+            TrajectoryPrimaryMetric(title: "Turns", value: String(summary.turns))
+            Divider().frame(height: 36)
+            TrajectoryPrimaryMetric(title: "Calls", value: String(summary.calls))
+        }
+    }
+
+    private var durationMetric: some View {
+        TrajectoryPrimaryMetric(
+            title: "Duration",
+            value: TrajectoryFormat.duration(summary.durationMilliseconds)
+        )
     }
 }
 
@@ -690,9 +714,7 @@ private struct TrajectorySectionHeader: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 10) {
-                Image(systemName: systemImage)
-                    .foregroundStyle(tint)
-                    .frame(width: 18)
+                HarnessIconTile(systemImage: systemImage, tint: tint, size: 28)
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(title)
@@ -732,12 +754,7 @@ private struct TrajectoryEventRow: View {
 
         Button(action: action) {
             HStack(alignment: .top, spacing: 10) {
-                Image(systemName: presentation.systemImage)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(presentation.tint)
-                    .frame(width: 28, height: 28)
-                    .background(presentation.tint.opacity(0.10), in: .rect(cornerRadius: 6))
-                    .accessibilityHidden(true)
+                HarnessIconTile(systemImage: presentation.systemImage, tint: presentation.tint, size: 28)
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 7) {
@@ -929,7 +946,7 @@ private struct HarnessTraceInspectorView: View {
         NavigationStack {
             List {
                 if let summary {
-                    Section("运行") {
+                    Section {
                         LabeledContent("Duration", value: TrajectoryFormat.duration(summary.durationMilliseconds))
                         LabeledContent("Turns", value: String(summary.turns))
                         LabeledContent("Calls", value: String(summary.calls))
@@ -941,10 +958,12 @@ private struct HarnessTraceInspectorView: View {
                             "Cache",
                             value: summary.cacheHitRate.map(TrajectoryFormat.percent) ?? "—"
                         )
+                    } header: {
+                        Label("运行", systemImage: "chart.bar.xaxis")
                     }
                 }
 
-                Section("Harness 事件") {
+                Section {
                     if filteredEvents.isEmpty {
                         ContentUnavailableView.search(text: query)
                     } else {
@@ -957,6 +976,8 @@ private struct HarnessTraceInspectorView: View {
                             .buttonStyle(.plain)
                         }
                     }
+                } header: {
+                    Label("Harness 事件", systemImage: "point.3.connected.trianglepath.dotted")
                 }
             }
             .navigationTitle("Harness F12")
@@ -987,11 +1008,11 @@ private struct HarnessTraceEventRow: View {
     var body: some View {
         let presentation = HarnessTracePresentation(event: event)
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: presentation.systemImage)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(presentation.tint)
-                .frame(width: 28, height: 28)
-                .background(presentation.tint.opacity(0.10), in: .rect(cornerRadius: 6))
+            HarnessIconTile(
+                systemImage: presentation.systemImage,
+                tint: presentation.tint,
+                size: 32
+            )
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 7) {
@@ -1123,7 +1144,7 @@ private struct HarnessTraceEventInspectorView: View {
         let presentation = HarnessTracePresentation(event: event)
         NavigationStack {
             List {
-                Section("事件") {
+                Section {
                     LabeledContent("Sequence", value: String(event.sequence))
                     LabeledContent("Kind", value: event.kind.rawValue)
                     LabeledContent("Name", value: event.name ?? "—")
@@ -1145,10 +1166,12 @@ private struct HarnessTraceEventInspectorView: View {
                             Text(pluginID).font(.footnote.monospaced()).textSelection(.enabled)
                         }
                     }
+                } header: {
+                    Label("事件", systemImage: presentation.systemImage)
                 }
 
                 if !event.harnessHandlerDescriptions.isEmpty {
-                    Section("Handler chain") {
+                    Section {
                         ForEach(
                             Array(event.harnessHandlerDescriptions.enumerated()),
                             id: \.element
@@ -1159,41 +1182,49 @@ private struct HarnessTraceEventInspectorView: View {
                                     .textSelection(.enabled)
                             }
                         }
+                    } header: {
+                        Label("Handler chain", systemImage: "link")
                     }
                 }
 
                 if let input = event.attributes["input"] {
-                    Section("Input") {
+                    Section {
                         ScrollView(.horizontal) {
                             Text(input.displayText)
                                 .font(.footnote.monospaced())
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
+                    } header: {
+                        Label("Input", systemImage: "arrow.down.doc")
                     }
                 }
 
                 if let output = event.attributes["output"] {
-                    Section("Output") {
+                    Section {
                         ScrollView(.horizontal) {
                             Text(output.displayText)
                                 .font(.footnote.monospaced())
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
+                    } header: {
+                        Label("Output", systemImage: "arrow.up.doc")
                     }
                 }
 
                 if let error = event.error, !error.isEmpty {
-                    Section("Error") {
+                    Section {
                         Text(error)
                             .font(.footnote.monospaced())
                             .foregroundStyle(.red)
                             .textSelection(.enabled)
+                    } header: {
+                        Label("Error", systemImage: "exclamationmark.triangle")
                     }
                 }
 
-                Section("原始 JSON") {
+                Section {
                     if let formattedEvent {
                         ScrollView(.horizontal) {
                             Text(formattedEvent)
@@ -1204,6 +1235,8 @@ private struct HarnessTraceEventInspectorView: View {
                     } else {
                         ProgressView().controlSize(.small)
                     }
+                } header: {
+                    Label("原始 JSON", systemImage: "curlybraces.square")
                 }
             }
             .navigationTitle(presentation.kind)
@@ -1243,7 +1276,7 @@ private struct TrajectoryEventInspectorView: View {
 
         NavigationStack {
             List {
-                Section("事件") {
+                Section {
                     LabeledContent("Seq", value: String(event.seq))
                     LabeledContent("Type", value: event.type)
                     LabeledContent("Time") {
@@ -1260,11 +1293,13 @@ private struct TrajectoryEventInspectorView: View {
                                 .textSelection(.enabled)
                         }
                     }
+                } header: {
+                    Label("事件", systemImage: presentation.systemImage)
                 }
 
                 typedDetailSections
 
-                Section("原始 JSON") {
+                Section {
                     if let formattedEnvelope {
                         ScrollView(.horizontal) {
                             Text(formattedEnvelope)
@@ -1279,6 +1314,8 @@ private struct TrajectoryEventInspectorView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+                } header: {
+                    Label("原始 JSON", systemImage: "curlybraces.square")
                 }
             }
             .navigationTitle(presentation.kind)
@@ -1298,33 +1335,39 @@ private struct TrajectoryEventInspectorView: View {
     @ViewBuilder
     private var typedDetailSections: some View {
         if let header = event.requestHeaderData {
-            Section("Request header") {
+            Section {
                 LabeledContent("Reason", value: header.reason.rawValue)
                 if let formattedRequestHeader {
                     inspectorPayload(formattedRequestHeader)
                 }
+            } header: {
+                Label("Request header", systemImage: "arrow.up.doc")
             }
         }
 
         if event.type == SessionEventVocabulary.userMessage,
            let formattedUserMessage {
-            Section("User") {
+            Section {
                 inspectorPayload(formattedUserMessage)
+            } header: {
+                Label("User", systemImage: "person")
             }
         }
 
         if let context = event.requestContextData {
-            Section("Request context") {
+            Section {
                 LabeledContent("Provider", value: context.provider)
                 LabeledContent("Model", value: context.model)
                 if let contextWindow = context.contextWindow {
                     LabeledContent("Context window", value: TrajectoryFormat.count(contextWindow))
                 }
+            } header: {
+                Label("Request context", systemImage: "contextualmenu.and.cursorarrow")
             }
         }
 
         if let assistant = event.assistantMessageData {
-            Section("Assistant") {
+            Section {
                 LabeledContent("Turn", value: String(assistant.turn))
                 LabeledContent("Step", value: String(assistant.step))
                 if let usage = assistant.usage {
@@ -1333,17 +1376,21 @@ private struct TrajectoryEventInspectorView: View {
                 if let formattedAssistantMessage {
                     inspectorPayload(formattedAssistantMessage)
                 }
+            } header: {
+                Label("Assistant", systemImage: "sparkles")
             }
         }
 
         if let usage = event.assistantChunkData?.usage {
-            Section("Usage") {
+            Section {
                 usageDetails(usage)
+            } header: {
+                Label("Usage", systemImage: "chart.bar")
             }
         }
 
         if let call = event.toolCallData {
-            Section("Tool call") {
+            Section {
                 LabeledContent("Name", value: call.name)
                 LabeledContent("Call ID") {
                     Text(call.callID)
@@ -1358,6 +1405,8 @@ private struct TrajectoryEventInspectorView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
+            } header: {
+                Label("Tool call", systemImage: "wrench.and.screwdriver")
             }
         }
 
