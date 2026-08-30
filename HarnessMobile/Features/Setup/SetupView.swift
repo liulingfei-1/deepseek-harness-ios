@@ -833,6 +833,7 @@ private struct ModelSelectionView: View {
             }
             .buttonStyle(.plain)
         }
+        .harnessCompactListChrome()
         .overlay {
             if filteredModels.isEmpty {
                 ContentUnavailableView.search(text: searchText)
