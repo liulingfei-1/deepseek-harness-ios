@@ -1,6 +1,6 @@
 # Harness Mobile 全界面审计与逐页改造计划
 
-> 状态：ACTIVE
+> 状态：BATCHED · 模拟器验证通过 · 真机/VoiceOver/深色大字保持 VERIFY
 > 建档：2026-08-29
 > 目标：以 OpenMinis 的 iOS 信息层级、语义色和轻量材质为参考，统一 Harness Mobile 的全部 SwiftUI 界面；不复制桌面布局，也不牺牲现有开发者能力。
 
