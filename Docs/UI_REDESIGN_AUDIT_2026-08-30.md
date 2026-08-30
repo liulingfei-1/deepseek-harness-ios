@@ -30,3 +30,11 @@
 ## 自动化与剩余边界
 
 本轮更新了首页无障碍与渐进披露测试，需在重新安装模拟器产物后执行相关 UI 测试。深色模式、Dynamic Type 极限字号、VoiceOver 朗读顺序、横屏和 iPhone 16 Pro 真机触控仍属于 `VERIFY`，不能用模拟器构建结果代替。
+
+## 用户选择与 Plan Review（本轮）
+
+- 普通选项卡原先混用默认系统背景，选中态只有浅色填充，边界不够清楚；现在复用 `HarnessTheme.surface` 和语义分隔线，选中态增加边界。
+- Plan Review 顶部改用共享表面，底部动作统一为中文“讨论计划 / 拒绝 / 批准”，保留原有按钮标识、回调和桌面动作集合。
+- 构建：arm64 iOS Simulator build succeeded（`/tmp/hm-user-question`）。
+- 专项测试：`HarnessMobilePlanReviewUITests/testPlanReviewPresentsAllDesktopActions` 1/1 通过（`/tmp/hm-user-question-tests/Logs/Test/Test-HarnessMobile-2026.08.30_16-57-17-+0800.xcresult`）。
+- 裸启动参数只能准备会话，必须由 UI 测试打开会话后才会出现 Plan Review；因此未把冷启动空白页截图冒充弹层证据。弹层深色、大字、横屏和真机触控仍为 `VERIFY`。

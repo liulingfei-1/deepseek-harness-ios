@@ -187,8 +187,17 @@ private struct GenericUserQuestionSheet: View {
                         .background(
                             isSelected(option.label, for: question)
                                 ? Color.accentColor.opacity(0.10)
-                                : Color(uiColor: .secondarySystemBackground)
+                                : HarnessTheme.surface
                         )
+                        .overlay {
+                            RoundedRectangle(cornerRadius: HarnessTheme.Radius.small, style: .continuous)
+                                .stroke(
+                                    isSelected(option.label, for: question)
+                                        ? Color.accentColor.opacity(0.35)
+                                        : HarnessTheme.separator,
+                                    lineWidth: 0.5
+                                )
+                        }
                         .clipShape(.rect(cornerRadius: 8))
                         .contentShape(.rect)
                     }
@@ -351,7 +360,7 @@ private struct PlanReviewSheet: View {
                 }
                 .padding(.horizontal, 20)
                 .frame(minHeight: 48)
-                .background(Color.accentColor.opacity(0.12))
+                .background(HarnessTheme.surface)
 
                 ScrollView {
                     NativeMarkdownText(source: review.plan)
@@ -395,7 +404,7 @@ private struct PlanReviewSheet: View {
         Button {
             model.cancelPendingUserQuestion()
         } label: {
-            Label("Chat about it", systemImage: "square.and.pencil")
+            Label("讨论计划", systemImage: "square.and.pencil")
                 .frame(maxWidth: fullWidth ? .infinity : nil)
         }
         .buttonStyle(.plain)
@@ -412,7 +421,7 @@ private struct PlanReviewSheet: View {
         Button {
             answer(with: decline.label)
         } label: {
-            Label("Refuse", systemImage: "xmark")
+            Label("拒绝", systemImage: "xmark")
                 .frame(maxWidth: fullWidth ? .infinity : nil)
         }
         .buttonStyle(.bordered)
@@ -425,7 +434,7 @@ private struct PlanReviewSheet: View {
         Button {
             answer(with: review.approve.label)
         } label: {
-            Label("Approve", systemImage: "checkmark")
+            Label("批准", systemImage: "checkmark")
                 .frame(maxWidth: fullWidth ? .infinity : nil)
         }
         .buttonStyle(.borderedProminent)
