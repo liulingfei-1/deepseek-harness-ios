@@ -227,6 +227,8 @@ private struct HarnessToolsView: View {
             }
         }
         .harnessCompactListChrome()
+        .scrollContentBackground(.hidden)
+        .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle("工具")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -246,8 +248,8 @@ private struct HarnessToolsView: View {
                 Image(systemName: systemImage)
                     .font(.body.weight(.semibold))
                     .foregroundStyle(tint)
-                    .frame(width: 34, height: 34)
-                    .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                    .frame(width: 38, height: 38)
+                    .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
@@ -263,6 +265,7 @@ private struct HarnessToolsView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)
             }
+            .padding(.vertical, 5)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

@@ -71,7 +71,12 @@ struct SessionsView: View {
                     }
                 }
             }
-            .contentMargins(.bottom, 76, for: .scrollContent)
+            // Leave room for the floating new-session control.  A fixed
+            // 76-point inset let the control cover the final session row at
+            // accessibility text sizes and on compact-height devices.
+            .contentMargins(.bottom, 132, for: .scrollContent)
+            .scrollContentBackground(.hidden)
+            .background(HarnessTheme.pageBackground)
 
             floatingControls
         }
@@ -254,11 +259,13 @@ struct SessionsView: View {
         _ title: String,
         sessions: [ConversationSessionSummary]
     ) -> some View {
-        Section(title) {
+        Section {
             ForEach(sessions) { session in
                 sessionRow(session)
-                    .padding(.leading, 12)
+                    .harnessCardListRow()
             }
+        } header: {
+            Label(title, systemImage: title == "已归档" ? "archivebox" : "bubble.left.and.bubble.right")
         }
     }
 
@@ -562,21 +569,57 @@ private struct HomeContinueSection: View {
     var body: some View {
         Section {
             Button(action: onContinue) {
-                Label(
-                    activeSession == nil ? "开始任务" : "继续当前任务",
-                    systemImage: activeSession == nil ? "play.fill" : "arrow.forward.circle.fill"
-                )
+                HStack(spacing: 12) {
+                    Image(systemName: activeSession == nil ? "play.fill" : "arrow.forward.circle.fill")
+                        .font(.body.weight(.bold))
+                        .frame(width: 44, height: 44)
+                        .background(.white.opacity(0.18), in: Circle())
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(activeSession == nil ? "开始任务" : "继续当前任务")
+                            .font(.body.weight(.semibold))
+                        Text(activeSession?.title ?? "创建一个新的本机会话")
+                            .font(.caption)
+                            .opacity(0.82)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
+                    Image(systemName: "arrow.right")
+                        .font(.caption.weight(.bold))
+                        .frame(width: 44, height: 44)
+                }
+                .foregroundStyle(.white)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, HarnessTheme.Spacing.large)
+                .padding(.vertical, HarnessTheme.Spacing.medium)
+                .background(Color.accentColor, in: RoundedRectangle(cornerRadius: HarnessTheme.Radius.card, style: .continuous))
             }
+            .buttonStyle(.plain)
+            .harnessCardListRow()
             .accessibilityIdentifier("home-continue-task")
 
             Button(action: onCreate) {
-                Label("新建会话", systemImage: "plus.bubble")
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 10) {
+                    HarnessIconTile(systemImage: "plus.bubble", tint: .accentColor, size: 28)
+                    Text("新建会话")
+                        .font(.body.weight(.medium))
+                    Spacer()
+                }
+                .foregroundStyle(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, HarnessTheme.Spacing.large)
+                .padding(.vertical, HarnessTheme.Spacing.medium)
+                .background(HarnessTheme.surface, in: RoundedRectangle(cornerRadius: HarnessTheme.Radius.card, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: HarnessTheme.Radius.card, style: .continuous)
+                        .stroke(HarnessTheme.separator, lineWidth: 0.5)
+                }
             }
+            .buttonStyle(.plain)
+            .harnessCardListRow()
             .accessibilityIdentifier("home-new-session")
         } header: {
-            Text("任务")
+            Label("任务", systemImage: "bolt.fill")
+                .foregroundStyle(.secondary)
         } footer: {
             if let activeSession, let status {
                 Text("当前：\(activeSession.title) · \(status.title)")
@@ -593,25 +636,58 @@ private struct BackgroundSystemStatusSection: View {
 
     var body: some View {
         Section {
-            HStack {
-                Label("后台任务", systemImage: "bolt.horizontal.circle")
-                Spacer()
-                Text("\(projection.activeRunCount) 个 · \(tierLabel)")
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-            if !projection.degradedReasons.isEmpty {
-                Text("降级：" + projection.degradedReasons.map(degradedLabel).sorted().joined(separator: "、"))
+            VStack(alignment: .leading, spacing: HarnessTheme.Spacing.medium) {
+                HStack(spacing: HarnessTheme.Spacing.medium) {
+                    HarnessIconTile(
+                        systemImage: "bolt.horizontal.circle.fill",
+                        tint: statusTint,
+                        size: 36
+                    )
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("后台任务")
+                            .font(.body.weight(.semibold))
+                        Text("\(projection.activeRunCount) 个活动任务")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                    Spacer(minLength: HarnessTheme.Spacing.small)
+                    HarnessStatusPill(
+                        title: tierLabel,
+                        systemImage: statusSystemImage,
+                        tint: statusTint
+                    )
+                }
+
+                if !projection.degradedReasons.isEmpty {
+                    Label(
+                        "降级：" + projection.degradedReasons.map(degradedLabel).sorted().joined(separator: "、"),
+                        systemImage: "exclamationmark.triangle.fill"
+                    )
                     .font(.footnote)
                     .foregroundStyle(.orange)
+                }
+
+                Divider()
+
+                Button(action: onOpenSettings) {
+                    HStack {
+                        Text("状态与恢复设置")
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("home-background-status")
             }
-            Button(action: onOpenSettings) {
-                Label("查看后台状态与恢复设置", systemImage: "arrow.up.forward.app")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .accessibilityIdentifier("home-background-status")
+            .harnessCardSurface(padding: HarnessTheme.Spacing.large)
+            .harnessCardListRow()
         } header: {
-            Text("系统状态")
+            Label("系统状态", systemImage: "waveform.path.ecg")
         } footer: {
             Text("这里汇总所有并行任务的真实状态；详细权限、通知和恢复设置在后台任务页。")
         }
@@ -625,6 +701,26 @@ private struct BackgroundSystemStatusSection: View {
         case .extendedAudio: "音频延展"
         case .extendedLocation: "定位延展"
         case .degraded: "降级"
+        }
+    }
+
+    private var statusTint: Color {
+        switch projection.survivalTier {
+        case .foreground: .secondary
+        case .finiteBackgroundTask: .blue
+        case .continuedProcessing, .extendedAudio, .extendedLocation: .green
+        case .degraded: .orange
+        }
+    }
+
+    private var statusSystemImage: String {
+        switch projection.survivalTier {
+        case .foreground: "iphone"
+        case .finiteBackgroundTask: "timer"
+        case .continuedProcessing: "bolt.fill"
+        case .extendedAudio: "speaker.wave.2.fill"
+        case .extendedLocation: "location.fill"
+        case .degraded: "exclamationmark.triangle.fill"
         }
     }
 
@@ -647,7 +743,7 @@ private struct WorkspaceHierarchySection: View {
     let onOpenWorkspace: () -> Void
 
     var body: some View {
-        Section("Workspace") {
+        Section {
             DisclosureGroup(isExpanded: $isExpanded) {
                 if let activeSessionTitle {
                     hierarchyRow(
@@ -697,10 +793,7 @@ private struct WorkspaceHierarchySection: View {
                 .accessibilityIdentifier("workspace-hierarchy-open")
             } label: {
                 HStack(spacing: 12) {
-                    Image(systemName: "folder.fill")
-                        .foregroundStyle(.orange)
-                        .frame(width: 38, height: 38)
-                        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
+                    HarnessIconTile(systemImage: "folder.fill", tint: .orange, size: 38)
                     VStack(alignment: .leading, spacing: 3) {
                         Text("/workspace")
                             .font(.body.weight(.semibold))
@@ -713,6 +806,8 @@ private struct WorkspaceHierarchySection: View {
                 }
                 .accessibilityIdentifier("workspace-hierarchy-root")
             }
+        } header: {
+            Label("Workspace", systemImage: "folder")
         }
     }
 
@@ -725,9 +820,7 @@ private struct WorkspaceHierarchySection: View {
         showsChevron: Bool = false
     ) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: systemImage)
-                .foregroundStyle(tint)
-                .frame(width: 24)
+            HarnessIconTile(systemImage: systemImage, tint: tint, size: 28)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .foregroundStyle(.primary)
@@ -932,11 +1025,7 @@ private struct SessionRow: View {
 
     var body: some View {
         HStack(spacing: 13) {
-            Image(systemName: status.leadingIcon)
-                .font(.body.weight(.semibold))
-                .foregroundStyle(status.color)
-                .frame(width: 38, height: 38)
-                .background(status.color.opacity(0.12), in: Circle())
+            HarnessIconTile(systemImage: status.leadingIcon, tint: status.color, size: 38)
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -964,9 +1053,12 @@ private struct SessionRow: View {
                         .lineLimit(2)
                 }
 
-                HStack(spacing: 6) {
-                    Label(status.title, systemImage: status.systemImage)
-                        .foregroundStyle(status.color)
+                HStack(spacing: HarnessTheme.Spacing.small) {
+                    HarnessStatusPill(
+                        title: status.title,
+                        systemImage: status.systemImage,
+                        tint: status.color
+                    )
                     Text("\(session.messageCount) 条消息")
                     if session.forkedFromSessionID != nil {
                         Text("·").accessibilityHidden(true)
@@ -974,7 +1066,7 @@ private struct SessionRow: View {
                             .labelStyle(.titleAndIcon)
                     }
                 }
-                .font(.caption2)
+                .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             }
@@ -986,6 +1078,18 @@ private struct SessionRow: View {
             }
         }
         .padding(.vertical, 6)
+        .padding(.horizontal, HarnessTheme.Spacing.medium)
+        .background(
+            status == .current ? Color.accentColor.opacity(0.10) : HarnessTheme.surface,
+            in: RoundedRectangle(cornerRadius: HarnessTheme.Radius.card, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: HarnessTheme.Radius.card, style: .continuous)
+                .stroke(
+                    status == .current ? Color.accentColor.opacity(0.24) : HarnessTheme.separator,
+                    lineWidth: 0.5
+                )
+        }
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(status == .current ? .isSelected : [])
@@ -998,7 +1102,7 @@ private struct SessionErrorSection: View {
     let message: String
 
     var body: some View {
-        Section("操作失败") {
+        Section {
             Label(message, systemImage: "exclamationmark.triangle.fill")
                 .foregroundStyle(.red)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1006,6 +1110,8 @@ private struct SessionErrorSection: View {
             Button("关闭") {
                 model.errorMessage = nil
             }
+        } header: {
+            Label("操作失败", systemImage: "exclamationmark.triangle")
         }
     }
 }
@@ -1044,10 +1150,12 @@ private struct RenameConversationSheet: View {
                 }
 
                 if let errorMessage = model.errorMessage {
-                    Section("无法重命名") {
+                    Section {
                         Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.red)
                             .fixedSize(horizontal: false, vertical: true)
+                    } header: {
+                        Label("无法重命名", systemImage: "pencil.slash")
                     }
                 }
             }

@@ -75,7 +75,7 @@ private struct GenericUserQuestionSheet: View {
                         move(to: index - 1)
                     } label: {
                         Image(systemName: "chevron.left")
-                            .frame(width: 30, height: 30)
+                            .frame(width: 44, height: 44)
                     }
                     .buttonStyle(.bordered)
                     .disabled(index == 0)
@@ -89,7 +89,7 @@ private struct GenericUserQuestionSheet: View {
                         move(to: index + 1)
                     } label: {
                         Image(systemName: "chevron.right")
-                            .frame(width: 30, height: 30)
+                            .frame(width: 44, height: 44)
                     }
                     .buttonStyle(.bordered)
                     .disabled(index == pending.request.questions.count - 1)
@@ -344,8 +344,7 @@ private struct PlanReviewSheet: View {
         NavigationStack {
             VStack(spacing: 0) {
                 HStack(spacing: 10) {
-                    Image(systemName: "doc.text.magnifyingglass")
-                        .foregroundStyle(.tint)
+                    HarnessIconTile(systemImage: "doc.text.magnifyingglass", tint: .accentColor, size: 28)
                     Text("Plan review")
                         .font(.headline)
                     Spacer(minLength: 0)

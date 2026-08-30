@@ -52,16 +52,20 @@ struct ChatInputBar: View {
             }
 
             if hasStagedImage {
-                Label("图片已就绪，可供本机 OCR 工具读取", systemImage: "text.viewfinder")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HarnessStatusPill(
+                    title: "图片已就绪，可供本机 OCR 工具读取",
+                    systemImage: "text.viewfinder",
+                    tint: .accentColor
+                )
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             if hasStagedFile {
-                Label("文件已就绪；将只发送类型、名称和大小说明", systemImage: "doc.badge.plus")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HarnessStatusPill(
+                    title: "文件已就绪；将只发送类型、名称和大小说明",
+                    systemImage: "doc.badge.plus",
+                    tint: .orange
+                )
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
@@ -76,17 +80,27 @@ struct ChatInputBar: View {
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel(submissionStatus ?? "正在准备请求")
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Color.accentColor.opacity(0.08), in: Capsule())
             }
 
             inputRow
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 8)
+        .padding(.horizontal, 10)
+        .padding(.top, 9)
         .padding(.bottom, 8)
-        .background(.bar)
-        .overlay(alignment: .top) {
-            Divider()
+        .background(
+            .regularMaterial,
+            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(.quaternary, lineWidth: 0.5)
         }
+        .shadow(color: .black.opacity(0.08), radius: 10, y: -2)
+        .padding(.horizontal, 8)
+        .padding(.bottom, 6)
     }
 
     private var inputRow: some View {
@@ -104,19 +118,31 @@ struct ChatInputBar: View {
                 Button(action: onPickFile) {
                     Label("选择 PDF、音频或视频", systemImage: "doc")
                 }
+
+                Button(action: onShowCommands) {
+                    Label("命令", systemImage: "slash.circle")
+                }
             } label: {
                 Image(systemName: "plus")
                     .font(.body.weight(.medium))
                     .frame(width: 44, height: 44)
+                    .background(Color(uiColor: .secondarySystemBackground), in: Circle())
             }
             .accessibilityLabel("添加内容")
 
+            // Commands are a high-frequency developer action. Keep them
+            // discoverable in the composer at large Dynamic Type and
+            // landscape sizes instead of hiding the only entry in the plus
+            // menu (which is not exposed as a visible control to VoiceOver).
             Button(action: onShowCommands) {
-                Text("/")
-                    .font(.title3.weight(.medium))
+                Image(systemName: "slash.circle")
+                    .font(.body.weight(.medium))
                     .frame(width: 44, height: 44)
+                    .background(Color(uiColor: .secondarySystemBackground), in: Circle())
             }
+            .buttonStyle(.plain)
             .accessibilityLabel("命令")
+            .accessibilityHint("打开开发者命令")
 
             TextField(
                 isRunning ? "输入后加入队列" : "输入任务",
@@ -129,10 +155,9 @@ struct ChatInputBar: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
             .frame(minHeight: 44)
-            .background(Color(uiColor: .secondarySystemBackground))
-            .clipShape(.rect(cornerRadius: 12))
+            .background(Color(uiColor: .secondarySystemBackground), in: .rect(cornerRadius: 14))
             .overlay {
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: 14)
                     .stroke(.quaternary, lineWidth: 0.5)
             }
             .submitLabel(.send)
@@ -147,6 +172,7 @@ struct ChatInputBar: View {
                 } label: {
                     Image(systemName: "arrow.triangle.branch")
                         .frame(width: 44, height: 44)
+                        .background(Color.orange.opacity(0.12), in: Circle())
                 }
                 .disabled(!hasDraft || isSubmitting)
                 .accessibilityLabel("作为 steer 发送")
@@ -216,8 +242,11 @@ private struct InputTriggerPalette: View {
                             onSelect(suggestion)
                         } label: {
                             HStack(spacing: 10) {
-                                Image(systemName: suggestion.systemImage ?? "terminal")
-                                    .frame(width: 22)
+                                HarnessIconTile(
+                                    systemImage: suggestion.systemImage ?? "terminal",
+                                    tint: .accentColor,
+                                    size: 28
+                                )
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(displayName(for: suggestion))
                                         .font(.body.monospaced())
@@ -239,6 +268,9 @@ private struct InputTriggerPalette: View {
             }
         }
         .frame(maxHeight: 280)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(Color(uiColor: .secondarySystemBackground), in: .rect(cornerRadius: 14))
         .accessibilityLabel("输入建议")
     }
 
@@ -396,6 +428,7 @@ private struct QueuedInputList: View {
                 .disabled(inputs.allSatisfy { $0.disposition == .steer })
                 .accessibilityLabel("将全部排队消息设为 steer")
             }
+            .foregroundStyle(.secondary)
 
             ForEach(inputs) { input in
                 HStack(spacing: 8) {
@@ -433,10 +466,15 @@ private struct QueuedInputList: View {
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
-                .background(Color(uiColor: .secondarySystemBackground))
-                .clipShape(.rect(cornerRadius: 8))
+                .background(.thinMaterial, in: .rect(cornerRadius: 11))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .stroke(.quaternary, lineWidth: 0.5)
+                }
             }
         }
+        .padding(8)
+        .background(Color(uiColor: .secondarySystemBackground).opacity(0.72), in: .rect(cornerRadius: 14))
     }
 }
 

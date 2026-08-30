@@ -166,9 +166,7 @@ private struct SearchToolCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                Image(systemName: model.kind == .glob ? "doc.text.magnifyingglass" : "magnifyingglass")
-                    .foregroundStyle(.blue)
-                    .accessibilityHidden(true)
+                HarnessIconTile(systemImage: model.kind == .glob ? "doc.text.magnifyingglass" : "magnifyingglass", tint: .blue, size: 28)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(model.query)
                         .font(.caption.weight(.semibold))
@@ -330,9 +328,7 @@ private struct WebToolCard: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Image(systemName: model.kind == .search ? "globe.badge.chevron.backward" : "doc.text.magnifyingglass")
-                .foregroundStyle(.cyan)
-                .accessibilityHidden(true)
+            HarnessIconTile(systemImage: model.kind == .search ? "globe.badge.chevron.backward" : "doc.text.magnifyingglass", tint: .cyan, size: 28)
             VStack(alignment: .leading, spacing: 2) {
                 Text(model.kind == .search ? model.queries.joined(separator: " · ") : (model.url ?? "网页内容"))
                     .font(.caption.weight(.semibold))
@@ -397,9 +393,7 @@ private struct JobToolCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                Image(systemName: model.kind == .list ? "list.bullet.rectangle" : "gearshape.2")
-                    .foregroundStyle(statusTint)
-                    .accessibilityHidden(true)
+                HarnessIconTile(systemImage: model.kind == .list ? "list.bullet.rectangle" : "gearshape.2", tint: statusTint, size: 28)
                 Text(model.jobID ?? "后台任务")
                     .font(.caption.weight(.semibold).monospaced())
                     .lineLimit(1)
@@ -527,9 +521,7 @@ private struct DiffToolCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                Image(systemName: "arrow.left.arrow.right")
-                    .foregroundStyle(.orange)
-                    .accessibilityHidden(true)
+                HarnessIconTile(systemImage: "arrow.left.arrow.right", tint: .orange, size: 28)
                 Text(model.path)
                     .font(.caption.weight(.semibold))
                     .lineLimit(1)
@@ -574,9 +566,7 @@ private struct DeliverableToolCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                Image(systemName: "doc.badge.plus")
-                    .foregroundStyle(.green)
-                    .accessibilityHidden(true)
+                HarnessIconTile(systemImage: "doc.badge.plus", tint: .green, size: 28)
                 Text(model.title ?? model.path)
                     .font(.caption.weight(.semibold))
                     .lineLimit(1)
@@ -669,9 +659,7 @@ private struct WorkspaceWriteToolCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                Image(systemName: "square.and.pencil")
-                    .foregroundStyle(.green)
-                    .accessibilityHidden(true)
+                HarnessIconTile(systemImage: "square.and.pencil", tint: .green, size: 28)
                 Text(model.path)
                     .font(.caption.weight(.semibold))
                     .lineLimit(1)
@@ -850,9 +838,7 @@ private struct WorkspaceFilesToolCard: View {
                 Text("\(model.files.count) 个路径")
                     .font(.caption.weight(.semibold))
                 Spacer()
-                Image(systemName: "doc.on.doc")
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
+                HarnessIconTile(systemImage: "doc.on.doc", tint: .secondary, size: 28)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
@@ -897,10 +883,7 @@ private struct WorkspaceFilesToolCard: View {
 
     private func fileRow(_ file: NativeWorkspaceFilePresentation) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: "doc.text")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
+            HarnessIconTile(systemImage: "doc.text", tint: .secondary, size: 24)
             Text(file.path)
                 .font(.caption.monospaced())
                 .lineLimit(1)
@@ -973,10 +956,7 @@ private struct WorkItemsToolCard: View {
 
     private func itemRow(_ item: NativeWorkItemPresentation) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: statusIcon(item.status))
-                .font(.caption)
-                .foregroundStyle(statusTint(item.status))
-                .accessibilityHidden(true)
+            HarnessIconTile(systemImage: statusIcon(item.status), tint: statusTint(item.status), size: 24)
             Text(item.title)
                 .font(.caption)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1026,9 +1006,7 @@ private struct WorkflowToolCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                Image(systemName: "arrow.triangle.branch")
-                    .foregroundStyle(model.status == .failed ? .red : .blue)
-                    .accessibilityHidden(true)
+                HarnessIconTile(systemImage: "arrow.triangle.branch", tint: model.status == .failed ? .red : .blue, size: 28)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(model.name)
                         .font(.caption.weight(.semibold))
@@ -1492,9 +1470,9 @@ private struct ToolHeadTailSlice<Item> {
 private struct ToolSurfaceModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .background(Color(uiColor: .secondarySystemBackground), in: .rect(cornerRadius: 6))
+            .background(HarnessTheme.surface, in: .rect(cornerRadius: HarnessTheme.Radius.small))
             .overlay {
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(cornerRadius: HarnessTheme.Radius.small)
                     .strokeBorder(.separator.opacity(0.55), lineWidth: 0.5)
             }
     }

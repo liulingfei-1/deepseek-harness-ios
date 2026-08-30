@@ -185,15 +185,13 @@ private struct ToolEventSummaryRow: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(
-                systemName: isExpanded
+            HarnessIconTile(
+                systemImage: isExpanded
                     ? "chevron.down"
-                    : ToolEventPresentation.icon(for: event.name)
+                    : ToolEventPresentation.icon(for: event.name),
+                tint: summary.isError ? .red : ToolEventPresentation.tint(for: event.status),
+                size: 28
             )
-            .font(.caption.weight(.medium))
-            .frame(width: 16, height: 24)
-            .foregroundStyle(summary.isError ? .red : ToolEventPresentation.tint(for: event.status))
-            .accessibilityHidden(true)
 
             Text(ToolEventPresentation.title(for: event.name))
                 .font(.footnote.weight(.medium))
@@ -318,7 +316,7 @@ private struct ToolEventInspectorView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("状态") {
+                Section {
                     LabeledContent("工具", value: ToolEventPresentation.title(for: event.name))
                     LabeledContent("状态", value: ToolEventPresentation.statusTitle(event.status))
                     if !event.summary.isEmpty {
@@ -335,38 +333,48 @@ private struct ToolEventInspectorView: View {
                             Text(finishedAt, format: .dateTime.hour().minute().second())
                         }
                     }
+                } header: {
+                    Label("状态", systemImage: "waveform.path.ecg")
                 }
 
-                Section("参数") {
+                Section {
                     Text(event.arguments)
                         .font(.footnote.monospaced())
                         .textSelection(.enabled)
+                } header: {
+                    Label("参数", systemImage: "slider.horizontal.3")
                 }
 
                 if !event.output.isEmpty {
-                    Section("输出") {
+                    Section {
                         ToolEventOutputView(event: event, maximumCharacters: 64 * 1_024)
+                    } header: {
+                        Label("输出", systemImage: "arrow.up.doc")
                     }
                 }
 
                 if let result = event.result, !result.isEmpty {
-                    Section("返回值") {
+                    Section {
                         Text(result)
                             .font(.footnote.monospaced())
                             .textSelection(.enabled)
+                    } header: {
+                        Label("返回值", systemImage: "return")
                     }
                 }
 
                 if let errorMessage = event.errorMessage, !errorMessage.isEmpty {
-                    Section("错误") {
+                    Section {
                         Text(errorMessage)
                             .foregroundStyle(.red)
                             .textSelection(.enabled)
+                    } header: {
+                        Label("错误", systemImage: "exclamationmark.triangle")
                     }
                 }
 
                 if !event.children.isEmpty {
-                    Section("子工具") {
+                    Section {
                         ForEach(event.children) { child in
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(ToolEventPresentation.title(for: child.name))
@@ -376,6 +384,8 @@ private struct ToolEventInspectorView: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
+                    } header: {
+                        Label("子工具", systemImage: "point.3.connected.trianglepath.dotted")
                     }
                 }
             }
@@ -412,6 +422,23 @@ enum ToolEventPresentation {
         case "workspace_read_text": "读取文件"
         case "workspace_write_text": "写入文件"
         case "camera_ocr": "相机 OCR"
+        case "vision_analyze": "本机视觉分析"
+        case "natural_language_analyze": "本机文本分析"
+        case "speech_synthesize": "系统朗读"
+        case "speech_transcribe": "语音转文字"
+        case "maps_search": "地图搜索"
+        case "maps_route": "地图路线"
+        case "system_open": "打开系统目标"
+        case "photo_library_list": "照片图库"
+        case "media_library_search": "媒体搜索"
+        case "media_playback": "媒体播放"
+        case "health_query": "健康数据"
+        case "bluetooth_scan": "蓝牙扫描"
+        case "calendar_events": "日历事件"
+        case "reminders_list": "提醒事项"
+        case "clipboard_read": "读取剪贴板"
+        case "clipboard_write": "写入剪贴板"
+        case "device_status": "设备状态"
         case "ask_user_question": "询问用户"
         case "exit_plan_mode": "计划审核"
         case "work_state_set_goal": "更新目标"
@@ -424,7 +451,6 @@ enum ToolEventPresentation {
         case "secure_authenticate": "设备验证"
         case "device_time": "设备时间"
         case "device_capabilities": "设备能力"
-        case "ios_native": "iOS 原生"
         case "web_fetch": "网页读取"
         case "plugin_marketplace": "插件市场"
         case "cordis_inspect_list": "检查 Cordis 插件"
@@ -456,6 +482,22 @@ enum ToolEventPresentation {
         case "workspace_read_text": "doc.text.magnifyingglass"
         case "workspace_write_text": "square.and.pencil"
         case "camera_ocr": "text.viewfinder"
+        case "vision_analyze": "viewfinder"
+        case "natural_language_analyze": "text.magnifyingglass"
+        case "speech_synthesize": "speaker.wave.2"
+        case "speech_transcribe": "waveform.badge.mic"
+        case "maps_search": "map"
+        case "maps_route": "point.topleft.down.to.point.bottomright.curvepath"
+        case "system_open": "arrow.up.forward.app"
+        case "photo_library_list": "photo.on.rectangle.angled"
+        case "media_library_search": "music.note.list"
+        case "media_playback": "play.circle"
+        case "health_query": "heart.text.square"
+        case "bluetooth_scan": "antenna.radiowaves.left.and.right"
+        case "calendar_events": "calendar"
+        case "reminders_list": "checklist"
+        case "clipboard_read", "clipboard_write": "clipboard"
+        case "device_status": "iphone.gen3"
         case "ask_user_question": "questionmark.bubble"
         case "exit_plan_mode": "checkmark.rectangle.stack"
         case "work_state_set_goal": "scope"
@@ -468,7 +510,6 @@ enum ToolEventPresentation {
         case "secure_authenticate": "faceid"
         case "device_time": "clock"
         case "device_capabilities": "iphone.gen3"
-        case "ios_native": "apps.iphone"
         case "web_fetch": "network"
         case "plugin_marketplace": "puzzlepiece.extension"
         case "cordis_inspect_list", "cordis_inspect_query", "cordis_inspect_self":

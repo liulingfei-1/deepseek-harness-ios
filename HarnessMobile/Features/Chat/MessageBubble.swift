@@ -4,6 +4,7 @@ import UIKit
 struct MessageBubble: View, Equatable {
     nonisolated let message: AgentMessage
     let canRerunUserMessage: Bool
+    let retryUserMessageID: UUID?
     let onRetryUserMessage: (UUID) -> Void
     let onEditUserMessage: (AgentMessage) -> Void
     let onToggleFeedback: (UUID, MessageFeedbackRating) -> Void
@@ -11,6 +12,8 @@ struct MessageBubble: View, Equatable {
 
     @State private var feedbackNoteEditor: FeedbackNoteEditor?
     @State private var visibleToolCallLimit = 4
+    @State private var copied = false
+    @State private var copyResetTask: Task<Void, Never>?
 
     var body: some View {
         HStack {
@@ -20,9 +23,13 @@ struct MessageBubble: View, Equatable {
 
             VStack(alignment: .leading, spacing: 8) {
                 if message.role == .assistant {
-                    Label("DeepSeek Harness", systemImage: "sparkles")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 7) {
+                        HarnessIconTile(systemImage: "sparkles", tint: .accentColor, size: 28)
+                        Text("DeepSeek Harness")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .accessibilityElement(children: .combine)
                 }
 
                 if let reasoning = message.reasoning, !reasoning.isEmpty {
@@ -72,6 +79,10 @@ struct MessageBubble: View, Equatable {
                             } label: {
                                 Label(call.name, systemImage: "wrench.and.screwdriver")
                                     .font(.footnote.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 7)
+                                    .background(Color(uiColor: .secondarySystemBackground), in: Capsule())
                             }
                         }
                     }
@@ -92,8 +103,8 @@ struct MessageBubble: View, Equatable {
                     ToolEventCard(event: legacyToolEvent, isLive: false) {}
                 }
 
-                if message.role == .assistant {
-                    assistantActions
+                if message.role != .tool {
+                    messageActions
                 }
             }
             .padding(message.role == .user ? 12 : 0)
@@ -101,6 +112,12 @@ struct MessageBubble: View, Equatable {
                 if message.role == .user {
                     RoundedRectangle(cornerRadius: 12)
                         .fill(background)
+                }
+            }
+            .overlay {
+                if message.role == .user {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.accentColor.opacity(0.10), lineWidth: 0.5)
                 }
             }
             .frame(
@@ -116,14 +133,25 @@ struct MessageBubble: View, Equatable {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("message-\(message.role.rawValue)")
         .contextMenu {
-            if message.role == .user {
+            if message.role != .tool, !message.content.isEmpty {
+                Button(action: copyMessage) {
+                    Label("复制", systemImage: "doc.on.doc")
+                }
+            }
+
+            if let retryUserMessageID {
                 Button {
-                    onRetryUserMessage(message.id)
+                    onRetryUserMessage(retryUserMessageID)
                 } label: {
-                    Label("重试此消息", systemImage: "arrow.clockwise")
+                    Label(
+                        message.role == .assistant ? "重新生成回答" : "重试此消息",
+                        systemImage: "arrow.clockwise"
+                    )
                 }
                 .disabled(!canRerunUserMessage)
+            }
 
+            if message.role == .user {
                 Button {
                     onEditUserMessage(message)
                 } label: {
@@ -131,6 +159,10 @@ struct MessageBubble: View, Equatable {
                 }
                 .disabled(!canRerunUserMessage)
             }
+        }
+        .onDisappear {
+            copyResetTask?.cancel()
+            copyResetTask = nil
         }
         .sheet(item: $feedbackNoteEditor) { editor in
             MessageFeedbackNoteSheet(
@@ -142,20 +174,49 @@ struct MessageBubble: View, Equatable {
         }
     }
 
-    private var assistantActions: some View {
+    private var messageActions: some View {
         HStack(spacing: 2) {
-            feedbackButton(
-                rating: .positive,
-                systemImage: "hand.thumbsup",
-                label: "有帮助"
-            )
-            feedbackButton(
-                rating: .negative,
-                systemImage: "hand.thumbsdown",
-                label: "需要改进"
+            actionButton(
+                systemImage: copied ? "checkmark" : "doc.on.doc",
+                label: copied ? "已复制" : "复制",
+                disabled: message.content.isEmpty,
+                action: copyMessage
             )
 
-            if let feedback = message.feedback {
+            if let retryUserMessageID {
+                actionButton(
+                    systemImage: "arrow.clockwise",
+                    label: message.role == .assistant ? "重新生成回答" : "重试此消息",
+                    disabled: !canRerunUserMessage
+                ) {
+                    onRetryUserMessage(retryUserMessageID)
+                }
+            }
+
+            if message.role == .user {
+                actionButton(
+                    systemImage: "pencil",
+                    label: "编辑并重新运行",
+                    disabled: !canRerunUserMessage
+                ) {
+                    onEditUserMessage(message)
+                }
+            }
+
+            if message.role == .assistant {
+                feedbackButton(
+                    rating: .positive,
+                    systemImage: "hand.thumbsup",
+                    label: "有帮助"
+                )
+                feedbackButton(
+                    rating: .negative,
+                    systemImage: "hand.thumbsdown",
+                    label: "需要改进"
+                )
+            }
+
+            if message.role == .assistant, let feedback = message.feedback {
                 Button {
                     feedbackNoteEditor = FeedbackNoteEditor(note: feedback.note ?? "")
                 } label: {
@@ -167,21 +228,48 @@ struct MessageBubble: View, Equatable {
                 .accessibilityLabel(feedback.note == nil ? "添加反馈备注" : "编辑反馈备注")
                 .help(feedback.note == nil ? "添加反馈备注" : "编辑反馈备注")
             }
-
-            Button {
-                UIPasteboard.general.string = message.content
-            } label: {
-                Image(systemName: "doc.on.doc")
-                    .frame(width: 44, height: 44)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .disabled(message.content.isEmpty)
-            .accessibilityLabel("复制回答")
-            .help("复制回答")
         }
         .font(.caption.weight(.medium))
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, HarnessTheme.Spacing.xSmall)
+        .background(HarnessTheme.subtleFill, in: Capsule())
+        .frame(
+            maxWidth: .infinity,
+            alignment: message.role == .user ? .trailing : .leading
+        )
+    }
+
+    private func actionButton(
+        systemImage: String,
+        label: String,
+        disabled: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .frame(width: 44, height: 44)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(copied && label == "已复制" ? Color.accentColor : Color.secondary)
+        .disabled(disabled)
+        .accessibilityLabel(label)
+        .help(label)
+    }
+
+    private func copyMessage() {
+        guard !message.content.isEmpty else { return }
+        UIPasteboard.general.string = message.content
+        copied = true
+        copyResetTask?.cancel()
+        copyResetTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .seconds(1.5))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            copied = false
+            copyResetTask = nil
+        }
     }
 
     private func feedbackButton(
@@ -256,6 +344,7 @@ struct MessageBubble: View, Equatable {
     nonisolated static func == (lhs: MessageBubble, rhs: MessageBubble) -> Bool {
         lhs.message == rhs.message
             && lhs.canRerunUserMessage == rhs.canRerunUserMessage
+            && lhs.retryUserMessageID == rhs.retryUserMessageID
     }
 }
 
@@ -308,7 +397,7 @@ private struct MessageFeedbackNoteSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("备注") {
+                Section {
                     TextEditor(text: $note)
                         .frame(minHeight: 120)
                         .accessibilityLabel("反馈备注")
@@ -320,6 +409,8 @@ private struct MessageFeedbackNoteSheet: View {
                                 ? Color.red
                                 : Color.secondary
                         )
+                } header: {
+                    Label("备注", systemImage: "note.text")
                 }
             }
             .navigationTitle("反馈备注")
@@ -349,9 +440,13 @@ struct StreamingMessageBubble: View {
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 8) {
-                Label("DeepSeek Harness", systemImage: "sparkles")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 7) {
+                    HarnessIconTile(systemImage: "sparkles", tint: .accentColor, size: 28)
+                    Text("DeepSeek Harness")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityElement(children: .combine)
 
                 if !reasoning.isEmpty {
                     ReasoningDisclosure(
@@ -423,6 +518,13 @@ private struct ReasoningDisclosure: View {
                     }
                 }
             }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(.quaternary, lineWidth: 0.5)
         }
     }
 

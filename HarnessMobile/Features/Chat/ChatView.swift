@@ -64,7 +64,7 @@ struct ChatView: View {
                             Circle()
                                 .fill(model.isRunning ? Color.green : Color.secondary.opacity(0.45))
                                 .frame(width: 5, height: 5)
-                            Text("\(model.effectiveConfiguration.model) · \(model.activeAgentPreset?.displayName ?? model.controlState.agentPresetID) · \(model.interactionMode.title)")
+                            Text("\(model.effectiveConfiguration.model) · \(model.interactionMode.title)")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
@@ -256,13 +256,6 @@ struct ChatView: View {
                 )
             }
         }
-        .alert("发生错误", isPresented: errorPresented) {
-            Button("好") {
-                model.errorMessage = nil
-            }
-        } message: {
-            Text(model.errorMessage ?? "")
-        }
     }
 
     @ViewBuilder
@@ -416,6 +409,13 @@ struct ChatView: View {
                 .focused($isInputFocused)
             }
         }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if let errorMessage = model.errorMessage {
+                ChatErrorBanner(message: errorMessage) {
+                    model.errorMessage = nil
+                }
+            }
+        }
     }
 
     private var approvalPresented: Binding<Bool> {
@@ -424,17 +424,6 @@ struct ChatView: View {
             set: { presented in
                 if !presented, model.pendingApproval != nil {
                     model.resolveApproval(approved: false)
-                }
-            }
-        )
-    }
-
-    private var errorPresented: Binding<Bool> {
-        Binding(
-            get: { model.errorMessage != nil },
-            set: { presented in
-                if !presented {
-                    model.errorMessage = nil
                 }
             }
         )
@@ -606,6 +595,47 @@ struct ChatView: View {
     }
 }
 
+private struct ChatErrorBanner: View {
+    let message: String
+    let onDismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: HarnessTheme.Spacing.medium) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.red)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: HarnessTheme.Spacing.xSmall) {
+                Text("任务未完成")
+                    .font(.subheadline.weight(.semibold))
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .textSelection(.enabled)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .accessibilityLabel("关闭错误提示")
+        }
+        .padding(.leading, HarnessTheme.Spacing.large)
+        .padding(.trailing, HarnessTheme.Spacing.small)
+        .padding(.vertical, HarnessTheme.Spacing.small)
+        .background(.regularMaterial)
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("chat-error-banner")
+    }
+}
+
 private struct SessionBreadcrumbBar: View {
     let path: [HarnessSessionPathNode]
     let onOpen: (HarnessSessionPathNode) -> Void
@@ -763,7 +793,7 @@ private struct ConversationScroller: View {
                 .padding(.horizontal)
                 .padding(.top, 12)
             }
-            .coordinateSpace(name: "conversation-scroll")
+            .coordinateSpace(.named("conversation-scroll"))
             .background {
                 GeometryReader { proxy in
                     Color.clear.preference(
@@ -913,9 +943,7 @@ private struct ConversationTimeline: View {
             if messages.isEmpty, streamingText.isEmpty {
                 Button(action: onStartInput) {
                     VStack(spacing: 12) {
-                        Image(systemName: "sparkles")
-                            .font(.title.weight(.medium))
-                            .foregroundStyle(.secondary)
+                        HarnessIconTile(systemImage: "sparkles", tint: .secondary, size: 40)
                         Text("有什么要处理？")
                             .font(.title3.weight(.semibold))
                             .foregroundStyle(.primary)
@@ -932,6 +960,7 @@ private struct ConversationTimeline: View {
                     MessageBubble(
                         message: message,
                         canRerunUserMessage: !isRunning,
+                        retryUserMessageID: messageActionTargets[message.id],
                         onRetryUserMessage: onRetryUserMessage,
                         onEditUserMessage: onEditUserMessage,
                         onToggleFeedback: onToggleFeedback,
@@ -1007,6 +1036,10 @@ private struct ConversationTimeline: View {
         messages.last(where: { $0.role == .user })?.id
     }
 
+    private var messageActionTargets: [UUID: UUID] {
+        ConversationMessageActionTargets.resolve(messages).retryUserMessageIDByMessageID
+    }
+
 }
 
 private struct ContextInjectionList: View {
@@ -1035,8 +1068,11 @@ private struct ContextInjectionRow: View {
                 isExpanded.toggle()
             } label: {
                 HStack(spacing: 7) {
-                    Image(systemName: injection.form == "catalog" ? "books.vertical" : "arrow.turn.down.right")
-                        .foregroundStyle(.secondary)
+                    HarnessIconTile(
+                        systemImage: injection.form == "catalog" ? "books.vertical" : "arrow.turn.down.right",
+                        tint: .secondary,
+                        size: 24
+                    )
                     Text(injection.sourceLabel)
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.secondary)
@@ -1089,8 +1125,7 @@ private struct PendingQuestionStatus: View {
 
     var body: some View {
         HStack(spacing: 9) {
-            Image(systemName: "questionmark.bubble.fill")
-                .foregroundStyle(.orange)
+            HarnessIconTile(systemImage: "questionmark.bubble.fill", tint: .orange, size: 28)
             VStack(alignment: .leading, spacing: 1) {
                 Text("等待你的回答")
                     .font(.caption.weight(.semibold))
@@ -1172,7 +1207,7 @@ private struct ConversationMetricsStrip: View {
         }
         .scrollIndicators(.hidden)
         .frame(height: 38)
-        .background(Color(uiColor: .secondarySystemBackground))
+        .background(HarnessTheme.surface)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("对话运行统计")
     }
@@ -1223,9 +1258,11 @@ private struct AgentPresetPickerView: View {
                         dismiss()
                     } label: {
                         HStack(alignment: .top, spacing: 12) {
-                            Image(systemName: systemImage(for: preset))
-                                .foregroundStyle(preset.isMountable ? Color.accentColor : Color.secondary)
-                                .frame(width: 24, height: 24)
+                            HarnessIconTile(
+                                systemImage: systemImage(for: preset),
+                                tint: preset.isMountable ? .accentColor : .secondary,
+                                size: 32
+                            )
                             VStack(alignment: .leading, spacing: 4) {
                                 HStack(spacing: 6) {
                                     Text(preset.displayName)
@@ -1416,8 +1453,7 @@ private struct SubagentTreeRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: statusIcon)
-                .foregroundStyle(statusColor)
+            HarnessIconTile(systemImage: statusIcon, tint: statusColor, size: 28)
             VStack(alignment: .leading, spacing: 2) {
                 Text(subagent.label)
                     .font(.footnote.weight(.semibold))
@@ -1429,12 +1465,14 @@ private struct SubagentTreeRow: View {
             Spacer(minLength: 4)
             Button(action: onOpen) {
                 Image(systemName: "arrow.up.forward.app")
+                    .frame(width: 44, height: 44)
             }
             .buttonStyle(.borderless)
             .accessibilityLabel("打开子 Agent")
             if !subagent.status.isTerminal {
                 Button(role: .destructive, action: onStop) {
                     Image(systemName: "stop.circle")
+                        .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.borderless)
                 .accessibilityLabel("停止子 Agent")
@@ -1482,8 +1520,7 @@ private struct JobPanelRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Image(systemName: statusIcon)
-                    .foregroundStyle(statusColor)
+                HarnessIconTile(systemImage: statusIcon, tint: statusColor, size: 28)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(job.label)
                         .font(.body.weight(.semibold))

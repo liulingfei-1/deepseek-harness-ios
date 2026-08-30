@@ -21,6 +21,8 @@ final class HarnessMobileOnboardingUITests: XCTestCase {
 
         XCTAssertTrue(app.navigationBars["配置 Harness"].waitForExistence(timeout: 15))
         XCTAssertTrue(app.secureTextFields["api-key-field"].exists)
+        XCTAssertFalse(app.textFields["provider-display-name-field"].exists)
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
         let saveButton = app.buttons["save-configuration"]
         XCTAssertTrue(saveButton.waitForExistence(timeout: 5))
         XCTAssertTrue(saveButton.isHittable)
@@ -344,6 +346,25 @@ final class HarnessMobileProgressiveDisclosureUITests: XCTestCase {
         XCTAssertTrue(activeRuns.exists)
     }
 
+    func testProviderManagementMovesRequestBehaviorToFocusedSubpage() {
+        let app = launchConfiguredApp()
+        addTeardownBlock { app.terminate() }
+
+        app.buttons["设置"].tap()
+        XCTAssertTrue(app.navigationBars["设置"].waitForExistence(timeout: 15))
+        app.buttons["settings-model-providers"].tap()
+        XCTAssertTrue(app.navigationBars["模型与服务商"].waitForExistence(timeout: 10))
+
+        let behavior = app.buttons["provider-behavior-settings"]
+        XCTAssertTrue(behavior.waitForExistence(timeout: 5))
+        behavior.tap()
+
+        XCTAssertTrue(app.navigationBars["模型行为"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["上下文压缩"].exists)
+        XCTAssertTrue(app.staticTexts["时间上下文"].exists)
+        XCTAssertTrue(app.staticTexts["会话标题"].exists)
+    }
+
     private func launchConfiguredApp() -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = [
@@ -486,6 +507,34 @@ final class HarnessMobileTrajectoryUITests: XCTestCase {
         XCTAssertTrue(app.buttons.matching(
             NSPredicate(format: "label CONTAINS %@", "workspace_read_text")
         ).firstMatch.waitForExistence(timeout: 5))
+    }
+}
+
+@MainActor
+final class HarnessMobileChatChromeUITests: XCTestCase {
+    func testErrorStaysInlineAndCanBeDismissed() {
+        let app = XCUIApplication()
+        addTeardownBlock {
+            app.terminate()
+        }
+        app.launchArguments = [
+            "-reset-persistent-state-for-ui-testing",
+            "-bootstrap-configuration-for-ui-testing",
+            "-disable-animations-for-ui-testing",
+            "-present-chat-error-for-ui-testing",
+        ]
+        app.launch()
+
+        openConversation(in: app)
+
+        let banner = app.descendants(matching: .any)["chat-error-banner"]
+        XCTAssertTrue(banner.waitForExistence(timeout: 10))
+        XCTAssertEqual(app.alerts.count, 0)
+
+        let dismiss = app.buttons["关闭错误提示"]
+        XCTAssertTrue(dismiss.isHittable)
+        dismiss.tap()
+        XCTAssertTrue(banner.waitForNonExistence(timeout: 3))
     }
 }
 
@@ -779,6 +828,7 @@ final class HarnessMobilePluginManagementUITests: XCTestCase {
         let mode = app.segmentedControls["community-plugin-market-mode"]
         XCTAssertTrue(mode.waitForExistence(timeout: 5))
         XCTAssertTrue(mode.buttons["市场"].isSelected)
+        XCTAssertTrue(app.descendants(matching: .any)["community-plugin-market-summary"].exists)
         XCTAssertTrue(app.staticTexts["Git Tools"].exists)
         XCTAssertTrue(app.staticTexts["Memory Notes"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["community-plugin-market-error"].exists)
@@ -873,6 +923,7 @@ final class HarnessMobilePluginManagementUITests: XCTestCase {
         pluginsButton.tap()
 
         XCTAssertTrue(app.descendants(matching: .any)["ish-plugin-host-status"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["plugin-runtime-summary"].exists)
         XCTAssertTrue(app.buttons["ish-plugin-host-start"].isEnabled)
         XCTAssertFalse(app.buttons["ish-plugin-host-refresh"].isEnabled)
         XCTAssertFalse(app.buttons["ish-plugin-host-stop"].isEnabled)

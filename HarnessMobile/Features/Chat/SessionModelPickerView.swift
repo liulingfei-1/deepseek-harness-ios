@@ -83,7 +83,7 @@ struct SessionModelPickerView: View {
                     inferenceSection
                 }
             }
-            .formStyle(.grouped)
+            .harnessCompactListChrome()
             .navigationTitle("本会话模型")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $searchText, prompt: "搜索模型 ID 或名称")
@@ -131,11 +131,26 @@ struct SessionModelPickerView: View {
                 .accessibilityIdentifier("session-model-follow-global")
 
             if isFollowingGlobal {
-                LabeledContent("当前模型", value: model.configuration.model)
-                LabeledContent(
-                    "Provider Profile",
-                    value: model.activeProviderProfile?.displayName ?? "未配置"
-                )
+                HStack(spacing: HarnessTheme.Spacing.medium) {
+                    HarnessIconTile(systemImage: "cpu", tint: .accentColor)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(model.configuration.model)
+                            .font(.body.weight(.medium))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Text(model.activeProviderProfile?.displayName ?? "未配置 Provider Profile")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
+                    HarnessStatusPill(
+                        title: "默认",
+                        systemImage: "checkmark.circle.fill",
+                        tint: .green
+                    )
+                }
+                .harnessCardListRow()
             } else {
                 Label("该选择只覆盖当前会话，不改变默认 Profile。", systemImage: "arrow.triangle.2.circlepath")
                     .font(.footnote)
@@ -170,8 +185,20 @@ struct SessionModelPickerView: View {
             }
 
             if let selectedProfile {
-                LabeledContent("Provider ID", value: selectedProfile.id)
-                LabeledContent("API", value: endpointHost(selectedProfile.baseURL))
+                HStack(spacing: HarnessTheme.Spacing.medium) {
+                    HarnessIconTile(systemImage: "server.rack", tint: .blue)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(selectedProfile.displayName)
+                            .font(.body.weight(.medium))
+                        Text("\(selectedProfile.id) · \(endpointHost(selectedProfile.baseURL))")
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    Spacer(minLength: 8)
+                }
+                .harnessCardListRow()
                 SessionProviderStatusView(
                     credentialStatus: model.credentialStatus(for: selectedProfile),
                     supportsInference: selectedProfile.descriptor.supportsCurrentInferenceWire
@@ -652,6 +679,11 @@ private struct SessionModelRow: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
+            HarnessIconTile(
+                systemImage: model.inputModalities.contains(.image) ? "photo" : "cpu",
+                tint: model.inputModalities.contains(.image) ? .purple : .accentColor,
+                size: 30
+            )
             VStack(alignment: .leading, spacing: 3) {
                 Text(model.name ?? model.id)
                     .foregroundStyle(.primary)
@@ -673,6 +705,7 @@ private struct SessionModelRow: View {
                 .opacity(isSelected ? 1 : 0)
                 .accessibilityHidden(true)
         }
+        .padding(.vertical, 4)
         .contentShape(.rect)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? .isSelected : [])

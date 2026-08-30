@@ -259,8 +259,7 @@ private struct NativeMarkdownBlockView: View {
                     .textSelection(.enabled)
                     .padding(10)
             }
-            .background(Color(uiColor: .secondarySystemBackground))
-            .clipShape(.rect(cornerRadius: 6))
+            .background(HarnessTheme.surface, in: RoundedRectangle(cornerRadius: HarnessTheme.Radius.small, style: .continuous))
         case let .table(table):
             NativeMarkdownTableView(
                 table: table,
