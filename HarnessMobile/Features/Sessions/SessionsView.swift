@@ -6,7 +6,6 @@ struct SessionsView: View {
     private let onConversationOpened: () -> Void
     private let onOpenSettings: () -> Void
     private let onOpenTools: () -> Void
-    private let onOpenBackgroundSettings: () -> Void
 
     @State private var sessionToRename: ConversationSessionSummary?
     @State private var sessionToDelete: ConversationSessionSummary?
@@ -21,39 +20,18 @@ struct SessionsView: View {
     init(
         onConversationOpened: @escaping () -> Void = {},
         onOpenSettings: @escaping () -> Void = {},
-        onOpenTools: @escaping () -> Void = {},
-        onOpenBackgroundSettings: @escaping () -> Void = {}
+        onOpenTools: @escaping () -> Void = {}
     ) {
         self.onConversationOpened = onConversationOpened
         self.onOpenSettings = onOpenSettings
         self.onOpenTools = onOpenTools
-        self.onOpenBackgroundSettings = onOpenBackgroundSettings
     }
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            List {
+        List {
                 if let errorMessage = model.errorMessage {
                     SessionErrorSection(message: errorMessage)
                 }
-
-                HomeContinueSection(
-                    activeSession: activeSession,
-                    status: activeSession.map(status(for:)),
-                    onContinue: {
-                        if let activeSession {
-                            openConversation(activeSession)
-                        } else {
-                            createConversation()
-                        }
-                    },
-                    onCreate: createConversation
-                )
-
-                BackgroundSystemStatusSection(
-                    projection: model.backgroundSystemProjection,
-                    onOpenSettings: onOpenBackgroundSettings
-                )
 
                 if visibleSessions.isEmpty {
                     emptyState
@@ -67,20 +45,16 @@ struct SessionsView: View {
                             sessionSection("已归档", sessions: archivedSessions)
                         }
                     } else {
-                        sessionSection(collectionScope == .active ? "最近会话" : collectionScope.sectionTitle, sessions: visibleSessions)
+                        sessionSection(collectionScope == .active ? "项目" : collectionScope.sectionTitle, sessions: visibleSessions)
                     }
                 }
             }
-            // Leave room for the floating new-session control.  A fixed
-            // 76-point inset let the control cover the final session row at
-            // accessibility text sizes and on compact-height devices.
-            .contentMargins(.bottom, 132, for: .scrollContent)
             .scrollContentBackground(.hidden)
             .background(HarnessTheme.pageBackground)
-
+        .listStyle(.plain)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             floatingControls
         }
-        .listStyle(.plain)
         .navigationTitle("Harness")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(
@@ -265,7 +239,7 @@ struct SessionsView: View {
                     .harnessCardListRow()
             }
         } header: {
-            Label(title, systemImage: title == "已归档" ? "archivebox" : "bubble.left.and.bubble.right")
+            Label(title, systemImage: title == "已归档" ? "archivebox" : "folder.fill")
         }
     }
 
@@ -557,180 +531,6 @@ struct SessionsView: View {
             return "恢复并打开此会话"
         }
         return session.id == model.activeSessionID ? "当前会话" : "切换到此会话"
-    }
-}
-
-private struct HomeContinueSection: View {
-    let activeSession: ConversationSessionSummary?
-    let status: SessionDisplayStatus?
-    let onContinue: () -> Void
-    let onCreate: () -> Void
-
-    var body: some View {
-        Section {
-            Button(action: onContinue) {
-                HStack(spacing: 12) {
-                    Image(systemName: activeSession == nil ? "play.fill" : "arrow.forward.circle.fill")
-                        .font(.body.weight(.bold))
-                        .frame(width: 44, height: 44)
-                        .background(.white.opacity(0.18), in: Circle())
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(activeSession == nil ? "开始任务" : "继续当前任务")
-                            .font(.body.weight(.semibold))
-                        Text(activeSession?.title ?? "创建一个新的本机会话")
-                            .font(.caption)
-                            .opacity(0.82)
-                            .lineLimit(1)
-                    }
-                    Spacer(minLength: 8)
-                    Image(systemName: "arrow.right")
-                        .font(.caption.weight(.bold))
-                        .frame(width: 44, height: 44)
-                }
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, HarnessTheme.Spacing.large)
-                .padding(.vertical, HarnessTheme.Spacing.medium)
-                .background(Color.accentColor, in: RoundedRectangle(cornerRadius: HarnessTheme.Radius.card, style: .continuous))
-            }
-            .buttonStyle(.plain)
-            .harnessCardListRow()
-            .accessibilityIdentifier("home-continue-task")
-
-            Button(action: onCreate) {
-                HStack(spacing: 10) {
-                    HarnessIconTile(systemImage: "plus.bubble", tint: .accentColor, size: 28)
-                    Text("新建会话")
-                        .font(.body.weight(.medium))
-                    Spacer()
-                }
-                .foregroundStyle(.primary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, HarnessTheme.Spacing.large)
-                .padding(.vertical, HarnessTheme.Spacing.medium)
-                .background(HarnessTheme.surface, in: RoundedRectangle(cornerRadius: HarnessTheme.Radius.card, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: HarnessTheme.Radius.card, style: .continuous)
-                        .stroke(HarnessTheme.separator, lineWidth: 0.5)
-                }
-            }
-            .buttonStyle(.plain)
-            .harnessCardListRow()
-            .accessibilityIdentifier("home-new-session")
-        } header: {
-            Label("任务", systemImage: "bolt.fill")
-                .foregroundStyle(.secondary)
-        } footer: {
-            if let activeSession, let status {
-                Text("当前：\(activeSession.title) · \(status.title)")
-            } else {
-                Text("从本机保存的会话继续，或开始一个新的任务。")
-            }
-        }
-    }
-}
-
-private struct BackgroundSystemStatusSection: View {
-    let projection: BackgroundSystemProjection
-    let onOpenSettings: () -> Void
-
-    var body: some View {
-        Section {
-            VStack(alignment: .leading, spacing: HarnessTheme.Spacing.medium) {
-                HStack(spacing: HarnessTheme.Spacing.medium) {
-                    HarnessIconTile(
-                        systemImage: "bolt.horizontal.circle.fill",
-                        tint: statusTint,
-                        size: 36
-                    )
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("后台任务")
-                            .font(.body.weight(.semibold))
-                        Text("\(projection.activeRunCount) 个活动任务")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                    }
-                    Spacer(minLength: HarnessTheme.Spacing.small)
-                    HarnessStatusPill(
-                        title: tierLabel,
-                        systemImage: statusSystemImage,
-                        tint: statusTint
-                    )
-                }
-
-                if !projection.degradedReasons.isEmpty {
-                    Label(
-                        "降级：" + projection.degradedReasons.map(degradedLabel).sorted().joined(separator: "、"),
-                        systemImage: "exclamationmark.triangle.fill"
-                    )
-                    .font(.footnote)
-                    .foregroundStyle(.orange)
-                }
-
-                Divider()
-
-                Button(action: onOpenSettings) {
-                    HStack {
-                        Text("状态与恢复设置")
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                    }
-                    .frame(minHeight: 44)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("home-background-status")
-            }
-            .harnessCardSurface(padding: HarnessTheme.Spacing.large)
-            .harnessCardListRow()
-        } header: {
-            Label("系统状态", systemImage: "waveform.path.ecg")
-        } footer: {
-            Text("这里汇总所有并行任务的真实状态；详细权限、通知和恢复设置在后台任务页。")
-        }
-    }
-
-    private var tierLabel: String {
-        switch projection.survivalTier {
-        case .foreground: "前台"
-        case .finiteBackgroundTask: "短时后台"
-        case .continuedProcessing: "Continued Processing"
-        case .extendedAudio: "音频延展"
-        case .extendedLocation: "定位延展"
-        case .degraded: "降级"
-        }
-    }
-
-    private var statusTint: Color {
-        switch projection.survivalTier {
-        case .foreground: .secondary
-        case .finiteBackgroundTask: .blue
-        case .continuedProcessing, .extendedAudio, .extendedLocation: .green
-        case .degraded: .orange
-        }
-    }
-
-    private var statusSystemImage: String {
-        switch projection.survivalTier {
-        case .foreground: "iphone"
-        case .finiteBackgroundTask: "timer"
-        case .continuedProcessing: "bolt.fill"
-        case .extendedAudio: "speaker.wave.2.fill"
-        case .extendedLocation: "location.fill"
-        case .degraded: "exclamationmark.triangle.fill"
-        }
-    }
-
-    private func degradedLabel(_ reason: BackgroundKeepAliveDegradedReason) -> String {
-        switch reason {
-        case .lowPowerMode: "低电量模式"
-        case .thermalPressure: "温度压力"
-        case .audioUnavailable: "音频不可用"
-        case .locationUnavailable: "定位不可用"
-        }
     }
 }
 

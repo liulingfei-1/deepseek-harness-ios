@@ -88,8 +88,7 @@ struct AppRootView: View {
             SessionsView(
                 onConversationOpened: openChat,
                 onOpenSettings: { navigationPath.append(.settings) },
-                onOpenTools: { navigationPath.append(.tools) },
-                onOpenBackgroundSettings: { navigationPath.append(.backgroundSettings) }
+                onOpenTools: { navigationPath.append(.tools) }
             )
             .navigationDestination(for: AppRoute.self) { route in
                 switch route {

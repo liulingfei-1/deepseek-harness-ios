@@ -146,11 +146,8 @@ final class HarnessMobileAccessibilityUITests: XCTestCase {
         assertSystemToolbarTarget(app.buttons["设置"], named: "首页设置")
         assertSystemToolbarTarget(app.buttons["筛选与排序"], named: "首页筛选与排序")
         assertSystemToolbarTarget(app.buttons["工具"], named: "首页工具")
-        assertCriticalTarget(app.buttons["home-continue-task"], named: "首页继续任务")
-        assertCriticalTarget(app.buttons["新建会话"], named: "首页新建会话")
-        let backgroundStatus = app.descendants(matching: .any)["home-background-status"]
-        scrollUntilHittable(backgroundStatus, in: app)
-        assertCriticalTarget(backgroundStatus, named: "首页后台状态")
+        let project = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "新会话")).firstMatch
+        assertCriticalTarget(project, named: "首页项目入口")
         attachAccessibilityEvidence(for: app, surface: "home")
     }
 
@@ -301,14 +298,15 @@ final class HarnessMobileProgressiveDisclosureUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    func testHomeKeepsCoreTaskPathAndMovesSecondaryToolsToToolsRoute() {
+    func testHomePrioritizesProjectsAndMovesSecondaryToolsToToolsRoute() {
         let app = launchConfiguredApp()
         addTeardownBlock { app.terminate() }
 
         XCTAssertTrue(app.navigationBars["Harness"].waitForExistence(timeout: 15))
-        XCTAssertTrue(app.buttons["home-continue-task"].exists)
-        XCTAssertTrue(app.buttons["home-new-session"].exists)
-        XCTAssertTrue(app.buttons["home-background-status"].exists)
+        XCTAssertTrue(app.staticTexts["项目"].exists)
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "新会话")).firstMatch.exists)
+        XCTAssertFalse(app.buttons["home-continue-task"].exists)
+        XCTAssertFalse(app.buttons["home-background-status"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["workspace-hierarchy-root"].exists)
 
         app.buttons["工具"].tap()
