@@ -65,17 +65,17 @@ Harness 采用同一原则，但保留自己的开发者信息架构：运行后
 
 | 顺序 | 页面/流程 | 主要文件 | 当前健康度 | 改造状态 |
 | --- | --- | --- | --- | --- |
-| 1 | 共享视觉基础 | `Features/Shared/HarnessListChrome.swift` | 弱：只有列表背景 | ACTIVE |
-| 2 | 首页与会话列表 | `Features/Sessions/SessionsView.swift` | 中：功能齐全，层级过重 | ACTIVE |
-| 3 | 聊天、消息、输入栏 | `Features/Chat/*` | 中：第一轮信息层级已收口 | ACTIVE |
-| 4 | 设置首页 | `Features/Settings/SettingsView.swift` | 中：系统表单但缺少摘要层 | ACTIVE |
-| 5 | 首次配置/Provider | `SetupView.swift`、`ProviderProfilesView.swift` | 中：首次配置已收口，Profile 管理待改 | ACTIVE |
-| 6 | 插件市场/管理/设置 | `Features/Plugins/*` | 中：市场与管理首屏已收口，设置待改 | ACTIVE |
-| 7 | 后台任务/权限/记忆 | `Features/Settings/*` | 中：大量裸 Form 行 | QUEUED |
-| 8 | 工具总览/工具事件 | `AppRootView.swift`、`NativeToolEventViews.swift` | 中：卡片语言不统一 | QUEUED |
-| 9 | Workspace/Console | `Features/Workspace/*`、`Features/Console/*` | 中：功能优先，缺少统一层级 | QUEUED |
-| 10 | Terminal/iSH | `Features/Terminal/*` | 中：画布可用，控制区需统一 | QUEUED |
-| 11 | Trajectory/Work State | `Features/Trajectory/*` | 弱：诊断信息一次性展开过多 | QUEUED |
+| 1 | 共享视觉基础 | `Features/Shared/HarnessListChrome.swift` | 已统一语义表面、间距、图标块和状态胶囊 | BATCHED / SIM PASS |
+| 2 | 首页与会话列表 | `Features/Sessions/SessionsView.swift` | 已完成首屏层级、浮动控件避让和状态行收口 | BATCHED / SIM PASS |
+| 3 | 聊天、消息、输入栏 | `Features/Chat/*` | 已完成错误条、消息动作、输入栏和工具事件层级 | BATCHED / SIM PASS |
+| 4 | 设置首页 | `Features/Settings/SettingsView.swift` | 已完成分组标题、危险操作和诊断入口层级 | BATCHED / SIM PASS |
+| 5 | 首次配置/Provider | `SetupView.swift`、`ProviderProfilesView.swift` | 已完成首次配置首屏和 Profile 状态/操作层级 | BATCHED / SIM PASS |
+| 6 | 插件市场/管理/设置 | `Features/Plugins/*` | 已完成市场、管理、详情、Settings 和 Host 状态层级 | BATCHED / SIM PASS |
+| 7 | 后台任务/权限/记忆 | `Features/Settings/*` | 已完成状态行、权限分组、记忆记录和自适应布局 | BATCHED / SIM PASS |
+| 8 | 工具总览/工具事件 | `AppRootView.swift`、`NativeToolEventViews.swift` | 已完成工具入口、事件卡片和诊断分区统一 | BATCHED / SIM PASS |
+| 9 | Workspace/Console | `Features/Workspace/*`、`Features/Console/*` | 已完成工作区行、控制器和分段切换统一 | BATCHED / SIM PASS |
+| 10 | Terminal/iSH | `Features/Terminal/*` | 已完成终端控制区、环境状态和输入浮层统一 | BATCHED / SIM PASS |
+| 11 | Trajectory/Work State | `Features/Trajectory/*`、`Features/WorkState/*` | 已完成轨迹、Inspector、目标和待办层级统一 | BATCHED / SIM PASS |
 | 12 | 横屏、iPad、深色、高对比度 | 全部路由 | 未形成完整矩阵 | VERIFY |
 
 ## 每页完成标准
@@ -87,6 +87,12 @@ Harness 采用同一原则，但保留自己的开发者信息架构：运行后
 - arm64 模拟器构建和相关 UI/SwiftPM 测试通过；真机触控、旋转、后台恢复和长列表性能在完成前保持 `VERIFY`。
 
 ## 实施记录
+
+### 2026-08-30 · 全页面 UI 批次收口
+
+- 页面清单 1–11 已逐项完成 UI 改造并拆为四个独立提交：共享基础、聊天/会话、设置/插件、终端/工作区/诊断。
+- 当前工作树中剩余未提交修改属于运行时、网络、插件宿主和测试基础设施，不混入 UI 批次。
+- 验证：Xcode Beta arm64 generic iOS Simulator `BUILD SUCCEEDED`；SwiftPM `823` tests、`3` skipped、`0` failures；无远程执行审计、上游一致性和 `git diff --check` 通过。真机触控、VoiceOver、后台系统回调和设备性能继续保持 `VERIFY`。
 
 ### 2026-08-30 · 聊天与首次配置第一轮
 
