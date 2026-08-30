@@ -142,7 +142,6 @@ struct SettingsView: View {
         }
         .harnessCompactListChrome()
         .scrollContentBackground(.hidden)
-        .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle("设置")
         .confirmationDialog(
             "清空当前会话？",
