@@ -54,3 +54,10 @@
 - 将“Agent 编排 Bundle / 手机权限”从“工具与插件”拆为独立的“Agent 与权限”分组；Cordis、工具授权和本机工具仍留在“工具与插件”。
 - 仅改变信息分组，不改变任何导航、状态、权限请求或授权逻辑。
 - 可靠夹具下设置分组路由测试：1/1 通过（`/tmp/hm-settings-agent-perm/Logs/Test/Test-HarnessMobile-2026.08.30_17-33-09-+0800.xcresult`）。
+
+## 社区插件市场首屏复核（本轮）
+
+- 真实模拟器截图：`/tmp/harness-ui-community-market-audit.png`。
+- 首屏已按“市场/已安装 + 目录摘要 + 搜索”组织，统计宫格和实现细节没有回流；插件目录行能直接看到名称、描述、分类、原生优先和安装状态。
+- 本轮不再改市场布局；刷新、导入、GitHub、清理缓存继续收在操作菜单中，符合渐进披露。
+- 专项测试：`HarnessMobilePluginManagementUITests/testCommunityMarketplaceUsesCompactSearchableList` 1/1 通过（`/tmp/hm-plugin-market-audit2/Logs/Test/Test-HarnessMobile-2026.08.30_17-41-31-+0800.xcresult`）。
