@@ -94,6 +94,11 @@ Harness 采用同一原则，但保留自己的开发者信息架构：运行后
 - 当前工作树中剩余未提交修改属于运行时、网络、插件宿主和测试基础设施，不混入 UI 批次。
 - 验证：Xcode Beta arm64 generic iOS Simulator `BUILD SUCCEEDED`；SwiftPM `823` tests、`3` skipped、`0` failures；无远程执行审计、上游一致性和 `git diff --check` 通过。真机触控、VoiceOver、后台系统回调和设备性能继续保持 `VERIFY`。
 
+### 2026-08-30 · 工具总览图标一致性补丁
+
+- 工具页行图标改为复用 `HarnessIconTile`，与首页、设置和插件页面统一为 32pt 图标块；导航和工具入口标识不变。
+- 验证：arm64 generic iOS Simulator 构建通过，现有工具路由 UI 测试覆盖导航可达性；真机视觉和 VoiceOver 朗读仍为 `VERIFY`。
+
 ### 2026-08-30 · 聊天与首次配置第一轮
 
 - 删除聊天页全局系统 Alert，复用 `safeAreaInset` 增加页内错误条；错误发生时消息、任务状态和输入栏仍可见。

@@ -245,11 +245,7 @@ private struct HarnessToolsView: View {
             navigate(route)
         } label: {
             HStack(spacing: 12) {
-                Image(systemName: systemImage)
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(tint)
-                    .frame(width: 38, height: 38)
-                    .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                HarnessIconTile(systemImage: systemImage, tint: tint, size: 32)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
