@@ -54,6 +54,9 @@ struct SettingsView: View {
                     SettingsLinkLabel(title: "手机权限", systemImage: "hand.raised", tint: .green)
                 }
                 .accessibilityIdentifier("settings-phone-permissions")
+            } header: { Label("Agent 与权限", systemImage: "person.crop.circle.badge.checkmark") }
+
+            Section {
                 NavigationLink {
                     PluginManagementView()
                 } label: {
