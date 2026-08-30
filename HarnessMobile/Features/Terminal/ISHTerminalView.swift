@@ -280,7 +280,6 @@ private struct ISHCommandConsoleView: View {
                             systemImage: "terminal",
                             description: Text("ARM64 Alpine 在手机本机运行；工作目录是 /workspace。")
                         )
-                        .padding(.top, 48)
                     } else {
                         ForEach(terminal.records) { record in
                             ISHConsoleRecordView(record: record)
