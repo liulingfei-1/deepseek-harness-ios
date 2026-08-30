@@ -61,3 +61,13 @@
 - 首屏已按“市场/已安装 + 目录摘要 + 搜索”组织，统计宫格和实现细节没有回流；插件目录行能直接看到名称、描述、分类、原生优先和安装状态。
 - 本轮不再改市场布局；刷新、导入、GitHub、清理缓存继续收在操作菜单中，符合渐进披露。
 - 专项测试：`HarnessMobilePluginManagementUITests/testCommunityMarketplaceUsesCompactSearchableList` 1/1 通过（`/tmp/hm-plugin-market-audit2/Logs/Test/Test-HarnessMobile-2026.08.30_17-41-31-+0800.xcresult`）。
+
+## Workspace 空态复核（本轮）
+
+- 现状截图：`/tmp/workspace-current-9.png`。
+- 截图显示“挂载目录”和“文件”之间存在较大空白，空文件状态占据整个区域；用户必须先猜测右上角 `+` 才能找到导入入口。
+- 调整：复用原有 `ContentUnavailableView`、`HarnessTheme` 和文件/文件夹导入状态，在空文件区补充一句范围说明，并提供“导入文件”“挂载文件夹”两个原地动作；没有新增依赖、模型或数据路径。
+- 视觉目标：减少空白、把下一步动作放到空态上下文中，同时保留右上角菜单作为全局入口。
+- 构建：arm64 iOS Simulator build succeeded（`/tmp/hm-workspace-ui-2`）。
+- 专项 UI 测试命令：`HarnessMobileWorkspaceHierarchyUITests/testWorkspaceRootExposesFilesMountsAndSessionStateFromHome`；测试启动阶段因环境报错 `xcrun: error: unable to find utility "simctl", not a developer tool or in PATH`，结果为失败，不能据此判断 Workspace 交互回归。
+- 当前状态：代码改造完成，布局截图需在 UI 自动化桥接恢复后重新采集；深色、Dynamic Type 极限字号、横屏、VoiceOver 和真机仍为 `VERIFY`。

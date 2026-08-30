@@ -24,10 +24,28 @@ struct WorkspaceView: View {
 
             Section {
                 if model.workspaceFiles.isEmpty {
-                    ContentUnavailableView(
-                        "还没有文件",
-                        systemImage: "folder.badge.plus"
-                    )
+                    VStack(spacing: HarnessTheme.Spacing.medium) {
+                        ContentUnavailableView(
+                            "还没有文件",
+                            systemImage: "folder.badge.plus",
+                            description: Text("导入一个文件，或挂载外部文件夹开始使用工作区。")
+                        )
+
+                        HStack(spacing: HarnessTheme.Spacing.small) {
+                            Button("导入文件", systemImage: "doc.badge.plus") {
+                                isFileImporterPresented = true
+                            }
+                            .buttonStyle(.bordered)
+
+                            Button("挂载文件夹", systemImage: "externaldrive.badge.plus") {
+                                reauthorizingMountID = nil
+                                isFolderImporterPresented = true
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, HarnessTheme.Spacing.large)
                 } else {
                     ForEach(model.workspaceFiles, id: \.path) { file in
                         WorkspaceFileRow(
