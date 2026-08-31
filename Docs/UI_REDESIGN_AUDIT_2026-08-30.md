@@ -183,6 +183,12 @@
 - 调整后截图：`/tmp/plugin-settings-final-attachments-0831-1/EACB544D-3D51-4411-B7C0-6A7EA257ED34.png`。
 - 专项测试：`HarnessMobilePluginSettingsUITests/testPluginSettingsShowsHostStateFromPluginRoute` 1/1 通过（`/tmp/hm-plugin-settings-final/Logs/Test/Test-HarnessMobile-2026.08.31_19-29-56-+0800.xcresult`），覆盖设置 → Cordis 插件 → 插件设置真实入口、Host 空态、启动标题、刷新和无效搜索隐藏。真机 Host、namespace 列表、编辑器、revision 冲突、深色、极限 Dynamic Type、VoiceOver 和横屏仍为 `VERIFY`。
 
+## 聊天空态与错误恢复复核（2026-08-31）
+
+- 当前截图：空会话 `/tmp/chat-chrome-audit-attachments-0831-1/70BA5F86-8C8F-4F07-A93D-8D5FF05A1A8E.png`；行内错误 `/tmp/chat-chrome-audit-attachments-0831-1/374E5262-8E71-4262-B32E-16D707CAECAB.png`。
+- 结论：空会话只保留单一“有什么要处理？”入口和常驻输入栏；错误使用可关闭的行内提示，没有模态弹窗，也没有遮挡会话标题。消息操作按钮保留 44pt 点击区和现有上下文菜单，未为追求更小视觉而牺牲无障碍。
+- 本轮不改生产 UI；新增专项证据防止空态、输入栏和错误条后续回归。`HarnessMobileChatChromeUITests` 2/2 通过（`/tmp/hm-chat-chrome-audit/Logs/Test/Test-HarnessMobile-2026.08.31_19-36-38-+0800.xcresult`）。运行中、排队输入、图片/文件、审批、长对话、深色、极限 Dynamic Type、VoiceOver、横屏和 iPhone 16 Pro 仍为 `VERIFY`。
+
 ## 全界面覆盖清单（截至本轮）
 
 | 界面 | 已检查内容 | 状态 |

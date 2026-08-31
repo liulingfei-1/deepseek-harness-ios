@@ -717,6 +717,28 @@ final class HarnessMobileTrajectoryUITests: XCTestCase {
 
 @MainActor
 final class HarnessMobileChatChromeUITests: XCTestCase {
+    func testEmptyConversationKeepsPromptAndComposerVisible() {
+        let app = XCUIApplication()
+        addTeardownBlock { app.terminate() }
+        app.launchArguments = [
+            "-reset-persistent-state-for-ui-testing",
+            "-bootstrap-configuration-for-ui-testing",
+            "-disable-animations-for-ui-testing",
+        ]
+        app.launch()
+
+        openConversation(in: app)
+
+        XCTAssertTrue(app.buttons["有什么要处理？"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["chat-input"].exists)
+        XCTAssertTrue(app.buttons["添加内容"].exists)
+        XCTAssertTrue(app.buttons["命令"].exists)
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "chat-empty-state"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     func testErrorStaysInlineAndCanBeDismissed() {
         let app = XCUIApplication()
         addTeardownBlock {
@@ -738,6 +760,10 @@ final class HarnessMobileChatChromeUITests: XCTestCase {
 
         let dismiss = app.buttons["关闭错误提示"]
         XCTAssertTrue(dismiss.isHittable)
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "chat-inline-error"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
         dismiss.tap()
         XCTAssertTrue(banner.waitForNonExistence(timeout: 3))
     }
