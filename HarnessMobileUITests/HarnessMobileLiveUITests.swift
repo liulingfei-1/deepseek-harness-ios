@@ -215,6 +215,42 @@ final class HarnessMobileMemoryManagementUITests: XCTestCase {
 }
 
 @MainActor
+final class HarnessMobilePluginSettingsUITests: XCTestCase {
+    func testPluginSettingsShowsHostStateFromPluginRoute() {
+        let app = XCUIApplication()
+        addTeardownBlock { app.terminate() }
+        app.launchArguments = [
+            "-reset-persistent-state-for-ui-testing",
+            "-bootstrap-configuration-for-ui-testing",
+            "-disable-animations-for-ui-testing",
+        ]
+        app.launch()
+
+        XCTAssertTrue(app.navigationBars["Harness"].waitForExistence(timeout: 15))
+        app.buttons["设置"].tap()
+        XCTAssertTrue(app.navigationBars["设置"].waitForExistence(timeout: 10))
+        let plugins = app.buttons["Cordis 插件"]
+        scrollUntilHittable(plugins, in: app)
+        plugins.tap()
+
+        XCTAssertTrue(app.navigationBars["插件"].waitForExistence(timeout: 10))
+        let settings = app.buttons["ish-plugin-settings"]
+        scrollUntilHittable(settings, in: app)
+        settings.tap()
+
+        XCTAssertTrue(app.navigationBars["插件设置"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["ish-plugin-settings-list"].exists)
+        XCTAssertTrue(app.buttons["ish-plugin-settings-refresh"].exists)
+        XCTAssertTrue(app.buttons["启动 Host"].exists)
+        XCTAssertFalse(app.searchFields["搜索 namespace"].exists)
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "plugin-settings-host-state"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+}
+
+@MainActor
 final class HarnessMobileConcurrentRunsUITests: XCTestCase {
     func testCreatingAndSwitchingSessionsKeepsBothRootRunsVisible() {
         let app = XCUIApplication()

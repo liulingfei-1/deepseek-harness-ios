@@ -176,6 +176,13 @@
 - 调整后截图：`/tmp/memory-management-final-attachments-0831-2/02112642-2CEB-4582-9CFA-2DDE504DE183.png`。
 - 专项测试：`HarnessMobileMemoryManagementUITests/testMemoryManagementKeepsSessionScopeAndExportVisible` 1/1 通过（`/tmp/hm-memory-management-final/Logs/Test/Test-HarnessMobile-2026.08.31_19-20-02-+0800.xcresult`），覆盖真实设置入口、当前会话开关、空态、默认折叠、安全说明展开和导出入口。非空记录、删除确认、真实文件导出、深色、极限 Dynamic Type、VoiceOver、横屏和 iPhone 16 Pro 仍为 `VERIFY`。
 
+## 插件设置 Host 空态（2026-08-31）
+
+- 调整前截图：`/tmp/plugin-settings-audit-attachments-0831-1/ACEDBBC8-8428-490E-877D-A85D2746AE79.png`。Host 未就绪时使用整屏空态，“启动 Host”只显示播放图标，且没有 namespace 时仍保留无效搜索框。
+- 调整：未就绪和无 namespace 状态改为紧凑原生分组；启动按钮显式显示图标与标题；只有真实 namespace 可搜索时才展示搜索。Host 启动、刷新、设置快照、编辑器、保存和冲突逻辑未改变。
+- 调整后截图：`/tmp/plugin-settings-final-attachments-0831-1/EACB544D-3D51-4411-B7C0-6A7EA257ED34.png`。
+- 专项测试：`HarnessMobilePluginSettingsUITests/testPluginSettingsShowsHostStateFromPluginRoute` 1/1 通过（`/tmp/hm-plugin-settings-final/Logs/Test/Test-HarnessMobile-2026.08.31_19-29-56-+0800.xcresult`），覆盖设置 → Cordis 插件 → 插件设置真实入口、Host 空态、启动标题、刷新和无效搜索隐藏。真机 Host、namespace 列表、编辑器、revision 冲突、深色、极限 Dynamic Type、VoiceOver 和横屏仍为 `VERIFY`。
+
 ## 全界面覆盖清单（截至本轮）
 
 | 界面 | 已检查内容 | 状态 |

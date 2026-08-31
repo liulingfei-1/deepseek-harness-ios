@@ -6,6 +6,37 @@ struct PluginSettingsView: View {
     @State private var isRefreshing = false
 
     var body: some View {
+        Group {
+            if model.ishPluginSettingsSnapshot?.namespaces.isEmpty == false {
+                settingsList
+                    .searchable(text: $query, prompt: "搜索 namespace")
+            } else {
+                settingsList
+            }
+        }
+        .navigationTitle("插件设置")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    Task { await refresh() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .disabled(isRefreshing)
+                .accessibilityLabel("刷新插件设置")
+                .accessibilityIdentifier("ish-plugin-settings-refresh")
+                .help("刷新插件设置")
+            }
+        }
+        .task {
+            await refresh()
+        }
+        .refreshable {
+            await refresh()
+        }
+    }
+
+    private var settingsList: some View {
         List {
             if let snapshot = model.ishPluginSettingsSnapshot {
                 Section {
@@ -33,15 +64,22 @@ struct PluginSettingsView: View {
                 }
 
                 if filteredNamespaces.isEmpty {
-                    ContentUnavailableView(
-                        query.isEmpty ? "没有插件设置" : "没有匹配的设置",
-                        systemImage: "slider.horizontal.3",
-                        description: Text(
+                    Section {
+                        Label(
+                            query.isEmpty ? "没有插件设置" : "没有匹配的设置",
+                            systemImage: "slider.horizontal.3"
+                        )
+                        .foregroundStyle(.secondary)
+                        Text(
                             query.isEmpty
                                 ? "启用注册设置命名空间的 Host 插件后会显示在这里。"
                                 : "尝试搜索其他 namespace。"
                         )
-                    )
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    } header: {
+                        Label("命名空间", systemImage: "square.stack.3d.up")
+                    }
                 } else {
                     Section {
                         ForEach(filteredNamespaces) { namespace in
@@ -56,43 +94,26 @@ struct PluginSettingsView: View {
                     }
                 }
             } else {
-                ContentUnavailableView {
+                Section {
                     Label("设置 Host 未就绪", systemImage: "terminal")
-                } description: {
+                        .foregroundStyle(.secondary)
                     Text("启动本机 iSH Cordis Host 后可读取插件设置。")
-                } actions: {
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                     Button {
                         Task { await refresh() }
                     } label: {
                         Label("启动 Host", systemImage: "play.fill")
+                            .labelStyle(.titleAndIcon)
                     }
                     .disabled(isRefreshing)
+                } header: {
+                    Label("设置提供方", systemImage: "slider.horizontal.3")
                 }
             }
         }
         .accessibilityIdentifier("ish-plugin-settings-list")
         .harnessCompactListChrome()
-        .navigationTitle("插件设置")
-        .searchable(text: $query, prompt: "搜索 namespace")
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    Task { await refresh() }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .disabled(isRefreshing)
-                .accessibilityLabel("刷新插件设置")
-                .accessibilityIdentifier("ish-plugin-settings-refresh")
-                .help("刷新插件设置")
-            }
-        }
-        .task {
-            await refresh()
-        }
-        .refreshable {
-            await refresh()
-        }
     }
 
     private var filteredNamespaces: [ISHPluginSettingsNamespace] {
