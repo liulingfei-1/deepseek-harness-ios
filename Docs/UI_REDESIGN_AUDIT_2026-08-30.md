@@ -195,6 +195,7 @@
 - `HarnessMobileAccessibilityUITests` 4/4 通过（`/tmp/hm-accessibility-matrix-0831/Logs/Test/Test-HarnessMobile-2026.08.31_22-23-36-+0800.xcresult`）。断言项目名、设置/工具入口、会话选项、添加/命令/发送、模型服务商、手机权限、终端输入/运行均可达且主要操作保持至少 44pt 点击区。
 - 原始截图：`/tmp/accessibility-matrix-attachments-0831-1/7BF8A086-949D-469F-9254-2BFAFF73E36E.png`、`61534177-7DD0-408C-A6DA-C417A09C77A1.png`、`B7529A9B-DA35-4FC2-8672-E4F222EAE188.png`、`F4B33080-598F-4914-9A40-A43FE0948373.png`。附件的横屏方向元数据未被预览器识别，审计时仅生成 `/tmp/accessibility-*-upright.png` 旋转副本，未修改测试原件或生产代码。
 - 结论：未发现文字截断、关键控件不可达或点击区不足。聊天和终端在键盘展开时只保留当前操作所需区域，符合横屏可用高度；没有为此新增自定义布局。VoiceOver 朗读顺序、不同设备尺寸和 iPhone 16 Pro 真机触控仍为 `VERIFY`。
+- 真机构建与安装：使用自动签名 Team `2SH3TUR2JL` 构建 `/tmp/hm-device-ui-0831/Build/Products/Debug-iphoneos/HarnessMobile.app` 成功；`devicectl` 已将 `com.llf.harnessmobile` 覆盖安装到配对的 iPhone 16 Pro，并成功发出启动命令。该证据只确认当前构建可安装、可启动，逐页触控、真实权限、插件 Host 和 VoiceOver 仍为 `VERIFY`。
 
 ## 全界面覆盖清单（截至本轮）
 
