@@ -79,14 +79,20 @@ struct SessionModelPickerView: View {
                 scopeSection
                 if !isFollowingGlobal {
                     providerSection
-                    modelSection
+                }
+                modelSection
+                if !isFollowingGlobal {
                     inferenceSection
                 }
             }
             .harnessCompactListChrome()
             .navigationTitle("本会话模型")
             .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $searchText, prompt: "搜索模型 ID 或名称")
+            .searchable(
+                text: $searchText,
+                placement: .navigationBarDrawer(displayMode: .always),
+                prompt: "搜索模型 ID 或名称"
+            )
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") {
@@ -130,29 +136,8 @@ struct SessionModelPickerView: View {
             Toggle("跟随默认模型设置", isOn: followingGlobalBinding)
                 .accessibilityIdentifier("session-model-follow-global")
 
-            if isFollowingGlobal {
-                HStack(spacing: HarnessTheme.Spacing.medium) {
-                    HarnessIconTile(systemImage: "cpu", tint: .accentColor)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(model.configuration.model)
-                            .font(.body.weight(.medium))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        Text(model.activeProviderProfile?.displayName ?? "未配置 Provider Profile")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                    Spacer(minLength: 8)
-                    HarnessStatusPill(
-                        title: "默认",
-                        systemImage: "checkmark.circle.fill",
-                        tint: .green
-                    )
-                }
-                .harnessCardListRow()
-            } else {
-                Label("该选择只覆盖当前会话，不改变默认 Profile。", systemImage: "arrow.triangle.2.circlepath")
+            if !isFollowingGlobal {
+                Label("该选择只覆盖当前会话，不改变默认服务商配置。", systemImage: "arrow.triangle.2.circlepath")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -167,13 +152,13 @@ struct SessionModelPickerView: View {
         Section {
             if model.providerProfiles.isEmpty {
                 ContentUnavailableView(
-                    "没有 Provider Profile",
+                    "没有服务商配置",
                     systemImage: "server.rack",
                     description: Text("请先在模型与服务商中添加连接。")
                 )
                 .listRowBackground(Color.clear)
             } else {
-                Picker("Provider Profile", selection: profileSelection) {
+                Picker("服务商配置", selection: profileSelection) {
                     ForEach(model.providerProfiles) { profile in
                         Text(profile.displayName)
                             .tag(profile.id)
@@ -233,7 +218,7 @@ struct SessionModelPickerView: View {
         } header: {
             Text("服务商")
         } footer: {
-            Text("这里只能选择已保存的 Profile；API Key 不会显示，也不能在会话页修改。")
+            Text("这里只能选择已保存的服务商配置；API Key 不会显示，也不能在会话页修改。")
         }
     }
 
@@ -273,6 +258,9 @@ struct SessionModelPickerView: View {
             } else {
                 ForEach(filteredModels) { candidate in
                     Button {
+                        if isFollowingGlobal, candidate.id != draft.model {
+                            isFollowingGlobal = false
+                        }
                         draft.model = candidate.id
                         draft.inputModalities = candidate.inputModalities
                     } label: {
@@ -324,7 +312,7 @@ struct SessionModelPickerView: View {
         } header: {
             Text("模型")
         } footer: {
-            Text("刷新只使用该 Profile 已保存在 Keychain 中的同源 API Key。目录之外的模型可直接填写 ID。")
+            Text("刷新只使用该服务商配置已保存在 Keychain 中的同源 API Key。目录之外的模型可直接填写 ID。")
         }
     }
 
@@ -398,7 +386,7 @@ struct SessionModelPickerView: View {
     private var catalogSourceTitle: String {
         switch visibleCatalog.source {
         case .builtIn:
-            return "Profile 目录 · \(visibleCatalog.models.count) 项"
+            return "配置目录 · \(visibleCatalog.models.count) 项"
         case .remote:
             return "服务商目录 · \(visibleCatalog.models.count) 项"
         case .cache:
@@ -638,7 +626,7 @@ private struct SessionProviderStatusView: View {
         case .configured:
             return "API Key 已配置"
         case .missing:
-            return "缺少 API Key，请先编辑该 Profile"
+            return "缺少 API Key，请先编辑该配置"
         case .originMismatch:
             return "API 地址已变化，需要重新输入 API Key"
         }

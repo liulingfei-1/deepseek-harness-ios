@@ -123,6 +123,14 @@
 - 问题：Setup 内的模型选择子页使用原生 `List`，没有继承设置页统一的页面背景、紧凑行高和滚动内容样式。
 - 调整：复用现有 `harnessCompactListChrome()`；模型搜索、选中态和返回逻辑不变。
 
+### 本会话模型直接选择（2026-08-31）
+
+- 调整前截图：`/tmp/modelpicker-audit-attachments-0831-1/35BD9851-BA27-46D3-BEEA-624C08FA4997.png`。打开“选择模型”后只有范围开关和重复的当前模型卡，模型列表被隐藏，搜索框却仍显示，首屏大面积空白。
+- 调整：删除重复的当前模型卡，跟随默认设置时也直接显示已有模型；点选其他模型会自动切换为本会话覆盖。服务商与推理设置仍只在覆盖模式展开。
+- 搜索使用系统导航栏抽屉，避免底部浮层遮挡列表；`Provider Profile / Profile 目录` 等框架文案统一为“服务商配置 / 配置目录”，API Key、Keychain、模型 ID 和协议名保持技术原文。
+- 调整后截图：跟随默认 `/tmp/modelpicker-final-attachments-0831-1/352A5850-FEF9-44DA-A190-15E119DCD0CE.png`；会话覆盖 `/tmp/modelpicker-final-attachments-0831-1/5D2D99EB-6163-4B01-A71F-A6E2F2C79647.png`。
+- 专项测试：`HarnessMobileSessionModelPickerUITests/testSessionModelPickerShowsScopeAndSearchableModels` 1/1 通过（`/tmp/hm-model-picker-final/Logs/Test/Test-HarnessMobile-2026.08.31_09-28-15-+0800.xcresult`）。深色、极限 Dynamic Type、VoiceOver、横屏、真实模型目录刷新和 iPhone 16 Pro 新构建仍为 `VERIFY`。
+
 ### Setup 首次配置渐进披露（2026-08-31）
 
 - 调整前截图：`/tmp/harness-after-bootstrap-relaunch.png`。首次配置把服务商、连接、模型、高级推理和安全边界放在同一张长表单里；连接和模型说明也沿用编辑页的完整技术文案。
@@ -153,7 +161,7 @@
 | --- | --- | --- |
 | 首页 / 项目列表 | 项目优先、搜索、新建会话、工具与设置入口 | DONE |
 | 聊天页 | 会话标题、输入栏、会话选项、轨迹切换、工作状态 Dock | VERIFY |
-| 模型选择 | 搜索、选中态、空结果 | VERIFY |
+| 模型选择 | 搜索、选中态、空结果、默认/会话覆盖 | DONE |
 | 工具总览 | 工作区、终端、任务/轨迹、插件、设置路由 | DONE |
 | Console | 任务 / 轨迹分段，移除重复插件入口 | DONE |
 | Work State | 目标、计划、待办、恢复和错误状态 | DONE |

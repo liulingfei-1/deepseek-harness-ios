@@ -85,6 +85,50 @@ final class HarnessMobileConversationModeUITests: XCTestCase {
 }
 
 @MainActor
+final class HarnessMobileSessionModelPickerUITests: XCTestCase {
+    func testSessionModelPickerShowsScopeAndSearchableModels() {
+        let app = XCUIApplication()
+        addTeardownBlock { app.terminate() }
+        app.launchArguments = [
+            "-reset-persistent-state-for-ui-testing",
+            "-bootstrap-configuration-for-ui-testing",
+            "-disable-animations-for-ui-testing",
+        ]
+        app.launch()
+
+        openConversation(in: app)
+        let modelButton = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "选择模型，当前")
+        ).firstMatch
+        XCTAssertTrue(modelButton.waitForExistence(timeout: 5))
+        modelButton.tap()
+
+        XCTAssertTrue(app.navigationBars["本会话模型"].waitForExistence(timeout: 5))
+        let followDefault = app.switches["session-model-follow-global"]
+        XCTAssertTrue(followDefault.isHittable)
+        XCTAssertTrue(app.buttons["session-model-option-deepseek-v4-flash"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["session-model-option-deepseek-v4-pro"].exists)
+        XCTAssertTrue(app.searchFields["搜索模型 ID 或名称"].exists)
+        attachScreenshot(named: "model-picker-follow-default")
+
+        app.buttons["session-model-option-deepseek-v4-pro"].tap()
+        XCTAssertEqual(followDefault.value as? String, "0")
+        XCTAssertTrue(app.buttons["session-model-provider-picker"].waitForExistence(timeout: 5))
+        let modelField = app.textFields["session-model-field"]
+        XCTAssertTrue(modelField.exists)
+        XCTAssertEqual(modelField.value as? String, "deepseek-v4-pro")
+        attachScreenshot(named: "model-picker-session-override")
+    }
+
+    private func attachScreenshot(named name: String) {
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = name
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+}
+
+@MainActor
 final class HarnessMobileConcurrentRunsUITests: XCTestCase {
     func testCreatingAndSwitchingSessionsKeepsBothRootRunsVisible() {
         let app = XCUIApplication()
