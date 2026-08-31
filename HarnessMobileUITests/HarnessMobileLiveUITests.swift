@@ -25,6 +25,7 @@ final class HarnessMobileOnboardingUITests: XCTestCase {
         app.launch()
 
         XCTAssertTrue(app.navigationBars["配置 Harness"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["provider-picker"].isHittable)
         for _ in 0..<6 {
             app.swipeUp(velocity: .fast)
         }

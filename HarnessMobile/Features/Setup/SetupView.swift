@@ -277,14 +277,19 @@ struct SetupView: View {
     private var identitySection: some View {
         Section {
             if canChangeCatalogProvider {
-                Picker("服务商", selection: providerSelection) {
-                    ForEach(ModelProviderCatalog.providers) { provider in
-                        Text(provider.displayName).tag(provider.id)
+                HStack {
+                    Text("服务商")
+                    Spacer()
+                    Picker("服务商", selection: providerSelection) {
+                        ForEach(ModelProviderCatalog.providers) { provider in
+                            Text(provider.displayName).tag(provider.id)
+                        }
                     }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .disabled(isDiscoveringModels)
+                    .accessibilityIdentifier("provider-picker")
                 }
-                .pickerStyle(.menu)
-                .disabled(isDiscoveringModels)
-                .accessibilityIdentifier("provider-picker")
             } else {
                 LabeledContent("Provider ID", value: profileID.isEmpty ? "未填写" : profileID)
             }
