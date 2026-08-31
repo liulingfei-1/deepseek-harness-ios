@@ -14,7 +14,8 @@ struct MemoryManagementView: View {
 
             Section {
                 if model.memoryRecords.isEmpty {
-                    ContentUnavailableView("没有已保存的记忆", systemImage: "brain")
+                    Label("没有已保存的记忆", systemImage: "brain")
+                        .foregroundStyle(.secondary)
                 } else {
                     ForEach(model.memoryRecords) { record in
                         MemoryRecordRow(record: record) {
@@ -22,10 +23,15 @@ struct MemoryManagementView: View {
                         }
                     }
                 }
+                DisclosureGroup("存储与发送范围") {
+                    Text("记忆只会在本机保存。模型通过 memory_write 显式保存的内容才会写入；不会自动复制整段对话。读取或注入的内容可能会发送给你配置的模型服务商。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, HarnessTheme.Spacing.xSmall)
+                }
             } header: {
                 Label("已保存的记忆", systemImage: "brain.head.profile")
-            } footer: {
-                Text("记忆只会在本机保存。模型通过 memory_write 显式保存的内容才会写入；不会自动复制整段对话。读取或注入的内容可能会发送给你配置的模型服务商。")
             }
 
             Section {
@@ -97,9 +103,13 @@ struct MemoryManagementView: View {
             Toggle("允许使用已保存的记忆", isOn: memoryEnabledBinding)
                 .disabled(!hasActiveSession)
                 .accessibilityHint("关闭后，本会话不会注入或读取已保存的记忆。")
-            Text(sessionExplanation)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+            DisclosureGroup("会话记忆说明") {
+                Text(sessionExplanation)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, HarnessTheme.Spacing.xSmall)
+            }
         } header: {
             Label("当前会话", systemImage: "bubble.left.and.bubble.right")
         }

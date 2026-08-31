@@ -169,6 +169,13 @@
 - 调整后截图：`/tmp/background-settings-final-attachments-0831-1/B54EF629-D6D5-4807-BB94-B5330278F214.png`、`/tmp/background-settings-final-attachments-0831-1/92BC714A-DF37-48CC-B663-28E43D2BC0CB.png`。
 - 专项测试：`HarnessMobileProgressiveDisclosureUITests/testSettingsGroupsBackgroundStorageAndPrivacyWithoutHidingRoutes` 1/1 通过（`/tmp/hm-background-settings-final/Logs/Test/Test-HarnessMobile-2026.08.31_19-06-42-+0800.xcresult`），覆盖真实设置入口、默认折叠、说明展开、系统投影和执行边界。真实后台调度、系统权限变化、深色、极限 Dynamic Type、VoiceOver、横屏和 iPhone 16 Pro 仍为 `VERIFY`。
 
+## 记忆管理空态与边界说明（2026-08-31）
+
+- 调整前截图：`/tmp/memory-management-audit-attachments-0831-1/A9944E61-2C86-4EA0-B7E1-D19256024D7B.png`。空态使用大尺寸 `ContentUnavailableView`，随后又永久展开本机存储和模型发送边界，页面大部分空间被重复空态与说明占据。
+- 调整：空态改为紧凑原生 `Label`；会话记忆行为及“本机保存/可能发送到配置服务商”的安全边界改为按需展开。导出 JSON、记录行、删除确认、刷新和会话记忆开关逻辑未改变。
+- 调整后截图：`/tmp/memory-management-final-attachments-0831-2/02112642-2CEB-4582-9CFA-2DDE504DE183.png`。
+- 专项测试：`HarnessMobileMemoryManagementUITests/testMemoryManagementKeepsSessionScopeAndExportVisible` 1/1 通过（`/tmp/hm-memory-management-final/Logs/Test/Test-HarnessMobile-2026.08.31_19-20-02-+0800.xcresult`），覆盖真实设置入口、当前会话开关、空态、默认折叠、安全说明展开和导出入口。非空记录、删除确认、真实文件导出、深色、极限 Dynamic Type、VoiceOver、横屏和 iPhone 16 Pro 仍为 `VERIFY`。
+
 ## 全界面覆盖清单（截至本轮）
 
 | 界面 | 已检查内容 | 状态 |

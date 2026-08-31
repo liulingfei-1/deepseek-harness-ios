@@ -174,6 +174,47 @@ final class HarnessMobilePhonePermissionsUITests: XCTestCase {
 }
 
 @MainActor
+final class HarnessMobileMemoryManagementUITests: XCTestCase {
+    func testMemoryManagementKeepsSessionScopeAndExportVisible() {
+        let app = XCUIApplication()
+        addTeardownBlock { app.terminate() }
+        app.launchArguments = [
+            "-reset-persistent-state-for-ui-testing",
+            "-bootstrap-configuration-for-ui-testing",
+            "-disable-animations-for-ui-testing",
+        ]
+        app.launch()
+
+        XCTAssertTrue(app.navigationBars["Harness"].waitForExistence(timeout: 15))
+        app.buttons["设置"].tap()
+        XCTAssertTrue(app.navigationBars["设置"].waitForExistence(timeout: 10))
+        let memory = app.buttons["settings-memory"]
+        scrollUntilHittable(memory, in: app)
+        memory.tap()
+
+        XCTAssertTrue(app.navigationBars["记忆"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.switches["允许使用已保存的记忆"].exists)
+        XCTAssertTrue(app.buttons["会话记忆说明"].exists)
+        XCTAssertFalse(app.staticTexts["关闭后，本会话不会注入或读取已保存的记忆。重新开启不会删除任何记录。"].exists)
+        XCTAssertTrue(app.staticTexts["已保存的记忆"].exists)
+        XCTAssertTrue(app.staticTexts["没有已保存的记忆"].exists)
+        XCTAssertTrue(app.buttons["memory-export-json"].exists)
+        let privacyDetails = app.buttons["存储与发送范围"]
+        XCTAssertTrue(privacyDetails.exists)
+        let privacyExplanation = app.staticTexts.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "记忆只会在本机保存")
+        ).firstMatch
+        XCTAssertFalse(privacyExplanation.exists)
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "memory-management-empty-state"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        privacyDetails.tap()
+        XCTAssertTrue(privacyExplanation.waitForExistence(timeout: 5))
+    }
+}
+
+@MainActor
 final class HarnessMobileConcurrentRunsUITests: XCTestCase {
     func testCreatingAndSwitchingSessionsKeepsBothRootRunsVisible() {
         let app = XCUIApplication()
