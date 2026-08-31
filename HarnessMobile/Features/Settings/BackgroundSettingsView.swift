@@ -144,10 +144,12 @@ private struct BackgroundSystemProjectionSection: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            BackgroundDetailsRow(
+                title: "投影范围",
+                text: "这里显示所有并行任务的汇总状态。不会显示提示词、工具参数、工具输出或模型正文；降级只表示对应系统能力当前不可用。"
+            )
         } header: {
             Label("当前系统投影", systemImage: "waveform.path.ecg")
-        } footer: {
-            Text("这里显示所有并行任务的汇总状态。不会显示提示词、工具参数、工具输出或模型正文；降级只表示对应系统能力当前不可用。")
         }
     }
 
@@ -229,14 +231,14 @@ private struct BackgroundLiveActivitySettingsSection: View {
                 Toggle("实时活动", isOn: .constant(false))
                     .disabled(true)
             }
+            BackgroundDetailsRow(
+                title: "实时活动说明",
+                text: isSystemSupported
+                    ? "显示当前会话、步骤、工具和真实进度。它只投影任务状态，不会让 App 获得永久后台执行能力；关闭后会立即移除当前实时活动。"
+                    : "当前设备环境不支持 ActivityKit 实时活动。"
+            )
         } header: {
             Label("锁屏与灵动岛", systemImage: "rectangle.topthird.inset.filled")
-        } footer: {
-            if isSystemSupported {
-                Text("显示当前会话、步骤、工具和真实进度。它只投影任务状态，不会让 App 获得永久后台执行能力；关闭后会立即移除当前实时活动。")
-            } else {
-                Text("当前设备环境不支持 ActivityKit 实时活动。")
-            }
         }
     }
 }
@@ -253,14 +255,14 @@ private struct BackgroundExecutionSettingsSection: View {
                 Toggle("增强后台处理", isOn: .constant(false))
                     .disabled(true)
             }
+            BackgroundDetailsRow(
+                title: "工作方式与限制",
+                text: isSystemSupported
+                    ? "组合使用 iOS 26 Continued Processing 与任务期间的音频/定位延展。系统后台时间配额到期时，只要延展层仍健康，就结束旧 lease、续挂新的有限 lease，并继续同一个任务和上下文；这不是模型服务商额度续期，系统仍可因资源、温度或用户操作终止 App。"
+                    : "当前系统不支持 Continued Processing。iOS 18–25 下只使用系统提供的短时后台时间，不承诺持续运行。"
+            )
         } header: {
             Label("后台执行", systemImage: "arrow.clockwise.icloud")
-        } footer: {
-            if isSystemSupported {
-                Text("组合使用 iOS 26 Continued Processing 与任务期间的音频/定位延展。系统后台时间配额到期时，只要延展层仍健康，就结束旧 lease、续挂新的有限 lease，并继续同一个任务和上下文；这不是模型服务商额度续期，系统仍可因资源、温度或用户操作终止 App。")
-            } else {
-                Text("当前系统不支持 Continued Processing。iOS 18–25 下只使用系统提供的短时后台时间，不承诺持续运行。")
-            }
         }
     }
 }
@@ -278,10 +280,12 @@ private struct BackgroundLocationKeepAliveSettingsSection: View {
                 Button("请求 Always 定位授权", action: requestAuthorization)
             }
             LabeledContent("当前状态", value: phaseLabel)
+            BackgroundDetailsRow(
+                title: "定位用途与隐私",
+                text: "仅在开启此开关、已允许 Always 定位、后台停留约 15 秒且仍有任务运行时使用约 3 公里精度的位置服务。不会保存、显示或上传坐标；普通一次定位工具不会触发此授权。"
+            )
         } header: {
             Label("可选定位保活", systemImage: "location.fill")
-        } footer: {
-            Text("仅在开启此开关、已允许 Always 定位、后台停留约 15 秒且仍有任务运行时使用约 3 公里精度的位置服务。不会保存、显示或上传坐标；普通一次定位工具不会触发此授权。")
         }
     }
 
@@ -316,16 +320,19 @@ private struct BackgroundNotificationSettingsSection: View {
         Section {
             Toggle("任务通知", isOn: $isEnabled)
             LabeledContent("系统权限", value: authorizationLabel)
-        } header: {
-            Label("任务通知", systemImage: "bell.badge")
-        } footer: {
             if let errorDescription {
                 Text("通知授权失败：\(errorDescription)")
+                    .foregroundStyle(.red)
             } else if authorization == .denied {
                 Text("通知偏好已保存，但系统权限被拒绝；在系统设置中允许通知后才能收到任务完成提醒。")
-            } else {
-                Text("仅在任务结束时发送本地通知。开启开关时才请求系统通知权限。")
+                    .foregroundStyle(.orange)
             }
+            BackgroundDetailsRow(
+                title: "通知说明",
+                text: "仅在任务结束时发送本地通知。开启开关时才请求系统通知权限。"
+            )
+        } header: {
+            Label("任务通知", systemImage: "bell.badge")
         }
     }
 
@@ -349,10 +356,12 @@ private struct BackgroundPrivacySettingsSection: View {
     var body: some View {
         Section {
             Toggle("任务状态隐私", isOn: $isEnabled)
+            BackgroundDetailsRow(
+                title: "隐私显示说明",
+                text: "开启后，锁屏、灵动岛状态和完成通知只显示通用任务状态，不显示会话标题、工具名称或回复内容。"
+            )
         } header: {
             Label("隐私显示", systemImage: "eye.slash")
-        } footer: {
-            Text("开启后，锁屏、灵动岛状态和完成通知只显示通用任务状态，不显示会话标题、工具名称或回复内容。")
         }
     }
 }
@@ -375,10 +384,12 @@ private struct BackgroundRuntimeStatusSection: View {
                 value: liveActivityStatus
             )
             runtimeContent
+            BackgroundDetailsRow(
+                title: "状态说明",
+                text: "Continued Processing 和实时活动都由 iOS 管理。实时活动只显示真实任务状态；两者都不是无限后台或常驻进程保证。"
+            )
         } header: {
             Label("状态", systemImage: "chart.bar.xaxis")
-        } footer: {
-            Text("Continued Processing 和实时活动都由 iOS 管理。实时活动只显示真实任务状态；两者都不是无限后台或常驻进程保证。")
         }
     }
 
@@ -428,6 +439,21 @@ private struct BackgroundRuntimeStatusSection: View {
         case .interrupted:
             HarnessStatusPill(title: "已被系统中断", systemImage: "pause.circle", tint: .orange)
         }
+    }
+}
+
+private struct BackgroundDetailsRow: View {
+    let title: String
+    let text: String
+
+    var body: some View {
+        DisclosureGroup(title) {
+            Text(text)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, HarnessTheme.Spacing.xSmall)
+        }
+        .font(.footnote)
     }
 }
 

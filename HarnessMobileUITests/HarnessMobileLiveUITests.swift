@@ -446,12 +446,32 @@ final class HarnessMobileProgressiveDisclosureUITests: XCTestCase {
         scrollUntilHittable(app.buttons["settings-background-tasks"], in: app)
         app.buttons["settings-background-tasks"].tap()
         XCTAssertTrue(app.navigationBars["后台任务"].waitForExistence(timeout: 10))
+        let firstScreen = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        firstScreen.name = "background-settings-first-screen"
+        firstScreen.lifetime = .keepAlways
+        add(firstScreen)
+        let executionDetails = app.buttons["工作方式与限制"]
+        XCTAssertTrue(executionDetails.isHittable)
+        let executionExplanation = app.staticTexts.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "组合使用 iOS 26")
+        ).firstMatch
+        XCTAssertFalse(executionExplanation.exists)
+        executionDetails.tap()
+        XCTAssertTrue(executionExplanation.waitForExistence(timeout: 5))
+        executionDetails.tap()
         let projectionHeader = app.staticTexts["当前系统投影"]
         scrollUntilExists(projectionHeader, in: app)
         XCTAssertTrue(projectionHeader.exists)
         let activeRuns = app.staticTexts["活动任务"]
         scrollUntilExists(activeRuns, in: app)
         XCTAssertTrue(activeRuns.exists)
+        let safetyBoundary = app.staticTexts["执行边界"]
+        scrollUntilExists(safetyBoundary, in: app)
+        XCTAssertTrue(safetyBoundary.exists)
+        let lastScreen = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        lastScreen.name = "background-settings-last-screen"
+        lastScreen.lifetime = .keepAlways
+        add(lastScreen)
     }
 
     func testProviderManagementMovesRequestBehaviorToFocusedSubpage() {

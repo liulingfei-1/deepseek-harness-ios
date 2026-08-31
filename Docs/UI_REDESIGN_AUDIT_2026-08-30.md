@@ -162,6 +162,13 @@
 - 调整后截图：`/tmp/phone-permissions-final-attachments-0831-2/A502CCCE-15EB-4DCF-8B34-48DBA2D83910.png`、`/tmp/phone-permissions-final-attachments-0831-2/27DA6045-4F38-4775-9CFB-6C2D59AA5122.png`。
 - 专项测试：`HarnessMobilePhonePermissionsUITests/testPhonePermissionsShowsGroupedStatusAndSystemSettingsLink` 1/1 通过（`/tmp/hm-phone-permissions-final/Logs/Test/Test-HarnessMobile-2026.08.31_18-56-24-+0800.xcresult`），覆盖真实设置入口、状态文字、默认折叠、用途展开、分组和 iOS 设置入口。真机权限状态变化、深色、极限 Dynamic Type、VoiceOver 和横屏仍为 `VERIFY`。
 
+## 后台任务设置渐进披露（2026-08-31）
+
+- 调整前截图：`/tmp/background-settings-audit-attachments-0831-1/FA42747D-D88A-42B3-BED5-AF6B4EE99C8E.png`、`/tmp/background-settings-audit-attachments-0831-1/6584B545-AD81-4EAA-B7B8-E6B9B317C841.png`。后台执行、定位、实时活动、通知、隐私、状态和系统投影的技术说明全部永久展开，关键开关和状态被长段落分隔。
+- 调整：复用原生 `DisclosureGroup`，普通工作方式、安全限制和隐私范围默认折叠；通知拒绝和授权错误仍直接显示，执行边界仍保持可见。后台偏好、定位授权、通知请求、Live Activity 和运行状态逻辑未改变。
+- 调整后截图：`/tmp/background-settings-final-attachments-0831-1/B54EF629-D6D5-4807-BB94-B5330278F214.png`、`/tmp/background-settings-final-attachments-0831-1/92BC714A-DF37-48CC-B663-28E43D2BC0CB.png`。
+- 专项测试：`HarnessMobileProgressiveDisclosureUITests/testSettingsGroupsBackgroundStorageAndPrivacyWithoutHidingRoutes` 1/1 通过（`/tmp/hm-background-settings-final/Logs/Test/Test-HarnessMobile-2026.08.31_19-06-42-+0800.xcresult`），覆盖真实设置入口、默认折叠、说明展开、系统投影和执行边界。真实后台调度、系统权限变化、深色、极限 Dynamic Type、VoiceOver、横屏和 iPhone 16 Pro 仍为 `VERIFY`。
+
 ## 全界面覆盖清单（截至本轮）
 
 | 界面 | 已检查内容 | 状态 |
