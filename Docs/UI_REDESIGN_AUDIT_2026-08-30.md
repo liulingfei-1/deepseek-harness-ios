@@ -218,6 +218,13 @@
 - 调整后截图：`/tmp/approvals-final-attachments-0831-1/8AE11C50-F307-4DFF-87E7-A1B42C334603.png`。
 - 专项测试：`HarnessMobileProgressiveDisclosureUITests/testToolApprovalsShowsRememberedGrantState` 1/1 通过（`/tmp/hm-approvals-final-0831/Logs/Test/Test-HarnessMobile-2026.08.31_23-15-53-+0800.xcresult`），覆盖设置真实入口、稳定语义 ID、空态文案和旧误导标题移除。非空授权、逐项/全部撤销确认、无障碍矩阵和真机仍为 `VERIFY`。
 
+## Agent 编排 Bundle 层级（2026-08-31）
+
+- 调整前截图：`/tmp/agent-bundles-audit-attachments-0831-1/008D017D-EEBE-4FD5-810A-0E49640B868F.png`。页面使用内部标题 `RC.8 Profile Bundles`，每个原生 Toggle 下又重复“未启用”状态胶囊，安装安全说明永久占据底部大段空间。
+- 调整：分区标题统一为“内置 Agent Bundle”；删除与 Toggle 重复的启用胶囊；完整 URL/SHA-256/npm/CLI/API Key 边界放入原生“安装与安全”折叠项，同时保留可见的 iSH 安装和原子替换摘要。Bundle 名称、固定版本来源、安装/重装/取消、校验及启用错误逻辑不变。
+- 调整后截图：`/tmp/agent-bundles-final-attachments-0831-1/A5882AB2-4675-48F6-B4B3-5104EAA534F5.png`。
+- 专项测试：`HarnessMobileProgressiveDisclosureUITests/testAgentBundlesKeepsInstallControlsReachable` 1/1 通过（`/tmp/hm-agent-bundles-final-0831/Logs/Test/Test-HarnessMobile-2026.08.31_23-23-57-+0800.xcresult`），覆盖设置真实入口、两个安装按钮、标题、重复状态移除和安全说明展开。真实 iSH 安装/取消/重装、启用、无障碍矩阵和真机仍为 `VERIFY`。
+
 ## 全界面覆盖清单（截至本轮）
 
 | 界面 | 已检查内容 | 状态 |
@@ -242,5 +249,6 @@
 | 记忆管理 | 当前会话开关、记忆列表、导出和删除 | VERIFY |
 | 详细日志 | 运行/Host 状态、刷新、脱敏导出和性能采样 | VERIFY |
 | 工具授权 | 空态、长期授权范围和撤销入口 | VERIFY |
+| Agent 编排 Bundle | 启用、安装状态、固定来源和安全说明 | VERIFY |
 
 `DONE` 表示已有代码调整并通过构建或专项证据；`VERIFY` 表示已检查结构但仍缺少完整的深色、极限 Dynamic Type、横屏、VoiceOver 或真机截图证据。当前未将 `VERIFY` 页面冒充为完成。

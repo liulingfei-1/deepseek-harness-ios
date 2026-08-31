@@ -48,6 +48,7 @@ struct SettingsView: View {
                 } label: {
                     SettingsLinkLabel(title: "Agent 编排 Bundle", systemImage: "arrow.triangle.branch", tint: .indigo)
                 }
+                .accessibilityIdentifier("settings-agent-bundles")
                 NavigationLink {
                     PhonePermissionsView()
                 } label: {

@@ -622,6 +622,36 @@ final class HarnessMobileProgressiveDisclosureUITests: XCTestCase {
         add(screenshot)
     }
 
+    func testAgentBundlesKeepsInstallControlsReachable() {
+        let app = launchConfiguredApp()
+        addTeardownBlock { app.terminate() }
+
+        app.buttons["设置"].tap()
+        XCTAssertTrue(app.navigationBars["设置"].waitForExistence(timeout: 15))
+        let bundles = app.descendants(matching: .any)["settings-agent-bundles"]
+        scrollUntilHittable(bundles, in: app)
+        bundles.tap()
+
+        XCTAssertTrue(app.navigationBars["Agent 编排"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["内置 Agent Bundle"].exists)
+        XCTAssertFalse(app.staticTexts["RC.8 Profile Bundles"].exists)
+        XCTAssertFalse(app.staticTexts["未启用"].exists)
+        XCTAssertTrue(app.buttons["安装到手机"].firstMatch.exists)
+        let installationDetails = app.buttons["安装与安全"]
+        XCTAssertTrue(installationDetails.exists)
+        let explanation = app.staticTexts.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "URL、SHA-256")
+        ).firstMatch
+        XCTAssertFalse(explanation.exists)
+        installationDetails.tap()
+        XCTAssertTrue(explanation.waitForExistence(timeout: 5))
+        installationDetails.tap()
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "agent-bundles"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     private func launchConfiguredApp() -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = [

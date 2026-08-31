@@ -20,11 +20,6 @@ struct AgentProviderBundlesView: View {
                                 )
                             }
                         }
-                        HarnessStatusPill(
-                            title: bundle.enabled ? "已启用" : "未启用",
-                            systemImage: bundle.enabled ? "checkmark.circle.fill" : "pause.circle",
-                            tint: bundle.enabled ? .green : .secondary
-                        )
                         installStatus(for: bundle)
                         installActions(for: bundle)
                         Text("固定来源：\(bundle.installPayload.packageName)@\(bundle.installPayload.version)")
@@ -33,10 +28,16 @@ struct AgentProviderBundlesView: View {
                     }
                     .padding(.vertical, 4)
                 }
+
+                DisclosureGroup("安装与安全") {
+                    Text("URL、SHA-256、npm 包身份、CLI 名称和命令均来自不可编辑的内置清单。下载会校验后原子替换；失败或取消会保留旧版本。安装器不会读取模型服务 API Key。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             } header: {
-                Text("RC.8 Profile Bundles")
+                Text("内置 Agent Bundle")
             } footer: {
-                Text("安装在手机 iSH 内完成：URL、SHA-256、npm 包身份、CLI 名称和命令均来自不可编辑的内置清单。下载会校验后原子替换；失败或取消会保留旧版本。安装器不会读取模型服务 API Key。")
+                Text("安装在手机 iSH 内完成，下载校验后原子替换。")
             }
         }
         .harnessCompactListChrome()
