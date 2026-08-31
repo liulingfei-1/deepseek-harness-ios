@@ -189,6 +189,13 @@
 - 结论：空会话只保留单一“有什么要处理？”入口和常驻输入栏；错误使用可关闭的行内提示，没有模态弹窗，也没有遮挡会话标题。消息操作按钮保留 44pt 点击区和现有上下文菜单，未为追求更小视觉而牺牲无障碍。
 - 本轮不改生产 UI；新增专项证据防止空态、输入栏和错误条后续回归。`HarnessMobileChatChromeUITests` 2/2 通过（`/tmp/hm-chat-chrome-audit/Logs/Test/Test-HarnessMobile-2026.08.31_19-36-38-+0800.xcresult`）。运行中、排队输入、图片/文件、审批、长对话、深色、极限 Dynamic Type、VoiceOver、横屏和 iPhone 16 Pro 仍为 `VERIFY`。
 
+## 核心页面无障碍布局矩阵（2026-08-31）
+
+- 组合条件：深色模式、横屏、辅助功能 XXXL 字号；覆盖首页项目列表、聊天输入、设置路由和 iSH 命令输入四个真实入口。
+- `HarnessMobileAccessibilityUITests` 4/4 通过（`/tmp/hm-accessibility-matrix-0831/Logs/Test/Test-HarnessMobile-2026.08.31_22-23-36-+0800.xcresult`）。断言项目名、设置/工具入口、会话选项、添加/命令/发送、模型服务商、手机权限、终端输入/运行均可达且主要操作保持至少 44pt 点击区。
+- 原始截图：`/tmp/accessibility-matrix-attachments-0831-1/7BF8A086-949D-469F-9254-2BFAFF73E36E.png`、`61534177-7DD0-408C-A6DA-C417A09C77A1.png`、`B7529A9B-DA35-4FC2-8672-E4F222EAE188.png`、`F4B33080-598F-4914-9A40-A43FE0948373.png`。附件的横屏方向元数据未被预览器识别，审计时仅生成 `/tmp/accessibility-*-upright.png` 旋转副本，未修改测试原件或生产代码。
+- 结论：未发现文字截断、关键控件不可达或点击区不足。聊天和终端在键盘展开时只保留当前操作所需区域，符合横屏可用高度；没有为此新增自定义布局。VoiceOver 朗读顺序、不同设备尺寸和 iPhone 16 Pro 真机触控仍为 `VERIFY`。
+
 ## 全界面覆盖清单（截至本轮）
 
 | 界面 | 已检查内容 | 状态 |
