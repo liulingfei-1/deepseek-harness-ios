@@ -115,6 +115,14 @@
 - 问题：Setup 内的模型选择子页使用原生 `List`，没有继承设置页统一的页面背景、紧凑行高和滚动内容样式。
 - 调整：复用现有 `harnessCompactListChrome()`；模型搜索、选中态和返回逻辑不变。
 
+### Setup 首次配置渐进披露（2026-08-31）
+
+- 调整前截图：`/tmp/harness-after-bootstrap-relaunch.png`。首次配置把服务商、连接、模型、高级推理和安全边界放在同一张长表单里；连接和模型说明也沿用编辑页的完整技术文案。
+- 调整：首次配置只保留服务商、连接、模型和安全边界；高级推理仍完整保留在保存后的服务商编辑页。首次配置的连接与模型说明压缩为当前操作所需信息，没有删除 Keychain、本机 Agent Loop 或第三方模型请求边界。
+- 调整后截图：`/tmp/harness-setup-progressive-0831-2.png`。
+- 专项测试：`HarnessMobileOnboardingUITests` 2/2 通过（`/tmp/hm-onboarding-ui/Logs/Test`）；新增测试确认安全边界仍可达且首次配置不展示“推理”段。
+- 当前状态：模拟器代码与交互验证完成；iPhone 16 Pro 上的新构建覆盖安装、深色、极限 Dynamic Type、VoiceOver 和横屏仍为 `VERIFY`。
+
 ## 后台任务面板复核（本轮）
 
 - 问题：聊天页打开的后台任务面板单独使用 `.insetGrouped`，与应用其他列表页面的统一背景、行高和分隔策略不一致。

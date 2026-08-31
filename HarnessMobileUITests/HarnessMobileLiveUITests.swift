@@ -12,6 +12,26 @@ final class HarnessMobileOnboardingUITests: XCTestCase {
         launchResetAndAssertOnboarding(app)
     }
 
+    func testOnboardingKeepsAdvancedInferenceInSettings() {
+        let app = XCUIApplication()
+        addTeardownBlock {
+            app.terminate()
+        }
+
+        app.launchArguments = [
+            "-reset-persistent-state-for-ui-testing",
+            "-disable-animations-for-ui-testing",
+        ]
+        app.launch()
+
+        XCTAssertTrue(app.navigationBars["配置 Harness"].waitForExistence(timeout: 15))
+        for _ in 0..<6 {
+            app.swipeUp(velocity: .fast)
+        }
+        XCTAssertTrue(app.staticTexts["安全边界"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["推理"].exists)
+    }
+
     private func launchResetAndAssertOnboarding(_ app: XCUIApplication) {
         app.launchArguments = [
             "-reset-persistent-state-for-ui-testing",

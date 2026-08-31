@@ -200,7 +200,9 @@ struct SetupView: View {
                 identitySection
                 connectionSection
                 modelSection
-                inferenceSection
+                if mode != .onboarding {
+                    inferenceSection
+                }
                 securitySection
 
                 if let inlineError {
@@ -340,7 +342,9 @@ struct SetupView: View {
             Text("连接")
         } footer: {
             Text(
-                "API Key 只写入该 Provider ID 的本机 Keychain 项，并绑定当前 HTTPS 域名和端口。模型推理走所选服务商，Agent Loop 和工具仍在这台 iPhone 内执行。"
+                mode == .onboarding
+                    ? "API Key 只存本机 Keychain；模型请求发往所选服务商，Agent Loop 和工具仍在 iPhone 本机执行。"
+                    : "API Key 只写入该 Provider ID 的本机 Keychain 项，并绑定当前 HTTPS 域名和端口。模型推理走所选服务商，Agent Loop 和工具仍在这台 iPhone 内执行。"
             )
         }
     }
@@ -401,7 +405,9 @@ struct SetupView: View {
             Text("模型")
         } footer: {
             Text(
-                "目录之外的模型可直接填写。刷新时，当前输入的 Key 只用于本次同源 /models 请求；请求完成后该字段会清空，保存前需要重新输入。"
+                mode == .onboarding
+                    ? "可从目录选择或直接填写模型 ID；刷新目录只临时使用当前 Key。"
+                    : "目录之外的模型可直接填写。刷新时，当前输入的 Key 只用于本次同源 /models 请求；请求完成后该字段会清空，保存前需要重新输入。"
             )
         }
     }
