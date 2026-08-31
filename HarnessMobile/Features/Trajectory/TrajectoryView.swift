@@ -41,11 +41,13 @@ struct TrajectoryView: View {
         VStack(spacing: 0) {
             TrajectoryMetricsHeader(summary: summary)
 
-            HarnessTraceStrip(
-                events: model.harnessTraceEvents,
-                summary: model.harnessTraceSummary,
-                action: { state.isHarnessInspectorPresented = true }
-            )
+            if !model.harnessTraceEvents.isEmpty {
+                HarnessTraceStrip(
+                    events: model.harnessTraceEvents,
+                    summary: model.harnessTraceSummary,
+                    action: { state.isHarnessInspectorPresented = true }
+                )
+            }
 
             Picker("轨迹视图", selection: $state.mode) {
                 ForEach(TrajectoryLedgerMode.allCases) { candidate in
@@ -63,7 +65,12 @@ struct TrajectoryView: View {
         }
         .navigationTitle(navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $state.query, prompt: "搜索类型、内容、工具或 Call ID")
+        .searchable(
+            text: $state.query,
+            placement: .navigationBarDrawer(displayMode: .always),
+            prompt: "搜索类型、内容、工具或 Call ID"
+        )
+        .searchPresentationToolbarBehavior(.avoidHidingContent)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 collapseMenu(projection)

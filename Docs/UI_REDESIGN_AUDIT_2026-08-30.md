@@ -102,6 +102,13 @@
 - 专项测试：`HarnessMobileTrajectoryUITests/testTrajectoryLedgersSearchCollapseAndInspect` 1/1 通过（`/tmp/hm-trajectory-localized-final/Logs/Test`），覆盖耗时/回合/调用三种视图、折叠、搜索、工具调用与工具结果 Inspector。
 - 当前状态：模拟器布局与交互通过；深色、极限 Dynamic Type、VoiceOver、横屏和 iPhone 16 Pro 新构建仍为 `VERIFY`。
 
+### 轨迹首屏诊断空态与搜索遮挡（2026-08-31）
+
+- 调整前截图：`/tmp/trajectory-capture-attachments-0831-1/824E96A8-1E88-40B9-81EE-CA8CF569D5C7.png`。Harness Trace 没有事件时仍显示“0 个检查点 · 0 个插件”整行入口，底部系统搜索栏也会覆盖滚动内容。
+- 调整：仅在存在真实 Harness Trace 事件时显示原有运行时入口，Inspector 和错误摘要能力不变；搜索继续使用 SwiftUI `searchable`，复用导航栏抽屉配置并启用系统 `avoidHidingContent`，没有新增自绘搜索或固定魔法间距。
+- 调整后截图：`/tmp/trajectory-final3-attachments-0831-1/9EFB37A3-3D44-4CDC-AD4C-ECD0081D99C0.png`。首屏直接进入会话轨迹，iOS 27 保留底部系统搜索外观并负责内容安全区。
+- 专项测试：`HarnessMobileTrajectoryUITests/testTrajectoryLedgersSearchCollapseAndInspect` 1/1 通过（`/tmp/hm-trajectory-final3-0831/Logs/Test/Test-HarnessMobile-2026.08.31_22-54-22-+0800.xcresult`），覆盖空 Trace 条隐藏、三种账本、折叠、搜索、工具调用与结果 Inspector。真实 Harness Trace 内容、深色、极限 Dynamic Type、VoiceOver、横屏和真机仍为 `VERIFY`。
+
 ## 原生客户端详情页复核（本轮）
 
 - 问题：详情页分区标题混用 `Native Client / Settings / Commands` 英文，与中文设置和插件市场页面不一致；技术值本身仍需保留原文。

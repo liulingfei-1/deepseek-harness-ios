@@ -675,6 +675,12 @@ final class HarnessMobileTrajectoryUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["首字延迟"].exists)
         XCTAssertTrue(app.staticTexts["输出"].exists)
         XCTAssertTrue(app.staticTexts["缓存"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["harness-trace-strip"].exists)
+
+        let initialScreen = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        initialScreen.name = "trajectory-overview"
+        initialScreen.lifetime = .keepAlways
+        add(initialScreen)
 
         let ledger = app.segmentedControls.firstMatch
         XCTAssertTrue(ledger.waitForExistence(timeout: 5))
