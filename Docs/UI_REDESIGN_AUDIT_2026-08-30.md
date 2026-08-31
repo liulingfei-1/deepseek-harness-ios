@@ -211,6 +211,13 @@
 - 调整后截图：`/tmp/diagnostic-final-attachments-0831-1/516E89A6-C5CD-4342-AFD6-2E3DB6A2F55B.png`。
 - 专项测试：`HarnessMobileProgressiveDisclosureUITests/testDiagnosticLogKeepsRuntimeAndExportActionsReachable` 1/1 通过（`/tmp/hm-diagnostic-final-0831/Logs/Test/Test-HarnessMobile-2026.08.31_23-03-43-+0800.xcresult`），覆盖设置真实入口、运行/Host 状态、刷新、导出、默认折叠及说明展开。真实文件导出、Host stderr、采样数据、无障碍矩阵和真机仍为 `VERIFY`。
 
+## 工具授权空态（2026-08-31）
+
+- 调整前截图：`/tmp/approvals-audit-attachments-0831-1/0048B1D2-DC01-43A0-B2DF-2C0A62C339DA.png`。没有长期授权时仍显示大尺寸“已记住的工具授权”卡片，既占据首屏又错误暗示已有内容。
+- 调整：空状态改为紧凑原生 `Label`“暂无长期工具授权”，将“始终允许”保存条件和 iOS 系统权限边界保留在 section footer；有内容时直接显示原有风险、资源、模型目的地和逐项/全部撤销操作。
+- 调整后截图：`/tmp/approvals-final-attachments-0831-1/8AE11C50-F307-4DFF-87E7-A1B42C334603.png`。
+- 专项测试：`HarnessMobileProgressiveDisclosureUITests/testToolApprovalsShowsRememberedGrantState` 1/1 通过（`/tmp/hm-approvals-final-0831/Logs/Test/Test-HarnessMobile-2026.08.31_23-15-53-+0800.xcresult`），覆盖设置真实入口、稳定语义 ID、空态文案和旧误导标题移除。非空授权、逐项/全部撤销确认、无障碍矩阵和真机仍为 `VERIFY`。
+
 ## 全界面覆盖清单（截至本轮）
 
 | 界面 | 已检查内容 | 状态 |
@@ -234,5 +241,6 @@
 | 手机权限 | 权限分组、状态刷新和 iOS 设置入口 | VERIFY |
 | 记忆管理 | 当前会话开关、记忆列表、导出和删除 | VERIFY |
 | 详细日志 | 运行/Host 状态、刷新、脱敏导出和性能采样 | VERIFY |
+| 工具授权 | 空态、长期授权范围和撤销入口 | VERIFY |
 
 `DONE` 表示已有代码调整并通过构建或专项证据；`VERIFY` 表示已检查结构但仍缺少完整的深色、极限 Dynamic Type、横屏、VoiceOver 或真机截图证据。当前未将 `VERIFY` 页面冒充为完成。

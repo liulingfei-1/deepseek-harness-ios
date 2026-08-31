@@ -72,6 +72,7 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                .accessibilityIdentifier("settings-tool-approvals")
                 LabeledContent("本机工具", value: "\(ProductionToolCatalog.approvedNames.count) 项")
             } header: { Label("工具与插件", systemImage: "puzzlepiece.extension") }
 
@@ -394,14 +395,13 @@ private struct ToolApprovalSettingsView: View {
 
     var body: some View {
         Form {
-            Section {
-                ContentUnavailableView(
-                    "已记住的工具授权",
-                    systemImage: "checkmark.shield",
-                    description: Text("只有你在首次弹窗中明确选择“始终允许”才会保存。iOS 系统隐私权限仍由系统单独管理。")
-                )
-            }
-            if !model.trustedToolApprovals.isEmpty {
+            if model.trustedToolApprovals.isEmpty {
+                Section {
+                    Label("暂无长期工具授权", systemImage: "checkmark.shield")
+                } footer: {
+                    Text("只有在首次弹窗中选择“始终允许”才会保存；iOS 系统隐私权限仍由系统单独管理。")
+                }
+            } else {
                 Section {
                     ForEach(model.trustedToolApprovals) { grant in
                         ToolApprovalGrantRow(grant: grant) {
@@ -413,6 +413,8 @@ private struct ToolApprovalSettingsView: View {
                     }
                 } header: {
                     Text("长期授权")
+                } footer: {
+                    Text("iOS 系统隐私权限仍由系统单独管理。")
                 }
             }
         }

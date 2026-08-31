@@ -603,6 +603,25 @@ final class HarnessMobileProgressiveDisclosureUITests: XCTestCase {
         add(screenshot)
     }
 
+    func testToolApprovalsShowsRememberedGrantState() {
+        let app = launchConfiguredApp()
+        addTeardownBlock { app.terminate() }
+
+        app.buttons["设置"].tap()
+        XCTAssertTrue(app.navigationBars["设置"].waitForExistence(timeout: 15))
+        let approvals = app.descendants(matching: .any)["settings-tool-approvals"]
+        scrollUntilHittable(approvals, in: app)
+        approvals.tap()
+
+        XCTAssertTrue(app.navigationBars["工具授权"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["暂无长期工具授权"].exists)
+        XCTAssertFalse(app.staticTexts["已记住的工具授权"].exists)
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "tool-approvals"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     private func launchConfiguredApp() -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = [
