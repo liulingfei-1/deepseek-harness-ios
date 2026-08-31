@@ -1,5 +1,42 @@
 # Harness Mobile 协作规范
 
+## Harness 控制入口
+
+本仓库使用 `AGENTS.md` + 12 份根级控制文档约束产品、设计、实现和验收。所有任务先读本文件；开始改动前再读 [PRD](PRD.md) 和 [决策记录](DECISIONS.md)，并按下表加载与改动直接相关的文档。不要为了“完整上下文”一次灌入所有大文件。
+
+| 控制文档 | 控制内容 | 何时必读 |
+| --- | --- | --- |
+| [PRD.md](PRD.md) | 产品目标、用户任务、范围与成功标准 | 所有产品/能力改动 |
+| [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md) | 视觉令牌、组件、层级与 UI 门禁 | 所有界面改动 |
+| [APP_FLOW.md](APP_FLOW.md) | 启动、项目、对话、工具、插件与恢复流程 | 路由、状态流、交互改动 |
+| [FRONTEND_GUIDELINES.md](FRONTEND_GUIDELINES.md) | SwiftUI、状态、交互、无障碍与性能 | `App/`、`Features/`、扩展 UI |
+| [BACKEND_STRUCTRUE.md](BACKEND_STRUCTRUE.md) | 设备内业务层、数据真源、并发与执行边界 | Runtime、Store、Network、Tools、Plugins |
+| [SECURITY_GUIDELINES.md](SECURITY_GUIDELINES.md) | 凭据、路径、网络、插件、权限与脱敏 | 任何信任边界改动 |
+| [CAPABILITY_CATALOG.md](CAPABILITY_CATALOG.md) | 产品能力、生产注册与状态 | 新增/扩大/下线能力 |
+| [TECH_STACK.md](TECH_STACK.md) | 平台、Target、依赖和构建真源 | 工程、依赖、工具链改动 |
+| [QUALITY_GUIDELINES.md](QUALITY_GUIDELINES.md) | 测试、证据、失败处理与 Done | 所有实现和验收 |
+| [PLATFORM_GUIDELINES.md](PLATFORM_GUIDELINES.md) | iOS 权限、后台、设备、entitlement 和 UI 行为 | iOS 系统能力与真机工作 |
+| [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) | 阶段、顺序、验收门与真机矩阵 | 规划、选下一项、收尾 |
+| [DECISIONS.md](DECISIONS.md) | 已接受架构与产品决策 | 所有可能改变既有方向的改动 |
+
+### 控制优先级
+
+1. `AGENTS.md`、安全与平台硬边界不能被实现便利绕过。
+2. 已接受的 `DECISIONS.md` 约束方向；要改变它先新增取代决策。
+3. `PRD.md`、`APP_FLOW.md` 和 `CAPABILITY_CATALOG.md` 定义产品行为。
+4. 设计、前后端、技术栈和质量文档约束实现方式。
+5. `IMPLEMENTATION_PLAN.md` 只控制顺序，不能降低上面的验收标准。
+
+源码、测试和设备结果是“当前实现事实”的最终证据；文档与事实冲突时先停止扩散，确认正确方向后同步修正，不静默选择对当前改动最方便的一方。
+
+### 文档同步
+
+- 产品范围或用户流程变化：更新 `PRD.md`、`APP_FLOW.md`、`CAPABILITY_CATALOG.md`，必要时追加决策。
+- UI 变化：更新设计/UI 审计与最小 UI 证据。
+- Runtime、存储或网络边界变化：更新后端结构、安全和相应决策。
+- Target、依赖、entitlement 或工具链变化：更新技术栈与平台规范。
+- 每个实现补丁仍必须更新 `Docs/DESKTOP_PARITY_REMEDIATION.md`；阶段变化再更新 `IMPLEMENTATION_PLAN.md`。
+
 ## 项目边界
 
 - 这是 DeepSeek Harness 的 iOS 原生移植；模型通过用户配置的 API 推理，工具、插件和命令只允许在手机本机或 iSH 沙箱执行。
