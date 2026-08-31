@@ -129,6 +129,51 @@ final class HarnessMobileSessionModelPickerUITests: XCTestCase {
 }
 
 @MainActor
+final class HarnessMobilePhonePermissionsUITests: XCTestCase {
+    func testPhonePermissionsShowsGroupedStatusAndSystemSettingsLink() {
+        let app = XCUIApplication()
+        addTeardownBlock { app.terminate() }
+        app.launchArguments = [
+            "-reset-persistent-state-for-ui-testing",
+            "-bootstrap-configuration-for-ui-testing",
+            "-disable-animations-for-ui-testing",
+        ]
+        app.launch()
+
+        XCTAssertTrue(app.navigationBars["Harness"].waitForExistence(timeout: 15))
+        app.buttons["设置"].tap()
+        XCTAssertTrue(app.navigationBars["设置"].waitForExistence(timeout: 10))
+        let permissions = app.buttons["settings-phone-permissions"]
+        scrollUntilHittable(permissions, in: app)
+        permissions.tap()
+
+        XCTAssertTrue(app.navigationBars["手机权限"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["隐私访问"].exists)
+        XCTAssertTrue(app.staticTexts["相机"].exists)
+        XCTAssertTrue(app.staticTexts["尚未请求"].firstMatch.exists)
+        XCTAssertTrue(app.buttons["刷新权限状态"].isHittable)
+        let cameraPurpose = app.staticTexts["用于拍照和本机 OCR。"]
+        XCTAssertFalse(cameraPurpose.exists)
+        app.buttons["phone-permission-camera"].tap()
+        XCTAssertTrue(cameraPurpose.waitForExistence(timeout: 5))
+        let firstScreen = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        firstScreen.name = "phone-permissions-first-screen"
+        firstScreen.lifetime = .keepAlways
+        add(firstScreen)
+
+        let systemSettings = app.buttons["打开 iOS 设置"]
+        scrollUntilHittable(systemSettings, in: app)
+        XCTAssertTrue(app.staticTexts["额外能力"].exists)
+        XCTAssertTrue(app.staticTexts["HealthKit"].exists)
+        XCTAssertTrue(systemSettings.isHittable)
+        let lastScreen = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        lastScreen.name = "phone-permissions-last-screen"
+        lastScreen.lifetime = .keepAlways
+        add(lastScreen)
+    }
+}
+
+@MainActor
 final class HarnessMobileConcurrentRunsUITests: XCTestCase {
     func testCreatingAndSwitchingSessionsKeepsBothRootRunsVisible() {
         let app = XCUIApplication()

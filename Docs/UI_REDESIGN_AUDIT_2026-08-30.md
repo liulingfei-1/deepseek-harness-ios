@@ -155,6 +155,13 @@
 - 问题：插件设置、插件管理和社区插件详情仍混用 `Settings Provider / Settings Host / Prompt / Native Client` 等用户可见英文标签。
 - 调整：统一为“设置提供方 / 设置 Host / 提示词 / 原生客户端”；namespace、Prompt 类型值、插件 ID 和协议字段保持原样。
 
+## 手机权限页渐进披露（2026-08-31）
+
+- 调整前截图：`/tmp/phone-permissions-audit-attachments-0831-1/51410D98-5F84-43A4-B3FA-507A5BCFB4B8.png`、`/tmp/phone-permissions-audit-attachments-0831-1/3A7EEB5F-016D-45B9-9359-59EA450926DD.png`。16 项权限始终展开用途说明，状态胶囊又因外层标签样式只显示图标，造成列表过长且状态不可读。
+- 调整：复用系统 `DisclosureGroup`，默认只显示权限名称与状态，按需展开用途；`HarnessStatusPill` 固定使用“图标 + 标题”，从共享入口修复状态文字丢失。权限查询、刷新、iOS 设置跳转和请求时机不变。
+- 调整后截图：`/tmp/phone-permissions-final-attachments-0831-2/A502CCCE-15EB-4DCF-8B34-48DBA2D83910.png`、`/tmp/phone-permissions-final-attachments-0831-2/27DA6045-4F38-4775-9CFB-6C2D59AA5122.png`。
+- 专项测试：`HarnessMobilePhonePermissionsUITests/testPhonePermissionsShowsGroupedStatusAndSystemSettingsLink` 1/1 通过（`/tmp/hm-phone-permissions-final/Logs/Test/Test-HarnessMobile-2026.08.31_18-56-24-+0800.xcresult`），覆盖真实设置入口、状态文字、默认折叠、用途展开、分组和 iOS 设置入口。真机权限状态变化、深色、极限 Dynamic Type、VoiceOver 和横屏仍为 `VERIFY`。
+
 ## 全界面覆盖清单（截至本轮）
 
 | 界面 | 已检查内容 | 状态 |

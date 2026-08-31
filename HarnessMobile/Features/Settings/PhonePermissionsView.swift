@@ -106,41 +106,30 @@ struct PhonePermissionsView: View {
 private struct DevicePermissionRow: View {
     let capability: DevicePermissionCapability
     let status: DevicePermissionStatus
+    @State private var isExpanded = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            HarnessIconTile(systemImage: capability.systemImage, tint: capability.tint)
-
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 8) {
-                    permissionDescription
-                    Spacer(minLength: 8)
-                    statusPill
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    permissionDescription
-                    statusPill
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.vertical, HarnessTheme.Spacing.xSmall)
-        .accessibilityElement(children: .combine)
-    }
-
-    private var permissionDescription: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(capability.title)
+        DisclosureGroup(isExpanded: $isExpanded) {
             Text(capability.purpose(for: status))
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, 44)
+                .padding(.top, HarnessTheme.Spacing.xSmall)
+        } label: {
+            HStack(spacing: 12) {
+                HarnessIconTile(systemImage: capability.systemImage, tint: capability.tint)
+                Text(capability.title)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                HarnessStatusPill(
+                    title: status.title,
+                    systemImage: status.systemImage,
+                    tint: status.tint
+                )
+            }
         }
-    }
-
-    private var statusPill: some View {
-        HarnessStatusPill(title: status.title, systemImage: status.systemImage, tint: status.tint)
+        .padding(.vertical, HarnessTheme.Spacing.xSmall)
+        .accessibilityIdentifier("phone-permission-\(capability.rawValue)")
     }
 }
 

@@ -47,6 +47,7 @@ struct HarnessStatusPill: View {
 
     var body: some View {
         Label(title, systemImage: systemImage)
+            .labelStyle(.titleAndIcon)
             .font(.caption.weight(.medium))
             .foregroundStyle(tint)
             .padding(.horizontal, HarnessTheme.Spacing.small)
