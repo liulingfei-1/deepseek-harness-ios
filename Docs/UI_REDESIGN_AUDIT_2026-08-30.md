@@ -94,6 +94,14 @@
 - 轨迹页本轮仅完成结构检查：统计、Trace、视图模式和事件列表职责清晰，未凭主观判断重排。
 - 当前状态：代码改造完成，深色、Dynamic Type 极限字号、横屏、VoiceOver 和真机仍为 `VERIFY`。
 
+### 轨迹页框架语言一致性（2026-08-31）
+
+- 调整前截图：`/tmp/harness-trajectory-live-audit-2.png`。统计、分段、运行时摘要和事件类型混用 `Duration / Turns / Calls / Model / Tools / Output / Cache / Between turns` 等英文框架标签。
+- 调整：框架标签、事件角色、回合/步骤状态和常用 Inspector 字段统一为中文；provider/model、工具名、Call ID、事件原始类型、JSON、路径和参数继续保持真实技术值。
+- 调整后截图：`/tmp/harness-trajectory-localized-0831-2.png`。
+- 专项测试：`HarnessMobileTrajectoryUITests/testTrajectoryLedgersSearchCollapseAndInspect` 1/1 通过（`/tmp/hm-trajectory-localized-final/Logs/Test`），覆盖耗时/回合/调用三种视图、折叠、搜索、工具调用与工具结果 Inspector。
+- 当前状态：模拟器布局与交互通过；深色、极限 Dynamic Type、VoiceOver、横屏和 iPhone 16 Pro 新构建仍为 `VERIFY`。
+
 ## 原生客户端详情页复核（本轮）
 
 - 问题：详情页分区标题混用 `Native Client / Settings / Commands` 英文，与中文设置和插件市场页面不一致；技术值本身仍需保留原文。

@@ -483,41 +483,41 @@ final class HarnessMobileTrajectoryUITests: XCTestCase {
         XCTAssertTrue(app.buttons["轨迹"].waitForExistence(timeout: 5))
         app.buttons["轨迹"].tap()
 
-        XCTAssertTrue(app.staticTexts["Duration"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["Turns"].exists)
-        XCTAssertTrue(app.staticTexts["Calls"].exists)
-        XCTAssertTrue(app.staticTexts["TTFT"].exists)
-        XCTAssertTrue(app.staticTexts["Output"].exists)
-        XCTAssertTrue(app.staticTexts["Cache"].exists)
+        XCTAssertTrue(app.staticTexts["耗时"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["回合"].exists)
+        XCTAssertTrue(app.staticTexts["调用"].exists)
+        XCTAssertTrue(app.staticTexts["首字延迟"].exists)
+        XCTAssertTrue(app.staticTexts["输出"].exists)
+        XCTAssertTrue(app.staticTexts["缓存"].exists)
 
         let ledger = app.segmentedControls.firstMatch
         XCTAssertTrue(ledger.waitForExistence(timeout: 5))
-        ledger.buttons["Calls"].tap()
+        ledger.buttons["调用"].tap()
         let toolEvent = app.buttons.matching(
-            NSPredicate(format: "label CONTAINS %@", "TOOL CALL")
+            NSPredicate(format: "label CONTAINS %@", "工具调用")
         ).firstMatch
         XCTAssertTrue(toolEvent.waitForExistence(timeout: 5))
         toolEvent.tap()
-        XCTAssertTrue(app.staticTexts["Tool call"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["工具调用"].waitForExistence(timeout: 5))
         app.navigationBars.buttons["完成"].tap()
 
         let resultEvent = app.buttons.matching(
-            NSPredicate(format: "label CONTAINS %@", "TOOL RESULT")
+            NSPredicate(format: "label CONTAINS %@", "工具结果")
         ).firstMatch
         XCTAssertTrue(resultEvent.waitForExistence(timeout: 5))
         resultEvent.tap()
-        XCTAssertTrue(app.staticTexts["Tool result"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["工具结果"].waitForExistence(timeout: 5))
 
         app.navigationBars.buttons["完成"].tap()
-        ledger.buttons["Turns"].tap()
+        ledger.buttons["回合"].tap()
         let turnHeader = app.buttons.matching(
-            NSPredicate(format: "label CONTAINS %@", "Turn 1")
+            NSPredicate(format: "label CONTAINS %@", "回合 1")
         ).firstMatch
         XCTAssertTrue(turnHeader.waitForExistence(timeout: 5))
         turnHeader.tap()
-        XCTAssertTrue(app.staticTexts["Request header"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["请求头"].waitForExistence(timeout: 5))
         turnHeader.tap()
-        XCTAssertTrue(app.staticTexts["Request header"].exists)
+        XCTAssertTrue(app.staticTexts["请求头"].exists)
 
         let search = app.searchFields["搜索类型、内容、工具或 Call ID"]
         XCTAssertTrue(search.waitForExistence(timeout: 5))
