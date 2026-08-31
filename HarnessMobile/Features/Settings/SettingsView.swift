@@ -299,8 +299,14 @@ private struct DiagnosticLogView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+
+                DisclosureGroup("导出内容与脱敏") {
+                    Text("导出包含设备与运行状态、Cordis 插件、Plugin Host stderr、有限 runtime telemetry、Harness Trace 和当前会话完整轨迹。API Key、Authorization 及常见密码/Secret 字段会在手机上脱敏后再写入文件；同时会写入当前会话的本地 Downloads 工作区。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             } footer: {
-                Text("导出包含设备与运行状态、Cordis 插件、Plugin Host stderr、有限 runtime telemetry、Harness Trace 和当前会话完整轨迹。API Key、Authorization 及常见密码/Secret 字段会在手机上脱敏后再写入文件；同时会写入当前会话的本地 Downloads 工作区。")
+                Text("导出前在本机脱敏，并保存到当前会话 Downloads。")
             }
 
             Section {
@@ -308,10 +314,16 @@ private struct DiagnosticLogView: View {
                     .onChange(of: preferences.isPerformanceResourceSamplingEnabled) { _, _ in
                         Task { await model.configureRuntimePerformanceSampling() }
                     }
+
+                DisclosureGroup("采样内容与隐私") {
+                    Text("开启后仅记录有界的热状态、低电量和前后台数值标记；不记录提示词、工具参数或输出、URL、请求头、Cookie、环境变量和调用栈。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             } header: {
                 Text("性能与资源采样")
             } footer: {
-                Text("默认关闭。开启后仅记录有界的热状态、低电量和前后台数值标记；不记录提示词、工具参数或输出、URL、请求头、Cookie、环境变量和调用栈。")
+                Text("默认关闭，仅记录有界的系统数值标记。")
             }
 
             if let workspaceExportPath {

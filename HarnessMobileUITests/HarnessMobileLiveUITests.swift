@@ -570,6 +570,39 @@ final class HarnessMobileProgressiveDisclosureUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["会话标题"].exists)
     }
 
+    func testDiagnosticLogKeepsRuntimeAndExportActionsReachable() {
+        let app = launchConfiguredApp()
+        addTeardownBlock { app.terminate() }
+
+        app.buttons["设置"].tap()
+        XCTAssertTrue(app.navigationBars["设置"].waitForExistence(timeout: 15))
+        let diagnostics = app.descendants(matching: .any)["settings-diagnostics"]
+        scrollUntilHittable(diagnostics, in: app)
+        diagnostics.tap()
+
+        XCTAssertTrue(app.navigationBars["详细日志"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["当前运行"].exists)
+        XCTAssertTrue(app.staticTexts["Cordis Host"].exists)
+        let refresh = app.buttons["刷新日志"]
+        scrollUntilHittable(refresh, in: app)
+        XCTAssertTrue(refresh.isHittable)
+        XCTAssertTrue(app.buttons["导出详细日志"].exists)
+        let exportDetails = app.buttons["导出内容与脱敏"]
+        XCTAssertTrue(exportDetails.exists)
+        let exportExplanation = app.staticTexts.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "导出包含设备与运行状态")
+        ).firstMatch
+        XCTAssertFalse(exportExplanation.exists)
+        exportDetails.tap()
+        XCTAssertTrue(exportExplanation.waitForExistence(timeout: 5))
+        exportDetails.tap()
+
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "diagnostic-log"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     private func launchConfiguredApp() -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = [

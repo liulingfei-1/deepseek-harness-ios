@@ -204,6 +204,13 @@
 - 结论：未发现文字截断、关键控件不可达或点击区不足。聊天和终端在键盘展开时只保留当前操作所需区域，符合横屏可用高度；没有为此新增自定义布局。VoiceOver 朗读顺序、不同设备尺寸和 iPhone 16 Pro 真机触控仍为 `VERIFY`。
 - 真机构建与安装：使用自动签名 Team `2SH3TUR2JL` 构建 `/tmp/hm-device-ui-0831/Build/Products/Debug-iphoneos/HarnessMobile.app` 成功；`devicectl` 已将 `com.llf.harnessmobile` 覆盖安装到配对的 iPhone 16 Pro，并成功发出启动命令。该证据只确认当前构建可安装、可启动，逐页触控、真实权限、插件 Host 和 VoiceOver 仍为 `VERIFY`。
 
+## 诊断日志渐进披露（2026-08-31）
+
+- 调整前截图：`/tmp/diagnostic-audit-attachments-0831-1/C5D10B1D-CC84-4A1E-BC76-0D8BBC012383.png`。导出内容、脱敏字段和性能采样隐私范围以两段长 footer 永久展开，刷新、导出和采样三个实际操作被技术说明拉开。
+- 调整：复用原生 `DisclosureGroup`，完整导出清单和采样隐私范围按需展开；首屏继续显示“本机脱敏/保存位置”和“默认关闭/有限系统数值”两条安全摘要。刷新、脱敏导出、工作区副本、采样配置和错误路径没有改变。
+- 调整后截图：`/tmp/diagnostic-final-attachments-0831-1/516E89A6-C5CD-4342-AFD6-2E3DB6A2F55B.png`。
+- 专项测试：`HarnessMobileProgressiveDisclosureUITests/testDiagnosticLogKeepsRuntimeAndExportActionsReachable` 1/1 通过（`/tmp/hm-diagnostic-final-0831/Logs/Test/Test-HarnessMobile-2026.08.31_23-03-43-+0800.xcresult`），覆盖设置真实入口、运行/Host 状态、刷新、导出、默认折叠及说明展开。真实文件导出、Host stderr、采样数据、无障碍矩阵和真机仍为 `VERIFY`。
+
 ## 全界面覆盖清单（截至本轮）
 
 | 界面 | 已检查内容 | 状态 |
@@ -226,5 +233,6 @@
 | 后台任务设置 | 执行、定位、Live Activity、通知、隐私 | VERIFY |
 | 手机权限 | 权限分组、状态刷新和 iOS 设置入口 | VERIFY |
 | 记忆管理 | 当前会话开关、记忆列表、导出和删除 | VERIFY |
+| 详细日志 | 运行/Host 状态、刷新、脱敏导出和性能采样 | VERIFY |
 
 `DONE` 表示已有代码调整并通过构建或专项证据；`VERIFY` 表示已检查结构但仍缺少完整的深色、极限 Dynamic Type、横屏、VoiceOver 或真机截图证据。当前未将 `VERIFY` 页面冒充为完成。
