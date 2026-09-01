@@ -62,6 +62,13 @@
 - 本轮不再改市场布局；刷新、导入、GitHub、清理缓存继续收在操作菜单中，符合渐进披露。
 - 专项测试：`HarnessMobilePluginManagementUITests/testCommunityMarketplaceUsesCompactSearchableList` 1/1 通过（`/tmp/hm-plugin-market-audit2/Logs/Test/Test-HarnessMobile-2026.08.30_17-41-31-+0800.xcresult`）。
 
+### 插件编译失败详情语义（2026-09-01）
+
+- 调整前截图：`/tmp/plugin-failure-before-attachments-0901/F332F9B2-7433-4456-97CC-6B6C19F8F13B.png`、`/tmp/plugin-failure-before-attachments-0901/5D7FFFCC-0772-422F-8936-99D19FDDFB15.png`。编译已在 Swift 校验阶段失败，但总摘要仍显示绿色“已结束”；日志混用英文 12 小时制，诊断状态与长错误码同排导致难读断行。
+- 调整：总摘要直接复用真实失败步骤决定红色图标和“失败”状态；日志时间固定为中文 24 小时格式；诊断状态与标题改为纵向排列，并复用系统 `avoidHidingContent` 保持搜索展开时内容可滚动到可点击区域。编译阶段、详细日志、结构化诊断、安全拒绝和插件目录逻辑不变。
+- 调整后截图：`/tmp/plugin-failure-final-attachments-0901/2FC79F24-7E7C-4BDF-BB2E-669A3D252842.png`、`/tmp/plugin-failure-final-attachments-0901/305BA51F-17CD-48EB-A4DF-C2A13441B19D.png`。
+- 专项测试：`HarnessMobilePluginManagementUITests/testCompilationFailureTraceExposesStagesLogsAndStructuredDiagnostic` 1/1 通过（`/tmp/hm-plugin-failure-final-0901.xcresult`），覆盖真实社区插件路由、失败总状态、阶段、日志展开、结构化诊断、安全说明、来源和前后截图。真实下载/编译/重试、深色、极限 Dynamic Type、VoiceOver、横屏和真机仍为 `VERIFY`。
+
 ## Workspace 空态复核（本轮）
 
 - 现状截图：`/tmp/workspace-current-9.png`。
@@ -337,6 +344,7 @@
 | iSH 终端 | 模式切换、状态卡、命令空态、底部输入栏 | DONE |
 | 轨迹 | 统计、Trace、耗时/回合/调用、搜索、折叠和事件检查器 | VERIFY |
 | 插件管理 | 运行时摘要、Host、插件库存和搜索 | DONE |
+| 插件编译失败详情 | 总状态、阶段、日志、结构化诊断和来源 | VERIFY |
 | 原生客户端详情 | 分区标签、命令与设置入口 | DONE |
 | 社区插件市场 | 市场/已安装、搜索、目录行和操作菜单 | DONE |
 | 插件设置 | Host 状态、namespace 列表、编辑器和冲突态 | VERIFY |

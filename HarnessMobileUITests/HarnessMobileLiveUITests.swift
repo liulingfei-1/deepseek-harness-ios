@@ -1416,10 +1416,16 @@ final class HarnessMobilePluginManagementUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["社区插件"].waitForExistence(timeout: 15))
         let trace = app.descendants(matching: .any)["community-plugin-compilation-summary"]
         XCTAssertTrue(trace.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["失败"].exists)
+        XCTAssertFalse(app.staticTexts["已结束"].exists)
         XCTAssertTrue(app.staticTexts["下载源码"].exists)
         let validation = app.staticTexts["Swift 校验"]
         XCTAssertTrue(validation.waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["拒绝未审计的 Web client contribution。"].exists)
+        let summaryScreen = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        summaryScreen.name = "plugin-compilation-failure-summary"
+        summaryScreen.lifetime = .keepAlways
+        add(summaryScreen)
 
         let logs = app.buttons["community-plugin-compilation-logs-toggle"]
         scrollUntilHittable(logs, in: app)
@@ -1430,8 +1436,13 @@ final class HarnessMobilePluginManagementUITests: XCTestCase {
         let diagnosticTitle = app.staticTexts["结构化诊断 · UNSUPPORTED_CLIENT_CONTRIBUTION"]
         scrollUntilExists(diagnosticTitle, in: app)
         XCTAssertTrue(diagnosticTitle.exists)
+        XCTAssertTrue(diagnosticTitle.isHittable)
         XCTAssertTrue(app.staticTexts["该插件请求 Web client slot；手机端不动态加载 Web 或 Swift 代码。"].exists)
         XCTAssertTrue(app.staticTexts["example/unsupported-web-client"].exists)
+        let detailsScreen = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        detailsScreen.name = "plugin-compilation-failure-details"
+        detailsScreen.lifetime = .keepAlways
+        add(detailsScreen)
     }
 
     func testCommunityMarketplaceUsesCompactSearchableList() {

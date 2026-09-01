@@ -78,6 +78,7 @@ struct CommunityPluginMarketView: View {
             text: $query,
             prompt: Text("搜索插件、分类或仓库")
         )
+        .searchPresentationToolbarBehavior(.avoidHidingContent)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
@@ -342,7 +343,10 @@ private struct CommunityPluginCompilationTraceSection: View {
                         LazyVStack(alignment: .leading, spacing: 7) {
                             ForEach(trace.logs) { entry in
                                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                    Text(entry.timestamp, format: .dateTime.hour().minute().second())
+                                    Text(entry.timestamp.formatted(
+                                        .dateTime.hour().minute().second()
+                                            .locale(Locale(identifier: "zh_CN"))
+                                    ))
                                         .foregroundStyle(.tertiary)
                                     Text(entry.stage.title)
                                         .foregroundStyle(entry.state.tint)
@@ -368,15 +372,13 @@ private struct CommunityPluginCompilationTraceSection: View {
 
                 if let diagnostic = trace.diagnostic {
                     VStack(alignment: .leading, spacing: 5) {
-                        HStack(spacing: 6) {
-                            HarnessStatusPill(
-                                title: diagnostic.retryable ? "可重试" : "需要处理",
-                                systemImage: diagnostic.retryable ? "arrow.triangle.2.circlepath" : "hand.raised.fill",
-                                tint: diagnostic.retryable ? .orange : .red
-                            )
-                            Text("结构化诊断 · \(diagnostic.code)")
-                                .font(.caption.weight(.semibold))
-                        }
+                        HarnessStatusPill(
+                            title: diagnostic.retryable ? "可重试" : "需要处理",
+                            systemImage: diagnostic.retryable ? "arrow.triangle.2.circlepath" : "hand.raised.fill",
+                            tint: diagnostic.retryable ? .orange : .red
+                        )
+                        Text("结构化诊断 · \(diagnostic.code)")
+                            .font(.caption.weight(.semibold))
                         Text(diagnostic.message)
                             .font(.caption2)
                             .foregroundStyle(.secondary)
@@ -393,8 +395,10 @@ private struct CommunityPluginCompilationTraceSection: View {
             } label: {
                 HStack(spacing: 10) {
                     HarnessIconTile(
-                        systemImage: trace.isFinished ? "checklist.checked" : "hammer.fill",
-                        tint: trace.isFinished ? .green : .accentColor
+                        systemImage: hasFailure
+                            ? "xmark.octagon.fill"
+                            : trace.isFinished ? "checklist.checked" : "hammer.fill",
+                        tint: hasFailure ? .red : trace.isFinished ? .green : .accentColor
                     )
                     VStack(alignment: .leading, spacing: 2) {
                         Text(trace.isFinished ? "最近一次编译结果" : "手机 Agent 编译中")
@@ -406,9 +410,9 @@ private struct CommunityPluginCompilationTraceSection: View {
                     }
                     Spacer(minLength: 4)
                     HarnessStatusPill(
-                        title: trace.isFinished ? "已结束" : "进行中",
-                        systemImage: trace.isFinished ? "checkmark" : "ellipsis",
-                        tint: trace.isFinished ? .green : .accentColor
+                        title: hasFailure ? "失败" : trace.isFinished ? "已结束" : "进行中",
+                        systemImage: hasFailure ? "xmark" : trace.isFinished ? "checkmark" : "ellipsis",
+                        tint: hasFailure ? .red : trace.isFinished ? .green : .accentColor
                     )
                 }
                 .accessibilityIdentifier("community-plugin-compilation-summary")
@@ -435,6 +439,10 @@ private struct CommunityPluginCompilationTraceSection: View {
         trace.steps.last(where: { $0.state == .running })?.detail
             ?? trace.steps.last(where: { $0.state == .failed })?.detail
             ?? "等待开始"
+    }
+
+    private var hasFailure: Bool {
+        trace.steps.contains { $0.state == .failed }
     }
 }
 
