@@ -322,7 +322,11 @@ final class HarnessMobileConcurrentRunsUITests: XCTestCase {
 
         secondSession.tap()
         XCTAssertTrue(app.descendants(matching: .any)["chat-input"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Deep diving..."].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["正在深入处理…"].waitForExistence(timeout: 5))
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "chat-running-status"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
 
         app.navigationBars.buttons.firstMatch.tap()
         XCTAssertTrue(firstSession.waitForExistence(timeout: 5))

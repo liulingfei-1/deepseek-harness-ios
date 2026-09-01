@@ -1161,7 +1161,7 @@ private struct HarnessRunStatus: View {
             HStack(spacing: 8) {
                 ProgressView()
                     .controlSize(.small)
-                Text("Deep diving...")
+                Text("正在深入处理…")
                     .font(.caption.weight(.medium))
                 if elapsed >= 15 {
                     Text(Self.duration(elapsed))
@@ -1174,7 +1174,7 @@ private struct HarnessRunStatus: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 4)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Deep diving，已运行 \(Self.duration(elapsed))")
+            .accessibilityLabel("正在深入处理，已运行 \(Self.duration(elapsed))")
         }
     }
 

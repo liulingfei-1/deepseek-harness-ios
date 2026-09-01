@@ -273,6 +273,13 @@
 - 结论：空会话只保留单一“有什么要处理？”入口和常驻输入栏；错误使用可关闭的行内提示，没有模态弹窗，也没有遮挡会话标题。消息操作按钮保留 44pt 点击区和现有上下文菜单，未为追求更小视觉而牺牲无障碍。
 - 本轮不改生产 UI；新增专项证据防止空态、输入栏和错误条后续回归。`HarnessMobileChatChromeUITests` 2/2 通过（`/tmp/hm-chat-chrome-audit/Logs/Test/Test-HarnessMobile-2026.08.31_19-36-38-+0800.xcresult`）。运行中、排队输入、图片/文件、审批、长对话、深色、极限 Dynamic Type、VoiceOver、横屏和 iPhone 16 Pro 仍为 `VERIFY`。
 
+### 聊天运行状态中文化（2026-09-02）
+
+- 调整前截图：`/tmp/chat-running-before-attachments-0902/0BE49272-400E-4996-B01D-D520219A617E.png`。空会话、导航和输入栏均为中文，运行状态仍单独显示 `Deep diving...`，VoiceOver 标签也混用英文。
+- 调整：显示文案改为“正在深入处理…”，无障碍标签同步为“正在深入处理，已运行 …”；计时、并发会话、停止与排队输入逻辑不变。
+- 调整后截图：`/tmp/chat-running-final-attachments-0902/F32C5797-2E6F-4DE9-A332-FB33EE61F396.png`。
+- 专项测试：`HarnessMobileConcurrentRunsUITests/testCreatingAndSwitchingSessionsKeepsBothRootRunsVisible` 1/1 通过（`/tmp/hm-chat-running-final-0902.xcresult`），覆盖两条根运行、会话切换、中文运行状态和最终截图。真实流式输出、运行计时、极限 Dynamic Type、VoiceOver、横屏和真机切换仍为 `VERIFY`。
+
 ## 聊天添加内容菜单收口（2026-09-01）
 
 - 调整前截图：`/tmp/chat-add-before-attachments-0901-1/EC06299C-4C1C-4418-A02D-E3478B09C591.png`。“添加内容”菜单同时列出命令和三类附件，而输入栏已经有独立常驻命令按钮，形成重复入口并混淆菜单任务。
