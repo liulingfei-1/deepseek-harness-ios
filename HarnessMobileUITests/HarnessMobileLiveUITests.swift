@@ -241,7 +241,9 @@ final class HarnessMobilePluginSettingsUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["插件设置"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.descendants(matching: .any)["ish-plugin-settings-list"].exists)
         XCTAssertTrue(app.buttons["ish-plugin-settings-refresh"].exists)
-        XCTAssertTrue(app.buttons["启动 Host"].exists)
+        XCTAssertTrue(app.staticTexts["正在启动设置 Host"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["ish-plugin-settings-loading"].exists)
+        XCTAssertFalse(app.buttons["启动 Host"].exists)
         XCTAssertFalse(app.searchFields["搜索 namespace"].exists)
         let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         screenshot.name = "plugin-settings-host-state"

@@ -95,20 +95,29 @@ struct PluginSettingsView: View {
                 }
             } else {
                 Section {
-                    Label("设置 Host 未就绪", systemImage: "terminal")
-                        .foregroundStyle(.secondary)
-                    Text("启动本机 iSH Cordis Host 后可读取插件设置。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    Button {
-                        Task { await refresh() }
-                    } label: {
-                        Label("启动 Host", systemImage: "play.fill")
-                            .labelStyle(.titleAndIcon)
+                    VStack(spacing: HarnessTheme.Spacing.medium) {
+                        ContentUnavailableView(
+                            isRefreshing ? "正在启动设置 Host" : "设置 Host 未就绪",
+                            systemImage: "terminal",
+                            description: Text("启动手机内的 iSH Cordis Host 后即可读取插件设置。")
+                        )
+
+                        if isRefreshing {
+                            ProgressView()
+                                .controlSize(.large)
+                                .accessibilityLabel("正在启动设置 Host")
+                                .accessibilityIdentifier("ish-plugin-settings-loading")
+                        } else {
+                            Button("启动 Host", systemImage: "play.fill") {
+                                Task { await refresh() }
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
                     }
-                    .disabled(isRefreshing)
-                } header: {
-                    Label("设置提供方", systemImage: "slider.horizontal.3")
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, HarnessTheme.Spacing.large)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
                 }
             }
         }
