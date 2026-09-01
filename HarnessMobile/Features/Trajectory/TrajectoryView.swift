@@ -1287,7 +1287,10 @@ private struct TrajectoryEventInspectorView: View {
                     LabeledContent("序号", value: String(event.seq))
                     LabeledContent("类型", value: event.type)
                     LabeledContent("时间") {
-                        Text(event.trajectoryDate, format: .dateTime.year().month().day().hour().minute().second())
+                        Text(event.trajectoryDate.formatted(
+                            .dateTime.year().month().day().hour().minute().second()
+                                .locale(Locale(identifier: "zh_CN"))
+                        ))
                             .monospacedDigit()
                     }
                     if event.isIgnorable {
@@ -1333,7 +1336,7 @@ private struct TrajectoryEventInspectorView: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.large])
         .task(id: event.seq) {
             await formatJSON()
         }

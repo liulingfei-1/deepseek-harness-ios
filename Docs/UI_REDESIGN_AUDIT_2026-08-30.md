@@ -109,6 +109,13 @@
 - 调整后截图：`/tmp/trajectory-final3-attachments-0831-1/9EFB37A3-3D44-4CDC-AD4C-ECD0081D99C0.png`。首屏直接进入会话轨迹，iOS 27 保留底部系统搜索外观并负责内容安全区。
 - 专项测试：`HarnessMobileTrajectoryUITests/testTrajectoryLedgersSearchCollapseAndInspect` 1/1 通过（`/tmp/hm-trajectory-final3-0831/Logs/Test/Test-HarnessMobile-2026.08.31_22-54-22-+0800.xcresult`），覆盖空 Trace 条隐藏、三种账本、折叠、搜索、工具调用与结果 Inspector。真实 Harness Trace 内容、深色、极限 Dynamic Type、VoiceOver、横屏和真机仍为 `VERIFY`。
 
+### 轨迹事件检查器信息密度（2026-09-01）
+
+- 调整前截图：`/tmp/trajectory-inspector-before2-attachments-0901/7EDD4BCE-6055-4B95-B5FF-1C3CA486D319.png`、`/tmp/trajectory-inspector-before2-attachments-0901/6B463130-BB29-40E9-88F2-6BF2C2E93283.png`。工具调用和结果检查器默认停在半屏，参数/结果刚出现即被底部截断；中文框架中的事件时间仍按英文 locale 显示。
+- 调整：事件检查器直接使用 SwiftUI 原生大尺寸 sheet，并将事件日期固定为中文年月日格式；事件字段、技术标识、JSON、横向滚动、选择和关闭行为不变。
+- 调整后截图：`/tmp/trajectory-inspector-final2-attachments-0901/8E6758B2-78A4-4C21-955E-0E42F087DB55.png`、`/tmp/trajectory-inspector-final2-attachments-0901/95FBA65F-154F-4752-A103-F12DD17D5158.png`。
+- 专项测试：`HarnessMobileTrajectoryUITests/testTrajectoryLedgersSearchCollapseAndInspect` 1/1 通过（`/tmp/hm-trajectory-inspector-final2-0901.xcresult`），覆盖真实轨迹入口、工具调用/结果检查器、中文日期、两张检查器截图、折叠和搜索。首次运行停在 onboarding；第二次基线运行 1/1 通过，最终一次中文日期断言因 XCUITest 为年月插入可访问性空格而失败，按实际语义调整后通过。深色、极限 Dynamic Type、VoiceOver、横屏和真机仍为 `VERIFY`。
+
 ## 原生客户端详情页复核（本轮）
 
 - 问题：详情页分区标题混用 `Native Client / Settings / Commands` 英文，与中文设置和插件市场页面不一致；技术值本身仍需保留原文。
@@ -328,7 +335,7 @@
 | Work State | 目标、计划、待办、恢复和错误状态 | DONE |
 | Workspace | 挂载目录、文件列表、空态动作 | DONE |
 | iSH 终端 | 模式切换、状态卡、命令空态、底部输入栏 | DONE |
-| 轨迹 | 统计、Trace、Duration/Turns/Calls、搜索与折叠 | VERIFY |
+| 轨迹 | 统计、Trace、耗时/回合/调用、搜索、折叠和事件检查器 | VERIFY |
 | 插件管理 | 运行时摘要、Host、插件库存和搜索 | DONE |
 | 原生客户端详情 | 分区标签、命令与设置入口 | DONE |
 | 社区插件市场 | 市场/已安装、搜索、目录行和操作菜单 | DONE |

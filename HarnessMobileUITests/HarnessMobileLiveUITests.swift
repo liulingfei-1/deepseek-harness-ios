@@ -1020,6 +1020,13 @@ final class HarnessMobileTrajectoryUITests: XCTestCase {
         XCTAssertTrue(toolEvent.waitForExistence(timeout: 5))
         toolEvent.tap()
         XCTAssertTrue(app.staticTexts["工具调用"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "1970", "年")
+        ).firstMatch.exists)
+        let toolInspector = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        toolInspector.name = "trajectory-tool-inspector"
+        toolInspector.lifetime = .keepAlways
+        add(toolInspector)
         app.navigationBars.buttons["完成"].tap()
 
         let resultEvent = app.buttons.matching(
@@ -1028,6 +1035,10 @@ final class HarnessMobileTrajectoryUITests: XCTestCase {
         XCTAssertTrue(resultEvent.waitForExistence(timeout: 5))
         resultEvent.tap()
         XCTAssertTrue(app.staticTexts["工具结果"].waitForExistence(timeout: 5))
+        let resultInspector = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        resultInspector.name = "trajectory-result-inspector"
+        resultInspector.lifetime = .keepAlways
+        add(resultInspector)
 
         app.navigationBars.buttons["完成"].tap()
         ledger.buttons["回合"].tap()
