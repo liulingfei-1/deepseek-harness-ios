@@ -768,7 +768,6 @@ private struct CommunityPluginCatalogDetailView: View {
                     CommunityPluginMarketplaceStateSections()
 
                     Section {
-                        LabeledContent("名称", value: item.name)
                         LabeledContent("分类", value: item.category)
                         LabeledContent("兼容性", value: item.compatibility.title)
                         if let installedVersion = item.installedVersion {

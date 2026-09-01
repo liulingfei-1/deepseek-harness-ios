@@ -1519,6 +1519,41 @@ final class HarnessMobilePluginManagementUITests: XCTestCase {
         add(screenshot)
     }
 
+    func testCommunityPluginCatalogDetailKeepsSourceAndInstallBoundaryVisible() {
+        let app = XCUIApplication()
+        addTeardownBlock { app.terminate() }
+        app.launchArguments = [
+            "-reset-persistent-state-for-ui-testing",
+            "-bootstrap-configuration-for-ui-testing",
+            "-disable-animations-for-ui-testing",
+            "-present-plugin-market-for-ui-testing",
+        ]
+        app.launch()
+
+        XCTAssertTrue(app.navigationBars["社区插件"].waitForExistence(timeout: 15))
+        let plugin = app.staticTexts["Git Tools"]
+        XCTAssertTrue(plugin.waitForExistence(timeout: 5))
+        plugin.tap()
+
+        XCTAssertTrue(app.navigationBars["Git Tools"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["名称"].exists)
+        XCTAssertTrue(app.descendants(matching: .any).matching(
+            NSPredicate(format: "label CONTAINS %@", "工具与能力")
+        ).firstMatch.exists)
+        XCTAssertTrue(app.descendants(matching: .any).matching(
+            NSPredicate(format: "label CONTAINS %@", "Host 兼容")
+        ).firstMatch.exists)
+        XCTAssertTrue(app.descendants(matching: .any).matching(
+            NSPredicate(format: "label CONTAINS %@", "原生优先")
+        ).firstMatch.exists)
+        XCTAssertTrue(app.staticTexts["https://github.com/example/git-tools"].exists)
+        XCTAssertTrue(app.buttons["原生优先安装"].exists)
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "community-plugin-catalog-detail"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     func testLiveMarketplaceCatalogRPCOnDevice() throws {
         try XCTSkipUnless(
             ProcessInfo.processInfo.environment["HARNESS_RUN_LIVE_ISH_NETWORK_TEST"] == "1",

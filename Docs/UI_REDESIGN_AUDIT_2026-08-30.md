@@ -69,6 +69,13 @@
 - 调整后截图：`/tmp/plugin-github-final-attachments-0901b/08B9C7C3-FE66-49BD-8460-6C6F60F07199.png`。
 - 专项测试：`HarnessMobilePluginManagementUITests/testGitHubInstallSheetKeepsRepositoryAndReplaceControlsClear` 1/1 通过（`/tmp/hm-plugin-github-final-0901.xcresult`），覆盖入口、仓库地址、覆盖开关、安装边界和空地址禁用态。真实 GitHub 下载/安装、覆盖结果、键盘、极限 Dynamic Type、VoiceOver、横屏和真机仍为 `VERIFY`。
 
+### 社区插件详情去重（2026-09-01）
+
+- 调整前截图：`/tmp/plugin-detail-before-attachments2-0901/C88D1348-0E2A-4B7E-A1EC-941A792BF32D.png`。导航标题已经显示插件名称，首个分区仍重复“名称 / Git Tools”，让最重要的兼容性和安装路径后移。
+- 调整：删除重复名称行，继续复用原生 `List`、`Section` 和 `LabeledContent`；分类、兼容性、安装路径、说明、来源、安装按钮、安全确认和安装逻辑不变。
+- 调整后截图：`/tmp/plugin-detail-final-attachments-0901/AC2F4D28-7F56-49F3-ABC3-B07E18B6BF01.png`。
+- 专项测试：`HarnessMobilePluginManagementUITests/testCommunityPluginCatalogDetailKeepsSourceAndInstallBoundaryVisible` 1/1 通过（`/tmp/hm-plugin-detail-final-0901.xcresult`），覆盖详情路由、去重、分类、兼容性、原生优先、来源和安装入口。首次基线用例的三个精确值断言失败，是 `LabeledContent` 将标签和值组合为单一可访问标签所致，改为按组合标签查询后通过；真实安装、确认操作、极限 Dynamic Type、VoiceOver、横屏和真机仍为 `VERIFY`。
+
 ### 插件编译失败详情语义（2026-09-01）
 
 - 调整前截图：`/tmp/plugin-failure-before-attachments-0901/F332F9B2-7433-4456-97CC-6B6C19F8F13B.png`、`/tmp/plugin-failure-before-attachments-0901/5D7FFFCC-0772-422F-8936-99D19FDDFB15.png`。编译已在 Swift 校验阶段失败，但总摘要仍显示绿色“已结束”；日志混用英文 12 小时制，诊断状态与长错误码同排导致难读断行。
@@ -355,6 +362,7 @@
 | 原生客户端详情 | 分区标签、命令与设置入口 | DONE |
 | 社区插件市场 | 市场/已安装、搜索、目录行和操作菜单 | DONE |
 | GitHub 仓库安装 | 仓库地址、覆盖开关、安装边界和紧凑 Sheet | VERIFY |
+| 社区插件详情 | 分类、兼容性、安装路径、来源和安装边界 | VERIFY |
 | 插件设置 | Host 状态、namespace 列表、编辑器和冲突态 | VERIFY |
 | 服务商配置 | Profile 列表、添加和凭据状态 | DONE |
 | 模型行为 | 摘要路由、时间上下文双态和自动标题 | VERIFY |
