@@ -578,6 +578,11 @@ final class HarnessMobileProgressiveDisclosureUITests: XCTestCase {
         XCTAssertTrue(app.buttons["tool-route-terminal"].exists)
         XCTAssertTrue(app.buttons["tool-route-workspace"].exists)
         XCTAssertTrue(app.buttons["tool-route-settings"].exists)
+        XCTAssertTrue(app.staticTexts["目标、计划、待办与 Harness 调用链"].exists)
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "tools-overview"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
     }
 
     func testSettingsGroupsBackgroundStorageAndPrivacyWithoutHidingRoutes() {

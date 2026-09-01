@@ -129,6 +129,13 @@
 - 视觉目标：控制台只承担运行观察职责，工具与插件管理回到工具总览的独立路径。
 - 当前状态：代码改造完成，深色、Dynamic Type 极限字号、横屏、VoiceOver 和真机仍为 `VERIFY`。
 
+### 工具总览语言与主题收口（2026-09-02）
+
+- 调整前截图：`/tmp/tools-before-attachments-0902/784E74C4-E810-4553-9F84-3C96975D7B7A.png`。任务行说明仍混用 `Goal、Plan、Todo` 英文框架词；页面调用共享列表壳后又重复覆盖滚动背景与系统分组背景。
+- 调整：任务说明统一为“目标、计划、待办与 Harness 调用链”，并删除两行重复背景修饰；工作区、终端、任务/轨迹、插件和设置路由不变，继续只复用 `harnessCompactListChrome()`。
+- 调整后截图：`/tmp/tools-final-attachments-0902/F9D9A225-0F56-45D7-B426-07FCFF891EC7.png`。
+- 专项测试：`HarnessMobileProgressiveDisclosureUITests/testHomePrioritizesProjectsAndMovesSecondaryToolsToToolsRoute` 1/1 通过（`/tmp/hm-tools-final-0902.xcresult`），覆盖首页真实入口、五个工具路由、中文任务说明和最终截图。真实路由操作、极限 Dynamic Type、VoiceOver、横屏和真机逐页触控仍为 `VERIFY`。
+
 ## Work State 复核（本轮）
 
 - 问题：无目标、计划或待办时，页面同时显示“暂无任务状态”空态和“创建会话目标”入口；两者重复占用列表首屏空间。

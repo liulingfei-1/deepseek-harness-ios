@@ -190,7 +190,7 @@ private struct HarnessToolsView: View {
                 )
                 toolRow(
                     title: "任务与轨迹",
-                    detail: "Goal、Plan、Todo 与 Harness 调用链",
+                    detail: "目标、计划、待办与 Harness 调用链",
                     systemImage: "rectangle.3.group",
                     tint: .blue,
                     accessibilityIdentifier: "tool-route-console",
@@ -226,8 +226,6 @@ private struct HarnessToolsView: View {
             }
         }
         .harnessCompactListChrome()
-        .scrollContentBackground(.hidden)
-        .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle("工具")
         .navigationBarTitleDisplayMode(.inline)
     }
