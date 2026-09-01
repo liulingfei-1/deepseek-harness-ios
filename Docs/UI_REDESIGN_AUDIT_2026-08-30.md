@@ -203,6 +203,13 @@
 - 结论：空会话只保留单一“有什么要处理？”入口和常驻输入栏；错误使用可关闭的行内提示，没有模态弹窗，也没有遮挡会话标题。消息操作按钮保留 44pt 点击区和现有上下文菜单，未为追求更小视觉而牺牲无障碍。
 - 本轮不改生产 UI；新增专项证据防止空态、输入栏和错误条后续回归。`HarnessMobileChatChromeUITests` 2/2 通过（`/tmp/hm-chat-chrome-audit/Logs/Test/Test-HarnessMobile-2026.08.31_19-36-38-+0800.xcresult`）。运行中、排队输入、图片/文件、审批、长对话、深色、极限 Dynamic Type、VoiceOver、横屏和 iPhone 16 Pro 仍为 `VERIFY`。
 
+## 会话选项 Sheet 收口（2026-09-01）
+
+- 调整前录屏末帧：`/tmp/session-options-audit-last-frame-0901.png`。对话/轨迹、Agent 预设、运行模式、工具权限、模型、设置、后台任务和导出控件只占上半段，却使用整页 sheet，底部留下大块无意义空白。
+- 调整：直接使用 SwiftUI 原生 `.medium` / `.large` detent，默认收成中等高度并显示拖拽指示；用户可上拉到全屏，给大字号和滚动保留空间。会话模式、权限、模型、设置、任务和导出逻辑均未改变。
+- 调整后截图：`/tmp/session-options-final-attachments-0901-1/7D7E725D-0827-43D4-B6A5-64549E9F5A0F.png`。
+- 专项测试：`HarnessMobileProgressiveDisclosureUITests/testSessionOptionsKeepsConversationControlsReachable` 1/1 通过（`/tmp/hm-session-options-final2-0901/Logs/Test/Test-HarnessMobile-2026.09.01_08-46-10-+0800.xcresult`），覆盖聊天真实入口和全部九类控件。运行中禁用态、非空导出、极限 Dynamic Type、VoiceOver、横屏和真机仍为 `VERIFY`。
+
 ## 核心页面无障碍布局矩阵（2026-08-31）
 
 - 组合条件：深色模式、横屏、辅助功能 XXXL 字号；覆盖首页项目列表、聊天输入、设置路由和 iSH 命令输入四个真实入口。
@@ -244,6 +251,7 @@
 | --- | --- | --- |
 | 首页 / 项目列表 | 项目优先、搜索、新建会话、工具与设置入口 | DONE |
 | 聊天页 | 会话标题、输入栏、会话选项、轨迹切换、工作状态 Dock | VERIFY |
+| 会话选项 Sheet | 对话/轨迹、预设、运行、权限、模型、设置、任务和导出 | VERIFY |
 | 模型选择 | 搜索、选中态、空结果、默认/会话覆盖 | DONE |
 | 工具总览 | 工作区、终端、任务/轨迹、插件、设置路由 | DONE |
 | Console | 任务 / 轨迹分段，移除重复插件入口 | DONE |

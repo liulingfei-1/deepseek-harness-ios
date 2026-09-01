@@ -615,6 +615,30 @@ final class HarnessMobileProgressiveDisclosureUITests: XCTestCase {
         add(screenshot)
     }
 
+    func testSessionOptionsKeepsConversationControlsReachable() {
+        let app = launchConfiguredApp()
+        addTeardownBlock { app.terminate() }
+
+        openConversation(in: app)
+        app.buttons["会话选项"].tap()
+
+        XCTAssertTrue(app.buttons["对话"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["轨迹"].exists)
+        XCTAssertTrue(app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "Agent 预设：")
+        ).firstMatch.exists)
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "session-options"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        XCTAssertTrue(app.descendants(matching: .any)["Agent"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["工作区写入"].exists)
+        XCTAssertTrue(app.buttons["切换模型"].exists)
+        XCTAssertTrue(app.buttons["设置"].exists)
+        XCTAssertTrue(app.buttons["后台任务"].exists)
+        XCTAssertTrue(app.buttons["导出对话"].exists)
+    }
+
     func testDiagnosticLogKeepsRuntimeAndExportActionsReachable() {
         let app = launchConfiguredApp()
         addTeardownBlock { app.terminate() }

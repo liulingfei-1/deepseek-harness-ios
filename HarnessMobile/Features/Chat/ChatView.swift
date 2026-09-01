@@ -91,6 +91,8 @@ struct ChatView: View {
                     // on compact iPhone navigation bars.
                     .navigationBarTitleDisplayMode(.inline)
             }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
         .task {
             consumePendingDraft()
