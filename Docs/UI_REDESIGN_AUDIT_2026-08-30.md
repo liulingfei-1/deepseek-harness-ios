@@ -225,6 +225,12 @@
 - 调整后截图：`/tmp/agent-bundles-final-attachments-0831-1/A5882AB2-4675-48F6-B4B3-5104EAA534F5.png`。
 - 专项测试：`HarnessMobileProgressiveDisclosureUITests/testAgentBundlesKeepsInstallControlsReachable` 1/1 通过（`/tmp/hm-agent-bundles-final-0831/Logs/Test/Test-HarnessMobile-2026.08.31_23-23-57-+0800.xcresult`），覆盖设置真实入口、两个安装按钮、标题、重复状态移除和安全说明展开。真实 iSH 安装/取消/重装、启用、无障碍矩阵和真机仍为 `VERIFY`。
 
+## 模型行为双态复核（2026-09-01）
+
+- 默认截图：`/tmp/provider-behavior-final4-attachments-0901-2/9BE6EB99-B48A-4662-815C-3137F380724E.png`。上下文压缩、时间上下文和会话标题按任务分组；时间上下文默认只有一个原生开关，没有重复状态或多余入口。
+- 开启截图：`/tmp/provider-behavior-final4-attachments-0901-2/07965E47-77AE-4F72-AC03-FFA856DAEE6C.png`。开启后在同一分组内按需出现“显示时区”和“刷新间隔”，无需新增自绘组件或生产 UI 改动。
+- 专项测试：`HarnessMobileProgressiveDisclosureUITests/testProviderManagementMovesRequestBehaviorToFocusedSubpage` 1/1 通过（`/tmp/hm-provider-behavior-final4-0901/Logs/Test/Test-HarnessMobile-2026.09.01_08-26-39-+0800.xcresult`），覆盖设置真实入口、唯一时间开关及关闭/开启双态。真实服务商请求、运行中禁用态、深色、极限 Dynamic Type、VoiceOver、横屏和真机仍为 `VERIFY`。
+
 ## 全界面覆盖清单（截至本轮）
 
 | 界面 | 已检查内容 | 状态 |
@@ -242,7 +248,8 @@
 | 原生客户端详情 | 分区标签、命令与设置入口 | DONE |
 | 社区插件市场 | 市场/已安装、搜索、目录行和操作菜单 | DONE |
 | 插件设置 | Host 状态、namespace 列表、编辑器和冲突态 | VERIFY |
-| 服务商配置 | Profile 列表、添加、模型行为和凭据状态 | DONE |
+| 服务商配置 | Profile 列表、添加和凭据状态 | DONE |
+| 模型行为 | 摘要路由、时间上下文双态和自动标题 | VERIFY |
 | Setup / Onboarding | 服务商、连接、模型、保存开始 | VERIFY |
 | 后台任务设置 | 执行、定位、Live Activity、通知、隐私 | VERIFY |
 | 手机权限 | 权限分组、状态刷新和 iOS 设置入口 | VERIFY |

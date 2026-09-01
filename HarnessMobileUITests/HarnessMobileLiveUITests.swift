@@ -568,6 +568,32 @@ final class HarnessMobileProgressiveDisclosureUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["上下文压缩"].exists)
         XCTAssertTrue(app.staticTexts["时间上下文"].exists)
         XCTAssertTrue(app.staticTexts["会话标题"].exists)
+        let timeContextToggles = app.switches.matching(
+            NSPredicate(format: "label == %@", "向 Agent 提供当前时间")
+        )
+        XCTAssertEqual(timeContextToggles.count, 1)
+
+        let initialScreen = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        initialScreen.name = "provider-behavior-default"
+        initialScreen.lifetime = .keepAlways
+        add(initialScreen)
+
+        let timeContextToggle = timeContextToggles.firstMatch
+        XCTAssertEqual(timeContextToggle.value as? String, "0")
+        timeContextToggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        XCTAssertEqual(timeContextToggle.value as? String, "1")
+        let timeZone = app.descendants(matching: .any).matching(
+            NSPredicate(format: "label BEGINSWITH %@", "显示时区")
+        ).firstMatch
+        let refreshInterval = app.descendants(matching: .any).matching(
+            NSPredicate(format: "label BEGINSWITH %@", "刷新间隔")
+        ).firstMatch
+        XCTAssertTrue(timeZone.waitForExistence(timeout: 5))
+        XCTAssertTrue(refreshInterval.exists)
+        let expandedScreen = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        expandedScreen.name = "provider-behavior-time-enabled"
+        expandedScreen.lifetime = .keepAlways
+        add(expandedScreen)
     }
 
     func testDiagnosticLogKeepsRuntimeAndExportActionsReachable() {
