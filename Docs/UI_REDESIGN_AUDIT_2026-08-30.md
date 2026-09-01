@@ -203,6 +203,13 @@
 - 结论：空会话只保留单一“有什么要处理？”入口和常驻输入栏；错误使用可关闭的行内提示，没有模态弹窗，也没有遮挡会话标题。消息操作按钮保留 44pt 点击区和现有上下文菜单，未为追求更小视觉而牺牲无障碍。
 - 本轮不改生产 UI；新增专项证据防止空态、输入栏和错误条后续回归。`HarnessMobileChatChromeUITests` 2/2 通过（`/tmp/hm-chat-chrome-audit/Logs/Test/Test-HarnessMobile-2026.08.31_19-36-38-+0800.xcresult`）。运行中、排队输入、图片/文件、审批、长对话、深色、极限 Dynamic Type、VoiceOver、横屏和 iPhone 16 Pro 仍为 `VERIFY`。
 
+## 聊天添加内容菜单收口（2026-09-01）
+
+- 调整前截图：`/tmp/chat-add-before-attachments-0901-1/EC06299C-4C1C-4418-A02D-E3478B09C591.png`。“添加内容”菜单同时列出命令和三类附件，而输入栏已经有独立常驻命令按钮，形成重复入口并混淆菜单任务。
+- 调整：直接删除菜单内的“命令”，保留系统 `PhotosPicker`、相机和文件选择三项；输入栏常驻命令按钮、Dynamic Type 与 VoiceOver 入口不变，没有新增菜单分组或组件。
+- 调整后截图：`/tmp/chat-add-final-attachments-0901-1/FF01C693-40C6-4D97-9B19-498702A4B98F.png`。
+- 专项测试：`HarnessMobileChatChromeUITests/testAddContentMenuOnlyContainsAttachments` 1/1 通过（`/tmp/hm-chat-add-final-0901/Logs/Test/Test-HarnessMobile-2026.09.01_14-02-09-+0800.xcresult`），覆盖聊天真实入口、三类附件和重复命令移除；`testEmptyConversationKeepsPromptAndComposerVisible` 继续覆盖常驻命令入口。真实照片/相机/文件选择、系统权限、取消路径和真机仍为 `VERIFY`。
+
 ## 会话选项 Sheet 收口（2026-09-01）
 
 - 调整前录屏末帧：`/tmp/session-options-audit-last-frame-0901.png`。对话/轨迹、Agent 预设、运行模式、工具权限、模型、设置、后台任务和导出控件只占上半段，却使用整页 sheet，底部留下大块无意义空白。
@@ -295,6 +302,7 @@
 | 项目删除确认 | 项目名、危险操作、本机数据范围和工作区边界 | VERIFY |
 | 项目归档与恢复 | 归档范围、项目行、分叉/恢复菜单和空态 | VERIFY |
 | 聊天页 | 会话标题、输入栏、会话选项、轨迹切换、工作状态 Dock | VERIFY |
+| 聊天添加内容菜单 | 图片、相机、文件和独立命令入口 | VERIFY |
 | 会话选项 Sheet | 对话/轨迹、预设、运行、权限、模型、设置、任务和导出 | VERIFY |
 | Agent 预设选择 | 系统预设、说明、选择态、锁定/损坏态 | VERIFY |
 | 对话导出确认 | 脱敏说明、JSON/Markdown 和文件生成边界 | VERIFY |

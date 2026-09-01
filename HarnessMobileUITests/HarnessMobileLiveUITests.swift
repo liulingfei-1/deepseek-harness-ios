@@ -1034,9 +1034,31 @@ final class HarnessMobileChatChromeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["有什么要处理？"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.descendants(matching: .any)["chat-input"].exists)
         XCTAssertTrue(app.buttons["添加内容"].exists)
-        XCTAssertTrue(app.buttons["命令"].exists)
+        XCTAssertFalse(app.buttons["命令"].exists)
         let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         screenshot.name = "chat-empty-state"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
+    func testAddContentMenuOnlyContainsAttachments() {
+        let app = XCUIApplication()
+        addTeardownBlock { app.terminate() }
+        app.launchArguments = [
+            "-reset-persistent-state-for-ui-testing",
+            "-bootstrap-configuration-for-ui-testing",
+            "-disable-animations-for-ui-testing",
+        ]
+        app.launch()
+
+        openConversation(in: app)
+        app.buttons["添加内容"].tap()
+        XCTAssertTrue(app.buttons["选择图片"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["拍照"].exists)
+        XCTAssertTrue(app.buttons["选择 PDF、音频或视频"].exists)
+        XCTAssertTrue(app.buttons["命令"].exists)
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "chat-add-content-menu"
         screenshot.lifetime = .keepAlways
         add(screenshot)
     }

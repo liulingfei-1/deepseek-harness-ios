@@ -118,10 +118,6 @@ struct ChatInputBar: View {
                 Button(action: onPickFile) {
                     Label("选择 PDF、音频或视频", systemImage: "doc")
                 }
-
-                Button(action: onShowCommands) {
-                    Label("命令", systemImage: "slash.circle")
-                }
             } label: {
                 Image(systemName: "plus")
                     .font(.body.weight(.medium))
@@ -130,10 +126,8 @@ struct ChatInputBar: View {
             }
             .accessibilityLabel("添加内容")
 
-            // Commands are a high-frequency developer action. Keep them
-            // discoverable in the composer at large Dynamic Type and
-            // landscape sizes instead of hiding the only entry in the plus
-            // menu (which is not exposed as a visible control to VoiceOver).
+            // Commands are a high-frequency developer action. Keep the
+            // standalone entry visible at large Dynamic Type and in VoiceOver.
             Button(action: onShowCommands) {
                 Image(systemName: "slash.circle")
                     .font(.body.weight(.medium))
