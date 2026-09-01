@@ -468,7 +468,6 @@ struct NativeAgentPluginSettingsView: View {
             if let plugin, plugin.settings != nil {
                 Form {
                     Section {
-                        LabeledContent("插件", value: plugin.name)
                         LabeledContent("生效", value: "立即替换运行时贡献")
                         LabeledContent("存储", value: "App 本地插件注册表")
                     } header: {
