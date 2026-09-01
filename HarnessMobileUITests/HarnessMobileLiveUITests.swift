@@ -639,6 +639,29 @@ final class HarnessMobileProgressiveDisclosureUITests: XCTestCase {
         XCTAssertTrue(app.buttons["导出对话"].exists)
     }
 
+    func testAgentPresetPickerShowsAllSystemPresets() {
+        let app = launchConfiguredApp()
+        addTeardownBlock { app.terminate() }
+
+        openConversation(in: app)
+        app.buttons["会话选项"].tap()
+        let presetButton = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "Agent 预设：")
+        ).firstMatch
+        XCTAssertTrue(presetButton.waitForExistence(timeout: 5))
+        presetButton.tap()
+
+        XCTAssertTrue(app.navigationBars["Agent 预设"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons["标准模式"].value as? String, "已选择")
+        XCTAssertTrue(app.buttons["PTC 模式"].exists)
+        XCTAssertTrue(app.buttons["极简模式"].exists)
+        XCTAssertTrue(app.buttons["创造模式"].exists)
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "agent-preset-picker"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     func testDiagnosticLogKeepsRuntimeAndExportActionsReachable() {
         let app = launchConfiguredApp()
         addTeardownBlock { app.terminate() }

@@ -210,6 +210,12 @@
 - 调整后截图：`/tmp/session-options-final-attachments-0901-1/7D7E725D-0827-43D4-B6A5-64549E9F5A0F.png`。
 - 专项测试：`HarnessMobileProgressiveDisclosureUITests/testSessionOptionsKeepsConversationControlsReachable` 1/1 通过（`/tmp/hm-session-options-final2-0901/Logs/Test/Test-HarnessMobile-2026.09.01_08-46-10-+0800.xcresult`），覆盖聊天真实入口和全部九类控件。运行中禁用态、非空导出、极限 Dynamic Type、VoiceOver、横屏和真机仍为 `VERIFY`。
 
+## Agent 预设选择页复核（2026-09-01）
+
+- 当前截图：`/tmp/agent-preset-audit-attachments-0901-1/003BD3E3-0AC4-4A07-8131-1DABC6E1F9F2.png`。
+- 结论：现有原生 medium/large sheet 已在首屏完整呈现标准、PTC、极简和创造四个系统预设；共享图标、说明文字、当前勾选和完成动作层级清楚，没有证据支持新增卡片、分段控件或自绘选择器，因此本页不改生产 UI。
+- 专项测试：`HarnessMobileProgressiveDisclosureUITests/testAgentPresetPickerShowsAllSystemPresets` 1/1 通过（`/tmp/hm-agent-preset-audit-0901/Logs/Test/Test-HarnessMobile-2026.09.01_08-49-58-+0800.xcresult`），覆盖聊天 → 会话选项真实入口、四个系统预设和当前选择。用户预设、损坏/锁定态、运行中禁用态、无障碍矩阵和真机仍为 `VERIFY`。
+
 ## 核心页面无障碍布局矩阵（2026-08-31）
 
 - 组合条件：深色模式、横屏、辅助功能 XXXL 字号；覆盖首页项目列表、聊天输入、设置路由和 iSH 命令输入四个真实入口。
@@ -252,6 +258,7 @@
 | 首页 / 项目列表 | 项目优先、搜索、新建会话、工具与设置入口 | DONE |
 | 聊天页 | 会话标题、输入栏、会话选项、轨迹切换、工作状态 Dock | VERIFY |
 | 会话选项 Sheet | 对话/轨迹、预设、运行、权限、模型、设置、任务和导出 | VERIFY |
+| Agent 预设选择 | 系统预设、说明、选择态、锁定/损坏态 | VERIFY |
 | 模型选择 | 搜索、选中态、空结果、默认/会话覆盖 | DONE |
 | 工具总览 | 工作区、终端、任务/轨迹、插件、设置路由 | DONE |
 | Console | 任务 / 轨迹分段，移除重复插件入口 | DONE |
