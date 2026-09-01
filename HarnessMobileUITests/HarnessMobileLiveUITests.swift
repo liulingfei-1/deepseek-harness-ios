@@ -750,6 +750,40 @@ final class HarnessMobileProgressiveDisclosureUITests: XCTestCase {
         add(screenshot)
     }
 
+    func testArchivedProjectActionsUseProjectLanguage() {
+        let app = launchConfiguredApp()
+        addTeardownBlock { app.terminate() }
+
+        XCTAssertTrue(app.navigationBars["Harness"].waitForExistence(timeout: 15))
+        let currentProject = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "新会话", "当前")
+        ).firstMatch
+        XCTAssertTrue(currentProject.waitForExistence(timeout: 5))
+        currentProject.swipeRight()
+        let archive = app.buttons["归档"]
+        XCTAssertTrue(archive.waitForExistence(timeout: 5))
+        archive.tap()
+
+        app.buttons["筛选与排序"].tap()
+        let archivedScope = app.buttons["归档"]
+        XCTAssertTrue(archivedScope.waitForExistence(timeout: 5))
+        archivedScope.tap()
+
+        XCTAssertTrue(app.staticTexts["已归档"].waitForExistence(timeout: 10))
+        let archivedProject = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "新会话", "已归档")
+        ).firstMatch
+        XCTAssertTrue(archivedProject.waitForExistence(timeout: 5))
+        archivedProject.press(forDuration: 1)
+        XCTAssertTrue(app.buttons["分叉项目"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["恢复项目"].exists)
+        XCTAssertFalse(app.buttons["恢复会话"].exists)
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "archived-project-actions"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     func testDiagnosticLogKeepsRuntimeAndExportActionsReachable() {
         let app = launchConfiguredApp()
         addTeardownBlock { app.terminate() }

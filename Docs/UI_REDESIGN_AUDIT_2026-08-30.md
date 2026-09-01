@@ -244,6 +244,13 @@
 - 专项测试：`HarnessMobileProgressiveDisclosureUITests/testHomeNewProjectEntryUsesProjectLanguage` 1/1 通过（`/tmp/hm-home-new-final-0901/Logs/Test/Test-HarnessMobile-2026.09.01_13-48-31-+0800.xcresult`），覆盖真实首页、项目分区、新入口及旧按钮名称移除。空存储态、实际创建、自动标题、无障碍完整矩阵和真机触控仍为 `VERIFY`。
 - 失败边界：最初尝试“删除最后条目后截图空态”的临时测试在 `/tmp/hm-home-empty-before-0901/Logs/Test/Test-HarnessMobile-2026.09.01_13-41-59-+0800.xcresult` 以 `XCTAssertTrue failed` 结束；结果包 UI hierarchy 证明应用会自动保留/重建默认 Session，因此改为验证真实可达的新建入口，没有增加只为测试存在的空态夹具。
 
+## 项目归档与恢复语义统一（2026-09-01）
+
+- 调整前截图：`/tmp/archive-before-attachments-0901-1/B27E4FBA-B54E-4A59-9CD0-28949F3E6D86.png`。归档筛选与项目行已经清楚，但长按菜单仍显示“分叉会话 / 恢复会话”，首页项目语义在操作层中断。
+- 调整：只把首页项目的分叉、归档、恢复菜单、归档空态、范围标题和操作中无障碍提示统一为“项目”；继续使用 SwiftUI 原生菜单、滑动操作和现有 Session 方法，未改变归档、恢复或分叉数据逻辑。
+- 调整后截图：`/tmp/archive-final-attachments-0901-1/4A3AC2DC-E7A6-4AEF-9925-59F5424288DC.png`。
+- 专项测试：`HarnessMobileProgressiveDisclosureUITests/testArchivedProjectActionsUseProjectLanguage` 1/1 通过（`/tmp/hm-archive-final-0901/Logs/Test/Test-HarnessMobile-2026.09.01_13-55-39-+0800.xcresult`），覆盖右滑归档、归档范围、归档项目行和长按菜单。真实恢复/分叉结果、空归档态、无障碍完整矩阵和真机触控仍为 `VERIFY`。
+
 ## 核心页面无障碍布局矩阵（2026-08-31）
 
 - 组合条件：深色模式、横屏、辅助功能 XXXL 字号；覆盖首页项目列表、聊天输入、设置路由和 iSH 命令输入四个真实入口。
@@ -286,6 +293,7 @@
 | 首页 / 项目列表 | 项目优先、搜索、新建项目、工具与设置入口 | DONE |
 | 项目重命名 | 首页左滑入口、名称、字数、保存和错误态 | VERIFY |
 | 项目删除确认 | 项目名、危险操作、本机数据范围和工作区边界 | VERIFY |
+| 项目归档与恢复 | 归档范围、项目行、分叉/恢复菜单和空态 | VERIFY |
 | 聊天页 | 会话标题、输入栏、会话选项、轨迹切换、工作状态 Dock | VERIFY |
 | 会话选项 Sheet | 对话/轨迹、预设、运行、权限、模型、设置、任务和导出 | VERIFY |
 | Agent 预设选择 | 系统预设、说明、选择态、锁定/损坏态 | VERIFY |

@@ -39,7 +39,7 @@ struct SessionsView: View {
                 } else {
                     if collectionScope == .all {
                         if !activeSessions.isEmpty {
-                            sessionSection("会话", sessions: activeSessions)
+                            sessionSection("项目", sessions: activeSessions)
                         }
                         if !archivedSessions.isEmpty {
                             sessionSection("已归档", sessions: archivedSessions)
@@ -213,9 +213,9 @@ struct SessionsView: View {
             ContentUnavailableView.search(text: normalizedSearchText)
         } else if collectionScope == .archived {
             ContentUnavailableView(
-                "没有已归档会话",
+                "没有已归档项目",
                 systemImage: "archivebox",
-                description: Text("归档会话会保留消息和任务状态，并可随时恢复。")
+                description: Text("归档项目会保留消息和任务状态，并可随时恢复。")
             )
         } else {
             ContentUnavailableView {
@@ -305,20 +305,20 @@ struct SessionsView: View {
             Button {
                 forkConversation(session)
             } label: {
-                Label("分叉会话", systemImage: "arrow.triangle.branch")
+                Label("分叉项目", systemImage: "arrow.triangle.branch")
             }
 
             if session.isArchived {
                 Button {
                     restoreConversation(session)
                 } label: {
-                    Label("恢复会话", systemImage: "arrow.uturn.backward")
+                    Label("恢复项目", systemImage: "arrow.uturn.backward")
                 }
             } else {
                 Button {
                     archiveConversation(session)
                 } label: {
-                    Label("归档会话", systemImage: "archivebox")
+                    Label("归档项目", systemImage: "archivebox")
                 }
             }
 
@@ -528,9 +528,9 @@ struct SessionsView: View {
 
     private func accessibilityHint(for session: ConversationSessionSummary) -> String {
         if session.isArchived {
-            return "恢复并打开此会话"
+            return "恢复并打开此项目"
         }
-        return session.id == model.activeSessionID ? "当前会话" : "切换到此会话"
+        return session.id == model.activeSessionID ? "当前项目" : "切换到此项目"
     }
 }
 
@@ -716,9 +716,9 @@ private enum SessionCollectionScope: String, CaseIterable, Identifiable {
 
     var sectionTitle: String {
         switch self {
-        case .active: "会话"
+        case .active: "项目"
         case .archived: "已归档"
-        case .all: "全部会话"
+        case .all: "全部项目"
         }
     }
 
@@ -874,7 +874,7 @@ private struct SessionRow: View {
             if isBusy {
                 ProgressView()
                     .controlSize(.small)
-                    .accessibilityLabel("正在处理会话")
+                    .accessibilityLabel("正在处理项目")
             }
         }
         .padding(.vertical, 6)
