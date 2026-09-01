@@ -1339,11 +1339,14 @@ private struct JobsPanelView: View {
         NavigationStack {
             Group {
                 if model.visibleJobs.isEmpty {
-                    ContentUnavailableView(
-                        "暂无后台任务",
-                        systemImage: "checkmark.circle",
-                        description: Text("后台工具和子 Agent 完成后会保留在这里。")
-                    )
+                    List {
+                        Section {
+                            Label("暂无后台任务", systemImage: "checkmark.circle")
+                        } footer: {
+                            Text("后台工具和子 Agent 完成后会保留在这里。")
+                        }
+                    }
+                    .harnessCompactListChrome()
                 } else {
                     List {
                         ForEach(model.visibleJobs, id: \.id) { job in

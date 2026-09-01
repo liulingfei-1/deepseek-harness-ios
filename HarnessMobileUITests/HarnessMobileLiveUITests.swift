@@ -596,6 +596,25 @@ final class HarnessMobileProgressiveDisclosureUITests: XCTestCase {
         add(expandedScreen)
     }
 
+    func testJobsPanelKeepsEmptyStateAndRefreshReachable() {
+        let app = launchConfiguredApp()
+        addTeardownBlock { app.terminate() }
+
+        openConversation(in: app)
+        app.buttons["会话选项"].tap()
+        let jobs = app.buttons["后台任务"]
+        XCTAssertTrue(jobs.waitForExistence(timeout: 5))
+        jobs.tap()
+
+        XCTAssertTrue(app.navigationBars["后台任务"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["暂无后台任务"].exists)
+        XCTAssertTrue(app.buttons["刷新后台任务"].exists)
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "jobs-panel-empty"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     func testDiagnosticLogKeepsRuntimeAndExportActionsReachable() {
         let app = launchConfiguredApp()
         addTeardownBlock { app.terminate() }

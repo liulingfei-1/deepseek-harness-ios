@@ -152,6 +152,13 @@
 - 问题：聊天页打开的后台任务面板单独使用 `.insetGrouped`，与应用其他列表页面的统一背景、行高和分隔策略不一致。
 - 调整：复用现有 `harnessCompactListChrome()`；任务刷新、停止、输出查看和子 Agent 顶部树状区域保持不变。
 
+### 后台任务空态收口（2026-09-01）
+
+- 调整前截图：`/tmp/jobs-audit-attachments-0901-1/0AD31537-1CB7-4B3B-9292-E68DC4B0077B.png`。没有后台任务时使用整屏居中的大空态，首屏信息层级松散。
+- 调整：复用现有紧凑列表和原生 `Section`，将“暂无后台任务”及保留规则放回顶部；刷新、停止、查看输出、子 Agent 和非空列表逻辑不变。
+- 调整后截图：`/tmp/jobs-final-attachments-0901-1/61F04631-0F3D-48B9-B993-50090C5699E0.png`。
+- 专项测试：`HarnessMobileProgressiveDisclosureUITests/testJobsPanelKeepsEmptyStateAndRefreshReachable` 1/1 通过（`/tmp/hm-jobs-final-0901/Logs/Test/Test-HarnessMobile-2026.09.01_08-34-51-+0800.xcresult`），覆盖聊天真实入口、空态和刷新按钮。非空任务、停止、输出、子 Agent、无障碍矩阵和真机仍为 `VERIFY`。
+
 ## 设置主题覆盖复核（本轮）
 
 - 问题：设置页调用共享 `harnessCompactListChrome()` 后又重复设置系统分组背景，存在主题覆盖冗余。
@@ -251,6 +258,7 @@
 | 服务商配置 | Profile 列表、添加和凭据状态 | DONE |
 | 模型行为 | 摘要路由、时间上下文双态和自动标题 | VERIFY |
 | Setup / Onboarding | 服务商、连接、模型、保存开始 | VERIFY |
+| 聊天后台任务面板 | 空态、刷新、任务列表、输出和子 Agent | VERIFY |
 | 后台任务设置 | 执行、定位、Live Activity、通知、隐私 | VERIFY |
 | 手机权限 | 权限分组、状态刷新和 iOS 设置入口 | VERIFY |
 | 记忆管理 | 当前会话开关、记忆列表、导出和删除 | VERIFY |
