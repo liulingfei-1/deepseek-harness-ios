@@ -20,9 +20,12 @@
 Harness Mobile 不是网页壳，也不会把命令悄悄转发到服务器。它是一个原生 SwiftUI Agent 客户端：模型推理由用户配置的 HTTPS API 完成；Agent loop、文件工作区、会话、轨迹、iOS 工具、Cordis Host-half 插件和 Linux 命令都在 iPhone 上运行。
 
 <p align="center">
-  <img src="Docs/Evidence/plan-review-iphone16pro.jpg" width="31%" alt="Harness Mobile plan review on iPhone 16 Pro" />
-  <img src="Docs/Evidence/ish-command-iphone16pro.jpg" width="31%" alt="Harness Mobile iSH command on iPhone 16 Pro" />
+  <img src="Docs/Evidence/home-projects-2026-09-01.png" width="31%" alt="Harness Mobile 项目优先首页" />
+  <img src="Docs/Evidence/archived-project-actions-2026-09-01.png" width="31%" alt="Harness Mobile 项目归档与恢复" />
+  <img src="Docs/Evidence/chat-attachments-2026-09-01.png" width="31%" alt="Harness Mobile 聊天附件菜单" />
 </p>
+
+<p align="center"><sub>项目优先首页 · 项目归档/恢复 · 聚焦附件的聊天输入（iOS 27.0 Simulator）</sub></p>
 
 ## 为什么做它
 
@@ -95,13 +98,15 @@ DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
 ## 界面与工作流
 
 ```text
-Chat          对话、附件、@文件/@会话引用、模型与权限座位、计划/Agent 模式
-Sessions      新建、切换、重命名、分叉、父子 Agent 导航
-Console       目标/计划/todo、Job、插件、Trajectory 与诊断
-Files         私有工作区浏览、导入、编辑与 Agent 文件工具
-Commands      iSH 命令与终端状态
-Settings      Provider、后台、权限、插件市场与插件设置
+Projects      项目优先首页、搜索、新建、归档、恢复、重命名与分叉
+Chat          对话、附件、@文件/@会话引用、模型与权限、计划/Agent 模式
+Tools         工作区、iSH 终端、任务/轨迹、插件与设置入口
+Workspace     私有文件浏览、导入、编辑与 Agent 文件工具
+Console       目标/计划/todo、Job、Trajectory 与诊断
+Settings      Provider、后台、手机权限、插件市场与插件设置
 ```
+
+当前没有独立 Project 持久化模型：首页以会话标题作为项目名称，避免同时维护两套数据真源；打开项目后进入对应对话，工具和诊断保留在二级入口。
 
 工具卡片有专用的紧凑呈现，长对话与流式输出走窗口化/增量渲染，避免把全部历史视图同时重算。对于每次模型或工具调用，轨迹中保留输入输出摘要、耗时、轮次、缓存/使用量信息与插件处理链；凭据形态的字段和内容会在持久化前脱敏。
 
