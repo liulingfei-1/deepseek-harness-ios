@@ -97,6 +97,13 @@
 - 调整后截图：`/tmp/plugin-settings-final2-attachments-0902/C5A9514F-DA97-4B12-A414-F885F2781777.png`。
 - 专项测试：`HarnessMobilePluginSettingsUITests/testPluginSettingsShowsHostStateFromPluginRoute` 1/1 通过（`/tmp/hm-plugin-settings-final2-0902.xcresult`），覆盖设置路由、启动标题、进度语义、刷新入口和无搜索状态。首次最终用例只因无标签 `ProgressView` 未暴露为 XCUI progress element 失败；补充可访问标识后通过。真实 Host 启动成功/失败、命名空间列表、极限 Dynamic Type、VoiceOver、横屏和真机仍为 `VERIFY`。
 
+### 插件设置命名空间语言统一（2026-09-02）
+
+- 调整前截图：`/tmp/plugin-namespace-before2-attachments-0902/FCFF56C4-5A5B-46BF-9AA8-2C412868632D.png`。导航标题已经显示 `memory-notes`，状态分区仍重复 `Namespace / memory-notes`，并混用 `Revision`、`rev` 等英文用户文案。
+- 调整：删除重复命名空间行，将搜索、列表版本、状态、冲突、只读和通知文案统一为中文；命名空间 ID 保持原文，revision fence、草稿 rebase 和 256 操作上限不变。
+- 调整后截图：`/tmp/plugin-namespace-final-attachments2-0902/AF976506-83E7-42FF-909C-524AD6759E30.png`。
+- 专项测试：`HarnessMobilePluginSettingsUITests/testPluginSettingsNamespaceKeepsStatusAndEditorVisible` 1/1 通过（`/tmp/hm-plugin-namespace-final-0902.xcresult`），覆盖命名空间路由、去重、修订版本、schema 字段和保存入口。首次基线用例因同一可访问标识同时匹配按钮和组合文本而失败，改为精确查询导航按钮后通过；真实修改/冲突/只读/秘密字段、极限 Dynamic Type、VoiceOver、横屏和真机仍为 `VERIFY`。
+
 ### 插件编译失败详情语义（2026-09-01）
 
 - 调整前截图：`/tmp/plugin-failure-before-attachments-0901/F332F9B2-7433-4456-97CC-6B6C19F8F13B.png`、`/tmp/plugin-failure-before-attachments-0901/5D7FFFCC-0772-422F-8936-99D19FDDFB15.png`。编译已在 Swift 校验阶段失败，但总摘要仍显示绿色“已结束”；日志混用英文 12 小时制，诊断状态与长错误码同排导致难读断行。
@@ -386,7 +393,7 @@
 | 社区插件详情 | 分类、兼容性、安装路径、来源和安装边界 | VERIFY |
 | 已安装插件详情 | 运行状态、入口数、设置、兼容性、来源和管理 | VERIFY |
 | 原生插件设置 | 生效方式、存储、schema 配置、草稿和默认值 | VERIFY |
-| 插件设置 | Host 空态/启动、namespace 列表、编辑器和冲突态 | VERIFY |
+| 插件设置 | Host 空态/启动、命名空间列表、编辑器、版本冲突和只读态 | VERIFY |
 | 服务商配置 | Profile 列表、添加和凭据状态 | DONE |
 | 模型行为 | 摘要路由、时间上下文双态和自动标题 | VERIFY |
 | Setup / Onboarding | 服务商、连接、模型、保存开始 | VERIFY |

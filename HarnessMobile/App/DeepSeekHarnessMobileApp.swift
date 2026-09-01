@@ -79,6 +79,9 @@ struct DeepSeekHarnessMobileApp: App {
                     if ProcessInfo.processInfo.arguments.contains("-present-plugin-market-for-ui-testing") {
                         model.presentPluginMarketplaceForUITesting()
                     }
+                    if ProcessInfo.processInfo.arguments.contains("-present-plugin-settings-for-ui-testing") {
+                        model.presentPluginSettingsForUITesting()
+                    }
                     if ProcessInfo.processInfo.arguments.contains("-present-plugin-compilation-failure-for-ui-testing") {
                         model.presentPluginCompilationFailureForUITesting()
                     }

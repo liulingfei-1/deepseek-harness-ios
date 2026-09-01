@@ -376,6 +376,48 @@ extension AppModel {
         ishPluginMarketplaceOperation = nil
     }
 
+    func presentPluginSettingsForUITesting() {
+        ishPluginHostState = .running(hostVersion: "ui-test", processID: nil)
+        ishPluginSettingsSnapshot = ISHPluginSettingsSnapshot(
+            writable: true,
+            hasDocument: true,
+            namespaces: [
+                ISHPluginSettingsNamespace(
+                    ns: "memory-notes",
+                    schema: .object([
+                        "type": .string("object"),
+                        "properties": .object([
+                            "autoIndex": .object([
+                                "type": .string("boolean"),
+                                "title": .string("自动索引"),
+                                "description": .string("保存文件后自动更新本地记忆索引。"),
+                                "default": .bool(true)
+                            ]),
+                            "maxItems": .object([
+                                "type": .string("integer"),
+                                "title": .string("最大记录数"),
+                                "description": .string("单个命名空间保留的记录上限。"),
+                                "minimum": .number(10),
+                                "maximum": .number(500),
+                                "default": .number(50)
+                            ])
+                        ]),
+                        "required": .array([.string("autoIndex"), .string("maxItems")]),
+                        "additionalProperties": .bool(false)
+                    ]),
+                    value: .object(["autoIndex": .bool(true), "maxItems": .number(80)]),
+                    base: .object(["autoIndex": .bool(true), "maxItems": .number(50)]),
+                    user: .object(["maxItems": .number(80)]),
+                    revision: 7,
+                    applies: .live,
+                    secrets: [],
+                    editable: true,
+                    unsupportedReason: nil
+                )
+            ]
+        )
+    }
+
     func presentPluginCompilationFailureForUITesting() {
         presentPluginMarketplaceForUITesting()
 

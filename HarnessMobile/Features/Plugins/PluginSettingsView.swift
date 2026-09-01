@@ -9,7 +9,7 @@ struct PluginSettingsView: View {
         Group {
             if model.ishPluginSettingsSnapshot?.namespaces.isEmpty == false {
                 settingsList
-                    .searchable(text: $query, prompt: "搜索 namespace")
+                    .searchable(text: $query, prompt: "搜索命名空间")
             } else {
                 settingsList
             }
@@ -29,7 +29,9 @@ struct PluginSettingsView: View {
             }
         }
         .task {
-            await refresh()
+            if !isUITestingFixtureRequested {
+                await refresh()
+            }
         }
         .refreshable {
             await refresh()
@@ -73,7 +75,7 @@ struct PluginSettingsView: View {
                         Text(
                             query.isEmpty
                                 ? "启用注册设置命名空间的 Host 插件后会显示在这里。"
-                                : "尝试搜索其他 namespace。"
+                                : "尝试搜索其他命名空间。"
                         )
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -142,6 +144,14 @@ struct PluginSettingsView: View {
         return false
     }
 
+    private var isUITestingFixtureRequested: Bool {
+#if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-present-plugin-settings-for-ui-testing")
+#else
+        false
+#endif
+    }
+
     @MainActor
     private func refresh() async {
         guard !isRefreshing else { return }
@@ -171,7 +181,7 @@ private struct PluginSettingsNamespaceRow: View {
                     .lineLimit(1)
                 HStack(spacing: 8) {
                     Label(namespace.applies.displayName, systemImage: namespace.applies.systemImage)
-                    Text("rev \(namespace.revision)")
+                    Text("版本 \(namespace.revision)")
                         .monospacedDigit()
                     if !namespace.secrets.isEmpty {
                         Label(
@@ -322,8 +332,7 @@ struct PluginSettingsNamespaceView: View {
     @ViewBuilder
     private func namespaceStatusSection(_ namespace: ISHPluginSettingsNamespace) -> some View {
         Section {
-            LabeledContent("Namespace", value: namespace.ns)
-            LabeledContent("Revision", value: "\(namespace.revision)")
+            LabeledContent("修订版本", value: "\(namespace.revision)")
             LabeledContent("生效", value: namespace.applies.displayName)
             LabeledContent("编辑", value: namespace.editable && providerIsWritable ? "可用" : "只读")
             if let draft {
@@ -337,7 +346,7 @@ struct PluginSettingsNamespaceView: View {
     @ViewBuilder
     private func conflictSection(_ namespace: ISHPluginSettingsNamespace) -> some View {
         Section {
-            Label("设置已在其他位置更新到 revision \(namespace.revision)", systemImage: "arrow.triangle.2.circlepath")
+            Label("设置已在其他位置更新到版本 \(namespace.revision)", systemImage: "arrow.triangle.2.circlepath")
                 .foregroundStyle(.orange)
             Button {
                 rebaseDraft()
@@ -350,7 +359,7 @@ struct PluginSettingsNamespaceView: View {
                 Label("放弃草稿并重新载入", systemImage: "trash")
             }
         } header: {
-            Label("Revision 冲突", systemImage: "exclamationmark.arrow.circlepath")
+            Label("版本冲突", systemImage: "exclamationmark.arrow.circlepath")
         }
     }
 
@@ -358,7 +367,7 @@ struct PluginSettingsNamespaceView: View {
     private func readOnlySection(_ namespace: ISHPluginSettingsNamespace) -> some View {
         Section {
             Label(
-                namespace.unsupportedReason ?? "此 namespace 当前不能从原生表单写入。",
+                namespace.unsupportedReason ?? "此命名空间当前不能从原生表单写入。",
                 systemImage: "lock.fill"
             )
                 .foregroundStyle(.secondary)
@@ -399,7 +408,7 @@ struct PluginSettingsNamespaceView: View {
         guard namespace.revision != draft.expectedRevision else { return }
         if draft.isDirty {
             hasConflict = true
-            notice = .warning("当前草稿仍保留，保存前需要处理 revision 冲突。")
+            notice = .warning("当前草稿仍保留，保存前需要处理版本冲突。")
         } else {
             seedFromCurrentNamespace(force: true)
         }
@@ -418,7 +427,7 @@ struct PluginSettingsNamespaceView: View {
             self.form = parsed
             self.draft = try draft.rebased(onto: namespace, form: parsed)
             hasConflict = false
-            notice = .success("草稿已重放到 revision \(namespace.revision)。")
+            notice = .success("草稿已重放到版本 \(namespace.revision)。")
         } catch {
             notice = .error(error.localizedDescription)
         }
@@ -450,7 +459,7 @@ struct PluginSettingsNamespaceView: View {
             } catch let error as ISHPluginHostError {
                 if error.settingsConflict != nil {
                     hasConflict = true
-                    notice = .warning("保存被 revision fence 拒绝，草稿未丢失。")
+                    notice = .warning("保存被修订版本校验拒绝，草稿未丢失。")
                 } else {
                     notice = .error(error.localizedDescription)
                 }

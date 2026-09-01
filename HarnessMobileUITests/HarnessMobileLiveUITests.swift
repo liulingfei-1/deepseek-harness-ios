@@ -250,6 +250,48 @@ final class HarnessMobilePluginSettingsUITests: XCTestCase {
         screenshot.lifetime = .keepAlways
         add(screenshot)
     }
+
+    func testPluginSettingsNamespaceKeepsStatusAndEditorVisible() {
+        let app = XCUIApplication()
+        addTeardownBlock { app.terminate() }
+        app.launchArguments = [
+            "-reset-persistent-state-for-ui-testing",
+            "-bootstrap-configuration-for-ui-testing",
+            "-disable-animations-for-ui-testing",
+            "-present-plugin-settings-for-ui-testing",
+        ]
+        app.launch()
+
+        XCTAssertTrue(app.navigationBars["Harness"].waitForExistence(timeout: 15))
+        app.buttons["设置"].tap()
+        XCTAssertTrue(app.navigationBars["设置"].waitForExistence(timeout: 10))
+        let plugins = app.buttons["Cordis 插件"]
+        scrollUntilHittable(plugins, in: app)
+        plugins.tap()
+
+        XCTAssertTrue(app.navigationBars["插件"].waitForExistence(timeout: 10))
+        let settings = app.buttons["ish-plugin-settings"]
+        scrollUntilHittable(settings, in: app)
+        settings.tap()
+
+        XCTAssertTrue(app.navigationBars["插件设置"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.searchFields["搜索命名空间"].exists)
+        let namespace = app.buttons["ish-plugin-settings-namespace-memory-notes"]
+        XCTAssertTrue(namespace.waitForExistence(timeout: 5))
+        namespace.tap()
+
+        XCTAssertTrue(app.navigationBars["memory-notes"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["ish-plugin-settings-editor"].exists)
+        XCTAssertFalse(app.staticTexts["Namespace"].exists)
+        XCTAssertFalse(app.staticTexts["Revision"].exists)
+        XCTAssertTrue(app.staticTexts["修订版本"].exists)
+        XCTAssertTrue(app.staticTexts["最大记录数"].exists)
+        XCTAssertTrue(app.buttons["ish-plugin-settings-save"].exists)
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "plugin-settings-namespace-editor"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
 }
 
 @MainActor
