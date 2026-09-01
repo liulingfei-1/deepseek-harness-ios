@@ -9,6 +9,7 @@
 [![UI](https://img.shields.io/badge/UI-SwiftUI-007AFF?style=flat-square)](#界面与工作流)
 [![Execution](https://img.shields.io/badge/execution-on--device-21C55D?style=flat-square)](#本机执行边界)
 [![DeepSeek Harness](https://img.shields.io/badge/inspired%20by-DeepSeek%20Harness-4D6BFE?style=flat-square)](https://github.com/deepseek-ai/deepseek-harness)
+[![License](https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square)](LICENSE)
 
 `iOS` · `SwiftUI` · `DeepSeek` · `OpenAI-compatible` · `Anthropic` · `Cordis` · `iSH` · `OpenMinis` · `Agent`
 
@@ -205,6 +206,6 @@ Vendor/                固定的上游/兼容实现与补丁
 
 ## 许可证与致谢
 
-本项目整合/改编的 on-device iSH 与 OpenMinis 组件受 GPLv3 及其附加条款约束；DeepSeek Harness 与其他来源组件的许可也必须一并遵守。分发源代码或构建产物前，请先阅读 [Third-Party Notices](THIRD_PARTY_NOTICES.md) 并确保提供相应源码与许可证文本。
+本项目整体采用 [GNU General Public License v3.0](LICENSE)。项目整合并修改了 GPLv3 的 on-device iSH 与 OpenMinis 组件；iSH 的附加分发条款保存在 [LICENSES/ISH-LICENSE.IOS](LICENSES/ISH-LICENSE.IOS)，完整上游声明见 [LICENSES/ISH-LICENSE.md](LICENSES/ISH-LICENSE.md)。分发源代码或构建产物前，请同时阅读 [Third-Party Notices](THIRD_PARTY_NOTICES.md)，并履行对应的源码提供与通知义务。
 
 特别感谢 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)、[OpenMinis](https://github.com/OpenMinis/OpenMinis) 与 [iSH ARM64](https://github.com/OpenMinis/ish-arm64) 的开源工作。
