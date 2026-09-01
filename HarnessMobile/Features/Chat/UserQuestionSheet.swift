@@ -354,7 +354,7 @@ private struct PlanReviewSheet: View {
             VStack(spacing: 0) {
                 HStack(spacing: 10) {
                     HarnessIconTile(systemImage: "doc.text.magnifyingglass", tint: .accentColor, size: 28)
-                    Text("Plan review")
+                    Text("计划审阅")
                         .font(.headline)
                     Spacer(minLength: 0)
                 }

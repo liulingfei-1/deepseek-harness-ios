@@ -41,6 +41,13 @@
 - 专项测试：`HarnessMobilePlanReviewUITests/testPlanReviewPresentsAllDesktopActions` 1/1 通过（`/tmp/hm-user-question-tests/Logs/Test/Test-HarnessMobile-2026.08.30_16-57-17-+0800.xcresult`）。
 - 裸启动参数只能准备会话，必须由 UI 测试打开会话后才会出现 Plan Review；因此未把冷启动空白页截图冒充弹层证据。弹层深色、大字、横屏和真机触控仍为 `VERIFY`。
 
+### Plan Review 框架标题中文化（2026-09-02）
+
+- 调整前截图：`/tmp/plan-review-before-attachments-0902/6F9E95CE-53B6-4541-9CB6-5108DF11ADE6.png`。底部动作已经统一为中文，App 自己的顶部标题仍显示 `Plan review`；计划正文为模型原始内容，不属于框架文案。
+- 调整：顶部标题改为“计划审阅”；模型计划 Markdown、讨论/拒绝/批准动作、按钮标识和回调不变。
+- 调整后截图：`/tmp/plan-review-final-attachments-0902/FC0BA310-73EC-4383-B6CB-05B392874AA1.png`。
+- 专项测试：`HarnessMobilePlanReviewUITests/testPlanReviewPresentsAllDesktopActions` 1/1 通过（`/tmp/hm-plan-review-final-0902.xcresult`），覆盖真实会话入口、中文框架标题、三个桌面动作和最终截图。真实动作回调、极限 Dynamic Type、VoiceOver、横屏和真机触控仍为 `VERIFY`。
+
 ## 设置页首屏复核（本轮）
 
 - 真实模拟器截图：`/tmp/harness-ui-settings-progressive.png`。

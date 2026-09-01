@@ -1297,6 +1297,11 @@ final class HarnessMobilePlanReviewUITests: XCTestCase {
         XCTAssertTrue(app.buttons["plan-review-chat"].isHittable)
         XCTAssertTrue(app.buttons["plan-review-refuse"].isHittable)
         XCTAssertTrue(app.buttons["plan-review-approve"].isHittable)
+        XCTAssertTrue(app.staticTexts["计划审阅"].exists)
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "plan-review"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
     }
 }
 
