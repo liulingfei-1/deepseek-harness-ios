@@ -222,6 +222,13 @@
 - 结论：原生 `confirmationDialog` 已用“脱敏导出对话”说明任务，完整保留移除工具原始参数、遮盖常见 API Token 和仅在用户选择位置生成文件的边界，JSON/Markdown 两个格式动作直接可选；没有必要增加自定义导出页或重复设置，因此本项不改生产 UI。
 - 专项测试：`HarnessMobileProgressiveDisclosureUITests/testConversationExportExplainsRedactionBeforeChoosingFormat` 1/1 通过（`/tmp/hm-export-audit2-0901/Logs/Test/Test-HarnessMobile-2026.09.01_08-56-51-+0800.xcresult`），覆盖含消息会话、会话选项真实入口、两种格式和脱敏说明。实际文件生成、内容脱敏抽检、文件选择器、取消语义、无障碍矩阵和真机仍为 `VERIFY`。
 
+## 项目重命名页语义统一（2026-09-01）
+
+- 调整前截图：`/tmp/rename-audit-attachments-0901-1/AAB284D3-A469-4180-A70F-C3B4ADE86551.png`。首页已经将条目作为“项目”呈现，但编辑页仍显示“重命名会话 / 会话名称”，暴露内部 Session 语义。
+- 调整：只把可见标题、输入标签和错误标题统一为“重命名项目 / 项目名称 / 无法重命名项目”；底层 `ConversationSessionSummary`、本机存储、80 字限制、自动聚焦、取消和保存逻辑不变。
+- 调整后截图：`/tmp/rename-final-attachments-0901-1/3C610454-7FBC-4958-A7F3-282E032421CA.png`。
+- 专项测试：`HarnessMobileProgressiveDisclosureUITests/testRenameConversationKeepsTitleValidationVisible` 1/1 通过（`/tmp/hm-rename-final-0901/Logs/Test/Test-HarnessMobile-2026.09.01_09-03-29-+0800.xcresult`），覆盖首页项目行左滑入口、项目名称、字数、本机说明和取消/保存。实际保存、空值/超长/错误态、无障碍矩阵和真机仍为 `VERIFY`。
+
 ## 核心页面无障碍布局矩阵（2026-08-31）
 
 - 组合条件：深色模式、横屏、辅助功能 XXXL 字号；覆盖首页项目列表、聊天输入、设置路由和 iSH 命令输入四个真实入口。
@@ -262,6 +269,7 @@
 | 界面 | 已检查内容 | 状态 |
 | --- | --- | --- |
 | 首页 / 项目列表 | 项目优先、搜索、新建会话、工具与设置入口 | DONE |
+| 项目重命名 | 首页左滑入口、名称、字数、保存和错误态 | VERIFY |
 | 聊天页 | 会话标题、输入栏、会话选项、轨迹切换、工作状态 Dock | VERIFY |
 | 会话选项 Sheet | 对话/轨迹、预设、运行、权限、模型、设置、任务和导出 | VERIFY |
 | Agent 预设选择 | 系统预设、说明、选择态、锁定/损坏态 | VERIFY |

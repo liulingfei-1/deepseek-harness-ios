@@ -935,7 +935,7 @@ private struct RenameConversationSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("会话名称", text: $title)
+                    TextField("项目名称", text: $title)
                         .focused($isTitleFocused)
                         .submitLabel(.done)
                         .onSubmit(save)
@@ -955,11 +955,11 @@ private struct RenameConversationSheet: View {
                             .foregroundStyle(.red)
                             .fixedSize(horizontal: false, vertical: true)
                     } header: {
-                        Label("无法重命名", systemImage: "pencil.slash")
+                        Label("无法重命名项目", systemImage: "pencil.slash")
                     }
                 }
             }
-            .navigationTitle("重命名会话")
+            .navigationTitle("重命名项目")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

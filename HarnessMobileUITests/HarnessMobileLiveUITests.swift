@@ -685,6 +685,32 @@ final class HarnessMobileProgressiveDisclosureUITests: XCTestCase {
         add(screenshot)
     }
 
+    func testRenameConversationKeepsTitleValidationVisible() {
+        let app = launchConfiguredApp()
+        addTeardownBlock { app.terminate() }
+
+        XCTAssertTrue(app.navigationBars["Harness"].waitForExistence(timeout: 15))
+        let currentSession = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "新会话", "当前")
+        ).firstMatch
+        XCTAssertTrue(currentSession.waitForExistence(timeout: 5))
+        currentSession.swipeLeft()
+        let rename = app.buttons["重命名"]
+        XCTAssertTrue(rename.waitForExistence(timeout: 5))
+        rename.tap()
+
+        XCTAssertTrue(app.navigationBars["重命名项目"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.textFields["项目名称"].exists)
+        XCTAssertTrue(app.staticTexts["名称保存在本机，最多 80 个字符。"].exists)
+        XCTAssertTrue(app.staticTexts["3/80"].exists)
+        XCTAssertTrue(app.buttons["取消"].exists)
+        XCTAssertTrue(app.buttons["保存"].exists)
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "rename-conversation"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     func testDiagnosticLogKeepsRuntimeAndExportActionsReachable() {
         let app = launchConfiguredApp()
         addTeardownBlock { app.terminate() }
