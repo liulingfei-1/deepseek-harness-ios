@@ -876,7 +876,7 @@ private struct CommunityInstalledPluginDetailView: View {
                     Section {
                         LabeledContent("状态", value: plugin.state.title)
                         LabeledContent("版本", value: plugin.version)
-                        LabeledContent("Loader entries", value: "\(plugin.entryCount)")
+                        LabeledContent("入口数", value: "\(plugin.entryCount)")
                         Toggle(
                             "启用插件",
                             isOn: Binding(

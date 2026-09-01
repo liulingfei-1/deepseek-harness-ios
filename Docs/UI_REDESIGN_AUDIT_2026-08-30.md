@@ -76,6 +76,13 @@
 - 调整后截图：`/tmp/plugin-detail-final-attachments-0901/AC2F4D28-7F56-49F3-ABC3-B07E18B6BF01.png`。
 - 专项测试：`HarnessMobilePluginManagementUITests/testCommunityPluginCatalogDetailKeepsSourceAndInstallBoundaryVisible` 1/1 通过（`/tmp/hm-plugin-detail-final-0901.xcresult`），覆盖详情路由、去重、分类、兼容性、原生优先、来源和安装入口。首次基线用例的三个精确值断言失败，是 `LabeledContent` 将标签和值组合为单一可访问标签所致，改为按组合标签查询后通过；真实安装、确认操作、极限 Dynamic Type、VoiceOver、横屏和真机仍为 `VERIFY`。
 
+### 已安装插件详情语言统一（2026-09-02）
+
+- 调整前截图：`/tmp/installed-plugin-before-attachments-0902/E9C905D6-17C1-4F17-819A-2CBA1ED080CC.png`。运行状态分区只有 `Loader entries` 仍为英文用户标签，与状态、版本和启用开关的中文层级混用。
+- 调整：将唯一的用户可见标签改为“入口数”；插件名称、版本、来源等技术值保持原文，启停、设置、兼容性、更新和卸载逻辑不变。
+- 调整后截图：`/tmp/installed-plugin-final-attachments-0902/3986FE54-790E-465F-8646-1C43BB6F0E71.png`。
+- 专项测试：`HarnessMobilePluginManagementUITests/testInstalledPluginDetailKeepsRuntimeAndManagementClear` 1/1 通过（`/tmp/hm-installed-plugin-final-0902.xcresult`），覆盖已安装路由、入口数、启用开关和插件设置入口。真实启停、更新、卸载、极限 Dynamic Type、VoiceOver、横屏和真机仍为 `VERIFY`。
+
 ### 插件编译失败详情语义（2026-09-01）
 
 - 调整前截图：`/tmp/plugin-failure-before-attachments-0901/F332F9B2-7433-4456-97CC-6B6C19F8F13B.png`、`/tmp/plugin-failure-before-attachments-0901/5D7FFFCC-0772-422F-8936-99D19FDDFB15.png`。编译已在 Swift 校验阶段失败，但总摘要仍显示绿色“已结束”；日志混用英文 12 小时制，诊断状态与长错误码同排导致难读断行。
@@ -363,6 +370,7 @@
 | 社区插件市场 | 市场/已安装、搜索、目录行和操作菜单 | DONE |
 | GitHub 仓库安装 | 仓库地址、覆盖开关、安装边界和紧凑 Sheet | VERIFY |
 | 社区插件详情 | 分类、兼容性、安装路径、来源和安装边界 | VERIFY |
+| 已安装插件详情 | 运行状态、入口数、设置、兼容性、来源和管理 | VERIFY |
 | 插件设置 | Host 状态、namespace 列表、编辑器和冲突态 | VERIFY |
 | 服务商配置 | Profile 列表、添加和凭据状态 | DONE |
 | 模型行为 | 摘要路由、时间上下文双态和自动标题 | VERIFY |

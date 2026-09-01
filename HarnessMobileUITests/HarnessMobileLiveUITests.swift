@@ -1554,6 +1554,36 @@ final class HarnessMobilePluginManagementUITests: XCTestCase {
         add(screenshot)
     }
 
+    func testInstalledPluginDetailKeepsRuntimeAndManagementClear() {
+        let app = XCUIApplication()
+        addTeardownBlock { app.terminate() }
+        app.launchArguments = [
+            "-reset-persistent-state-for-ui-testing",
+            "-bootstrap-configuration-for-ui-testing",
+            "-disable-animations-for-ui-testing",
+            "-present-plugin-market-for-ui-testing",
+        ]
+        app.launch()
+
+        XCTAssertTrue(app.navigationBars["社区插件"].waitForExistence(timeout: 15))
+        let mode = app.segmentedControls["community-plugin-market-mode"]
+        XCTAssertTrue(mode.waitForExistence(timeout: 5))
+        mode.buttons["已安装"].tap()
+        let plugin = app.staticTexts["File Memory Native"]
+        XCTAssertTrue(plugin.waitForExistence(timeout: 5))
+        plugin.tap()
+
+        XCTAssertTrue(app.navigationBars["File Memory Native"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["入口数"].exists)
+        XCTAssertFalse(app.staticTexts["Loader entries"].exists)
+        XCTAssertTrue(app.switches["启用插件"].exists)
+        XCTAssertTrue(app.buttons["插件设置"].exists)
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "installed-plugin-detail"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     func testLiveMarketplaceCatalogRPCOnDevice() throws {
         try XCTSkipUnless(
             ProcessInfo.processInfo.environment["HARNESS_RUN_LIVE_ISH_NETWORK_TEST"] == "1",
