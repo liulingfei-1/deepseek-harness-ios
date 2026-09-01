@@ -662,6 +662,29 @@ final class HarnessMobileProgressiveDisclosureUITests: XCTestCase {
         add(screenshot)
     }
 
+    func testConversationExportExplainsRedactionBeforeChoosingFormat() {
+        let app = launchConfiguredApp(extraArguments: ["-present-chat-error-for-ui-testing"])
+        addTeardownBlock { app.terminate() }
+
+        openConversation(in: app)
+        app.buttons["会话选项"].tap()
+        let export = app.buttons["导出对话"]
+        XCTAssertTrue(export.waitForExistence(timeout: 5))
+        XCTAssertTrue(export.isEnabled)
+        export.tap()
+
+        XCTAssertTrue(app.staticTexts["脱敏导出对话"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["JSON"].exists)
+        XCTAssertTrue(app.buttons["Markdown"].exists)
+        XCTAssertTrue(app.staticTexts.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "导出会移除工具原始参数")
+        ).firstMatch.exists)
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "conversation-export-confirmation"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     func testDiagnosticLogKeepsRuntimeAndExportActionsReachable() {
         let app = launchConfiguredApp()
         addTeardownBlock { app.terminate() }
@@ -744,13 +767,13 @@ final class HarnessMobileProgressiveDisclosureUITests: XCTestCase {
         add(screenshot)
     }
 
-    private func launchConfiguredApp() -> XCUIApplication {
+    private func launchConfiguredApp(extraArguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = [
             "-reset-persistent-state-for-ui-testing",
             "-bootstrap-configuration-for-ui-testing",
             "-disable-animations-for-ui-testing",
-        ]
+        ] + extraArguments
         app.launch()
         return app
     }

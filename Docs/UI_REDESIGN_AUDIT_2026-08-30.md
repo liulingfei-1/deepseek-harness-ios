@@ -216,6 +216,12 @@
 - 结论：现有原生 medium/large sheet 已在首屏完整呈现标准、PTC、极简和创造四个系统预设；共享图标、说明文字、当前勾选和完成动作层级清楚，没有证据支持新增卡片、分段控件或自绘选择器，因此本页不改生产 UI。
 - 专项测试：`HarnessMobileProgressiveDisclosureUITests/testAgentPresetPickerShowsAllSystemPresets` 1/1 通过（`/tmp/hm-agent-preset-audit-0901/Logs/Test/Test-HarnessMobile-2026.09.01_08-49-58-+0800.xcresult`），覆盖聊天 → 会话选项真实入口、四个系统预设和当前选择。用户预设、损坏/锁定态、运行中禁用态、无障碍矩阵和真机仍为 `VERIFY`。
 
+## 对话导出确认框复核（2026-09-01）
+
+- 当前截图：`/tmp/export-audit-final-attachments-0901-1/6BC0150E-12B4-46FB-ACFC-B954F6FEB912.png`。
+- 结论：原生 `confirmationDialog` 已用“脱敏导出对话”说明任务，完整保留移除工具原始参数、遮盖常见 API Token 和仅在用户选择位置生成文件的边界，JSON/Markdown 两个格式动作直接可选；没有必要增加自定义导出页或重复设置，因此本项不改生产 UI。
+- 专项测试：`HarnessMobileProgressiveDisclosureUITests/testConversationExportExplainsRedactionBeforeChoosingFormat` 1/1 通过（`/tmp/hm-export-audit2-0901/Logs/Test/Test-HarnessMobile-2026.09.01_08-56-51-+0800.xcresult`），覆盖含消息会话、会话选项真实入口、两种格式和脱敏说明。实际文件生成、内容脱敏抽检、文件选择器、取消语义、无障碍矩阵和真机仍为 `VERIFY`。
+
 ## 核心页面无障碍布局矩阵（2026-08-31）
 
 - 组合条件：深色模式、横屏、辅助功能 XXXL 字号；覆盖首页项目列表、聊天输入、设置路由和 iSH 命令输入四个真实入口。
@@ -259,6 +265,7 @@
 | 聊天页 | 会话标题、输入栏、会话选项、轨迹切换、工作状态 Dock | VERIFY |
 | 会话选项 Sheet | 对话/轨迹、预设、运行、权限、模型、设置、任务和导出 | VERIFY |
 | Agent 预设选择 | 系统预设、说明、选择态、锁定/损坏态 | VERIFY |
+| 对话导出确认 | 脱敏说明、JSON/Markdown 和文件生成边界 | VERIFY |
 | 模型选择 | 搜索、选中态、空结果、默认/会话覆盖 | DONE |
 | 工具总览 | 工作区、终端、任务/轨迹、插件、设置路由 | DONE |
 | Console | 任务 / 轨迹分段，移除重复插件入口 | DONE |
