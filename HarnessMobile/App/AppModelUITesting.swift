@@ -56,6 +56,11 @@ extension AppModel {
         guard let first else { return }
         _ = await first.handle.beginRunning(for: firstIdentity)
         _ = await first.state.markRunning(for: firstIdentity)
+        _ = try? await first.state.enqueue(
+            text: "continue with queued input",
+            disposition: .queued,
+            for: firstIdentity
+        )
 
         await createConversation(title: "并发会话 B")
         guard let secondSessionID = activeSessionID else { return }

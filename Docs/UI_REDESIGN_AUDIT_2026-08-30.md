@@ -216,6 +216,14 @@
 - 结论：常驻命令按钮向输入框写入 `/` 后，现有内联建议面板在系统键盘展开时仍完整显示 5 个命令、可滚动余量、输入框和发送动作；列表复用 `HarnessIconTile` 与原生 `ScrollView`，没有重复操作或遮挡证据，因此本页不改生产 UI。
 - 专项测试：`HarnessMobileChatChromeUITests/testCommandPaletteKeepsSuggestionsAboveComposer` 1/1 通过（`/tmp/hm-command-palette-audit-0901/Logs/Test/Test-HarnessMobile-2026.09.01_18-52-46-+0800.xcresult`），覆盖聊天真实入口、`/` 草稿、命令分组、建议行和截图。命令筛选、选择后参数补全、极限 Dynamic Type、VoiceOver、横屏和真机仍为 `VERIFY`。
 
+## 运行中排队输入操作收口（2026-09-01）
+
+- 调整前截图：`/tmp/queued-before2-attachments-0901-1/B86916A4-291A-4C80-BE22-6DCFB0B56E57.png`。每条排队输入右侧并排放置编辑、steer 和移除三个 28×28 图标，压缩消息文本且低于 44pt 主要点击区门槛。
+- 调整：复用 SwiftUI 原生 `Menu` 将三项逐条操作收成单一 44×44 的“排队消息操作”按钮；编辑、steer 禁用态、危险移除角色、全量 steer 和停止当前运行逻辑不变。
+- 调整后截图：`/tmp/queued-final-attachments-0901-1/124A196D-6525-484D-97D5-448CD553C714.png`。
+- 专项测试：`HarnessMobileConcurrentRunsUITests/testQueuedInputKeepsActionsReachableWhileRunning` 1/1 通过（`/tmp/hm-queued-final-0901/Logs/Test/Test-HarnessMobile-2026.09.01_19-03-34-+0800.xcresult`），覆盖真实 `SessionRunState` 队列投影、折叠行、44pt 菜单、三项菜单动作和停止按钮。实际编辑/steer/移除结果、多条队列、极限 Dynamic Type、VoiceOver、横屏和真机仍为 `VERIFY`。
+- 失败边界：最初通过 UI 发送消息的临时测试在 `/tmp/hm-queued-before-0901/Logs/Test/Test-HarnessMobile-2026.09.01_18-56-49-+0800.xcresult` 以四个 `XCTAssertTrue failed` 结束；输入已接受，但并发夹具没有运行生产投影监视器，队列未稳定出现在 `selectedRunPresentation`。最终复用同一真实 `SessionRunState.enqueue` 在切换前排队，没有新增平行 UI 假模型。
+
 ## 会话选项 Sheet 收口（2026-09-01）
 
 - 调整前录屏末帧：`/tmp/session-options-audit-last-frame-0901.png`。对话/轨迹、Agent 预设、运行模式、工具权限、模型、设置、后台任务和导出控件只占上半段，却使用整页 sheet，底部留下大块无意义空白。
@@ -310,6 +318,7 @@
 | 聊天页 | 会话标题、输入栏、会话选项、轨迹切换、工作状态 Dock | VERIFY |
 | 聊天添加内容菜单 | 图片、相机、文件和独立命令入口 | VERIFY |
 | 聊天命令建议面板 | `/` 草稿、命令分组、建议列表和键盘布局 | VERIFY |
+| 运行中排队输入 | 队列文本、逐条菜单、全量 steer 和停止运行 | VERIFY |
 | 会话选项 Sheet | 对话/轨迹、预设、运行、权限、模型、设置、任务和导出 | VERIFY |
 | Agent 预设选择 | 系统预设、说明、选择态、锁定/损坏态 | VERIFY |
 | 对话导出确认 | 脱敏说明、JSON/Markdown 和文件生成边界 | VERIFY |

@@ -287,6 +287,39 @@ final class HarnessMobileConcurrentRunsUITests: XCTestCase {
             2
         )
     }
+
+    func testQueuedInputKeepsActionsReachableWhileRunning() {
+        let app = XCUIApplication()
+        addTeardownBlock { app.terminate() }
+        app.launchArguments = [
+            "-reset-persistent-state-for-ui-testing",
+            "-bootstrap-configuration-for-ui-testing",
+            "-disable-animations-for-ui-testing",
+            "-present-concurrent-session-runs-for-ui-testing",
+        ]
+        app.launch()
+
+        let currentProject = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "新会话", "运行中")
+        ).firstMatch
+        XCTAssertTrue(currentProject.waitForExistence(timeout: 15))
+        currentProject.tap()
+
+        XCTAssertTrue(app.staticTexts["排队 1"].waitForExistence(timeout: 5))
+        let actions = app.buttons["排队消息操作"]
+        XCTAssertTrue(actions.exists)
+        XCTAssertFalse(app.buttons["编辑排队消息"].exists)
+        XCTAssertTrue(app.buttons["停止当前运行"].exists)
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "chat-queued-input-actions"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+
+        actions.tap()
+        XCTAssertTrue(app.buttons["编辑排队消息"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["将排队消息设为 steer"].exists)
+        XCTAssertTrue(app.buttons["移除排队消息"].exists)
+    }
 }
 
 @MainActor

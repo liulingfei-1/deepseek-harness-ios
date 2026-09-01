@@ -433,30 +433,30 @@ private struct QueuedInputList: View {
                         .lineLimit(2)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
-                    Button {
-                        onEdit(input)
-                    } label: {
-                        Image(systemName: "pencil")
-                            .frame(width: 28, height: 28)
-                    }
-                    .accessibilityLabel("编辑排队消息")
+                    Menu {
+                        Button {
+                            onEdit(input)
+                        } label: {
+                            Label("编辑排队消息", systemImage: "pencil")
+                        }
 
-                    Button {
-                        onSteer(input.id)
-                    } label: {
-                        Image(systemName: "arrow.triangle.branch")
-                            .frame(width: 28, height: 28)
-                    }
-                    .disabled(input.disposition == .steer)
-                    .accessibilityLabel("将排队消息设为 steer")
+                        Button {
+                            onSteer(input.id)
+                        } label: {
+                            Label("将排队消息设为 steer", systemImage: "arrow.triangle.branch")
+                        }
+                        .disabled(input.disposition == .steer)
 
-                    Button(role: .destructive) {
-                        onRemove(input.id)
+                        Button(role: .destructive) {
+                            onRemove(input.id)
+                        } label: {
+                            Label("移除排队消息", systemImage: "trash")
+                        }
                     } label: {
-                        Image(systemName: "xmark")
-                            .frame(width: 28, height: 28)
+                        Image(systemName: "ellipsis.circle")
+                            .frame(width: 44, height: 44)
                     }
-                    .accessibilityLabel("移除排队消息")
+                    .accessibilityLabel("排队消息操作")
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
