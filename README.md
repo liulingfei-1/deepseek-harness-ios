@@ -28,6 +28,14 @@ Harness Mobile 不是网页壳，也不会把命令悄悄转发到服务器。�
 
 <p align="center"><sub>项目优先首页 · 项目归档/恢复 · 聚焦附件的聊天输入（iOS 27.0 Simulator）</sub></p>
 
+<p align="center">
+  <img src="Docs/Evidence/trajectory-overview-2026-09-01.png" width="31%" alt="Harness Mobile Agent 轨迹总览" />
+  <img src="Docs/Evidence/plugin-compilation-failure-2026-09-01.png" width="31%" alt="Harness Mobile 插件原生编译失败诊断" />
+  <img src="Docs/Evidence/plugin-github-install-2026-09-01.png" width="31%" alt="Harness Mobile GitHub 插件仓库安装" />
+</p>
+
+<p align="center"><sub>Agent 轨迹 · 原生插件编译诊断 · GitHub 仓库安装边界（iOS 27.0 Simulator）</sub></p>
+
 ## 为什么做它
 
 桌面 Harness 的核心体验并不只是一个聊天窗口，而是模型、工具、上下文、轨迹、工作区与插件共同组成的可观察 Agent loop。Harness Mobile 选择把这条 loop 保留在手机上，并按 iOS 的能力边界重新实现。
