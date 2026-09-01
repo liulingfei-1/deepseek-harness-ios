@@ -210,6 +210,12 @@
 - 调整后截图：`/tmp/chat-add-final-attachments-0901-1/FF01C693-40C6-4D97-9B19-498702A4B98F.png`。
 - 专项测试：`HarnessMobileChatChromeUITests/testAddContentMenuOnlyContainsAttachments` 1/1 通过（`/tmp/hm-chat-add-final-0901/Logs/Test/Test-HarnessMobile-2026.09.01_14-02-09-+0800.xcresult`），覆盖聊天真实入口、三类附件和重复命令移除；`testEmptyConversationKeepsPromptAndComposerVisible` 继续覆盖常驻命令入口。真实照片/相机/文件选择、系统权限、取消路径和真机仍为 `VERIFY`。
 
+## 聊天命令建议面板复核（2026-09-01）
+
+- 当前截图：`/tmp/command-palette-audit-attachments-0901-1/7D818881-0B6B-438A-AE58-408146A30A41.png`。
+- 结论：常驻命令按钮向输入框写入 `/` 后，现有内联建议面板在系统键盘展开时仍完整显示 5 个命令、可滚动余量、输入框和发送动作；列表复用 `HarnessIconTile` 与原生 `ScrollView`，没有重复操作或遮挡证据，因此本页不改生产 UI。
+- 专项测试：`HarnessMobileChatChromeUITests/testCommandPaletteKeepsSuggestionsAboveComposer` 1/1 通过（`/tmp/hm-command-palette-audit-0901/Logs/Test/Test-HarnessMobile-2026.09.01_18-52-46-+0800.xcresult`），覆盖聊天真实入口、`/` 草稿、命令分组、建议行和截图。命令筛选、选择后参数补全、极限 Dynamic Type、VoiceOver、横屏和真机仍为 `VERIFY`。
+
 ## 会话选项 Sheet 收口（2026-09-01）
 
 - 调整前录屏末帧：`/tmp/session-options-audit-last-frame-0901.png`。对话/轨迹、Agent 预设、运行模式、工具权限、模型、设置、后台任务和导出控件只占上半段，却使用整页 sheet，底部留下大块无意义空白。
@@ -303,6 +309,7 @@
 | 项目归档与恢复 | 归档范围、项目行、分叉/恢复菜单和空态 | VERIFY |
 | 聊天页 | 会话标题、输入栏、会话选项、轨迹切换、工作状态 Dock | VERIFY |
 | 聊天添加内容菜单 | 图片、相机、文件和独立命令入口 | VERIFY |
+| 聊天命令建议面板 | `/` 草稿、命令分组、建议列表和键盘布局 | VERIFY |
 | 会话选项 Sheet | 对话/轨迹、预设、运行、权限、模型、设置、任务和导出 | VERIFY |
 | Agent 预设选择 | 系统预设、说明、选择态、锁定/损坏态 | VERIFY |
 | 对话导出确认 | 脱敏说明、JSON/Markdown 和文件生成边界 | VERIFY |

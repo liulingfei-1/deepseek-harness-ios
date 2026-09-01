@@ -1063,6 +1063,31 @@ final class HarnessMobileChatChromeUITests: XCTestCase {
         add(screenshot)
     }
 
+    func testCommandPaletteKeepsSuggestionsAboveComposer() {
+        let app = XCUIApplication()
+        addTeardownBlock { app.terminate() }
+        app.launchArguments = [
+            "-reset-persistent-state-for-ui-testing",
+            "-bootstrap-configuration-for-ui-testing",
+            "-disable-animations-for-ui-testing",
+        ]
+        app.launch()
+
+        openConversation(in: app)
+        app.buttons["命令"].tap()
+        let input = app.descendants(matching: .any)["chat-input"]
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        XCTAssertEqual(input.value as? String, "/")
+        XCTAssertTrue(app.staticTexts["命令"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "/")
+        ).firstMatch.exists)
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "chat-command-palette"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     func testErrorStaysInlineAndCanBeDismissed() {
         let app = XCUIApplication()
         addTeardownBlock {
