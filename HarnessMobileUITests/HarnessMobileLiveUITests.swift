@@ -736,6 +736,20 @@ final class HarnessMobileProgressiveDisclosureUITests: XCTestCase {
         add(screenshot)
     }
 
+    func testHomeNewProjectEntryUsesProjectLanguage() {
+        let app = launchConfiguredApp()
+        addTeardownBlock { app.terminate() }
+
+        XCTAssertTrue(app.navigationBars["Harness"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["项目"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["新建项目"].exists)
+        XCTAssertFalse(app.buttons["新建会话"].exists)
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "home-new-project-entry"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     func testDiagnosticLogKeepsRuntimeAndExportActionsReachable() {
         let app = launchConfiguredApp()
         addTeardownBlock { app.terminate() }
@@ -1441,9 +1455,9 @@ private func openConversation(in app: XCUIApplication) {
         if activeConversation.waitForExistence(timeout: 2), activeConversation.isHittable {
             activeConversation.tap()
         } else {
-            let newConversation = app.buttons["新建会话"]
-            XCTAssertTrue(newConversation.waitForExistence(timeout: 5))
-            newConversation.tap()
+            let newProject = app.buttons["新建项目"]
+            XCTAssertTrue(newProject.waitForExistence(timeout: 5))
+            newProject.tap()
         }
     }
 

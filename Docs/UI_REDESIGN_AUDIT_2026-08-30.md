@@ -236,6 +236,14 @@
 - 调整后截图：`/tmp/delete-final-attachments-0901-2/FF76AF02-D7CD-4D32-8C86-9B7FB9DAB38D.png`。
 - 专项测试：`HarnessMobileProgressiveDisclosureUITests/testDeleteProjectExplainsLocalDataAndWorkspaceBoundary` 1/1 通过（`/tmp/hm-delete-final-0901/Logs/Test/Test-HarnessMobile-2026.09.01_09-10-31-+0800.xcresult`），覆盖首页项目左滑入口、危险操作标题、项目名、本机删除范围和工作区边界。实际删除、运行中停止、真实工作区保留、无障碍矩阵和真机仍为 `VERIFY`。
 
+## 首页新建项目入口统一（2026-09-01）
+
+- 调整前截图：`/tmp/home-new-before-attachments-0901-1/EF35CCA2-F38B-4F7F-9A4E-6AD771C2845A.png`。首页已经以“项目”为主内容，但底部主操作仍使用双气泡图标和“新建会话”无障碍名称，视觉语义指向聊天而不是项目。
+- 调整：复用原生 `folder.badge.plus`，将主操作及空态统一为“新建项目 / 还没有项目”；同步 `APP_FLOW.md` 的首页路径。创建、存储、自动标题和 `/new` 会话命令仍走原有 Session 真源，没有新增 Project 模型或迁移。
+- 调整后截图：`/tmp/home-new-final-attachments-0901-1/91A271E5-029C-4796-B6F7-E73F3C70D6BD.png`。
+- 专项测试：`HarnessMobileProgressiveDisclosureUITests/testHomeNewProjectEntryUsesProjectLanguage` 1/1 通过（`/tmp/hm-home-new-final-0901/Logs/Test/Test-HarnessMobile-2026.09.01_13-48-31-+0800.xcresult`），覆盖真实首页、项目分区、新入口及旧按钮名称移除。空存储态、实际创建、自动标题、无障碍完整矩阵和真机触控仍为 `VERIFY`。
+- 失败边界：最初尝试“删除最后条目后截图空态”的临时测试在 `/tmp/hm-home-empty-before-0901/Logs/Test/Test-HarnessMobile-2026.09.01_13-41-59-+0800.xcresult` 以 `XCTAssertTrue failed` 结束；结果包 UI hierarchy 证明应用会自动保留/重建默认 Session，因此改为验证真实可达的新建入口，没有增加只为测试存在的空态夹具。
+
 ## 核心页面无障碍布局矩阵（2026-08-31）
 
 - 组合条件：深色模式、横屏、辅助功能 XXXL 字号；覆盖首页项目列表、聊天输入、设置路由和 iSH 命令输入四个真实入口。
@@ -275,7 +283,7 @@
 
 | 界面 | 已检查内容 | 状态 |
 | --- | --- | --- |
-| 首页 / 项目列表 | 项目优先、搜索、新建会话、工具与设置入口 | DONE |
+| 首页 / 项目列表 | 项目优先、搜索、新建项目、工具与设置入口 | DONE |
 | 项目重命名 | 首页左滑入口、名称、字数、保存和错误态 | VERIFY |
 | 项目删除确认 | 项目名、危险操作、本机数据范围和工作区边界 | VERIFY |
 | 聊天页 | 会话标题、输入栏、会话选项、轨迹切换、工作状态 Dock | VERIFY |

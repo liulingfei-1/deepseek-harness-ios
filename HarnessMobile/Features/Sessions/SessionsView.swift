@@ -136,14 +136,14 @@ struct SessionsView: View {
     private var floatingControls: some View {
         HStack(spacing: 10) {
             Button(action: createConversation) {
-                Image(systemName: "bubble.left.and.text.bubble.right.fill")
+                Image(systemName: "folder.badge.plus")
                     .font(.body.weight(.semibold))
                     .foregroundStyle(.white)
                     .frame(width: 52, height: 52)
                     .background(Color.accentColor, in: Circle())
                     .shadow(color: .black.opacity(0.16), radius: 8, y: 3)
             }
-            .accessibilityLabel("新建会话")
+            .accessibilityLabel("新建项目")
             .disabled(operation != nil)
         }
         .padding(.trailing, 16)
@@ -219,11 +219,11 @@ struct SessionsView: View {
             )
         } else {
             ContentUnavailableView {
-                Label("还没有会话", systemImage: "bubble.left.and.bubble.right")
+                Label("还没有项目", systemImage: "folder")
             } description: {
-                Text("新建会话后，消息、任务状态与恢复检查点都会保存在本机。")
+                Text("新建项目后，消息、任务状态与恢复检查点都会保存在本机。")
             } actions: {
-                Button("新建会话", action: createConversation)
+                Button("新建项目", action: createConversation)
                     .disabled(operation != nil)
             }
         }
