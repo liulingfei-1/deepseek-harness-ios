@@ -113,7 +113,7 @@ struct SessionsView: View {
             RenameConversationSheet(session: session)
         }
         .confirmationDialog(
-            "删除会话？",
+            "删除项目？",
             isPresented: $isDeleteConfirmationPresented,
             titleVisibility: .visible,
             presenting: sessionToDelete
@@ -126,9 +126,9 @@ struct SessionsView: View {
             }
         } message: { session in
             if session.id == model.activeSessionID, model.isRunning {
-                Text("当前执行会先停止，然后删除这个会话。工作区文件不会被删除。")
+                Text("当前执行会先停止，然后删除这个项目。工作区文件不会被删除。")
             } else {
-                Text("会删除这个会话在本机保存的消息、任务状态和恢复检查点；工作区文件不受影响。")
+                Text("会删除这个项目在本机保存的消息、任务状态和恢复检查点；工作区文件不受影响。")
             }
         }
     }

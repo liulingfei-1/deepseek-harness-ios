@@ -711,6 +711,31 @@ final class HarnessMobileProgressiveDisclosureUITests: XCTestCase {
         add(screenshot)
     }
 
+    func testDeleteProjectExplainsLocalDataAndWorkspaceBoundary() {
+        let app = launchConfiguredApp()
+        addTeardownBlock { app.terminate() }
+
+        XCTAssertTrue(app.navigationBars["Harness"].waitForExistence(timeout: 15))
+        let currentSession = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "新会话", "当前")
+        ).firstMatch
+        XCTAssertTrue(currentSession.waitForExistence(timeout: 5))
+        currentSession.swipeLeft()
+        let delete = app.buttons["删除"]
+        XCTAssertTrue(delete.waitForExistence(timeout: 5))
+        delete.tap()
+
+        XCTAssertTrue(app.staticTexts["删除项目？"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["删除“新会话”"].exists)
+        XCTAssertTrue(app.staticTexts.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "会删除这个项目在本机保存的消息")
+        ).firstMatch.exists)
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "delete-project-confirmation"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     func testDiagnosticLogKeepsRuntimeAndExportActionsReachable() {
         let app = launchConfiguredApp()
         addTeardownBlock { app.terminate() }
