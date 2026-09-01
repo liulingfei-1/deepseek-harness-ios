@@ -1115,6 +1115,8 @@ private struct CommunityPluginGitHubInstallSheet: View {
                     Toggle("覆盖同名插件", isOn: $replaceExisting)
                 } header: {
                     Label("GitHub", systemImage: "link")
+                } footer: {
+                    Text("先在手机内分析源码并尝试原生安装；不兼容时才转入 iSH。插件不会获得模型 API Key。")
                 }
             }
             .listStyle(.insetGrouped)
@@ -1145,7 +1147,7 @@ private struct CommunityPluginGitHubInstallSheet: View {
             }
             .interactiveDismissDisabled(model.isISHPluginMarketplaceWorking)
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.height(340), .medium])
     }
 
     private var normalizedLocation: String {

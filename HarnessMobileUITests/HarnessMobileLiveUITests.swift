@@ -1488,6 +1488,37 @@ final class HarnessMobilePluginManagementUITests: XCTestCase {
         XCTAssertTrue(app.buttons["清理下载缓存"].exists)
     }
 
+    func testGitHubInstallSheetKeepsRepositoryAndReplaceControlsClear() {
+        let app = XCUIApplication()
+        addTeardownBlock { app.terminate() }
+        app.launchArguments = [
+            "-reset-persistent-state-for-ui-testing",
+            "-bootstrap-configuration-for-ui-testing",
+            "-disable-animations-for-ui-testing",
+            "-present-plugin-market-for-ui-testing",
+        ]
+        app.launch()
+
+        XCTAssertTrue(app.navigationBars["社区插件"].waitForExistence(timeout: 15))
+        app.buttons["community-plugin-market-actions"].tap()
+        let github = app.buttons["GitHub 仓库"]
+        XCTAssertTrue(github.waitForExistence(timeout: 5))
+        github.tap()
+
+        XCTAssertTrue(app.navigationBars["安装仓库"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.textFields["https://github.com/owner/repository"].exists)
+        XCTAssertTrue(app.switches["覆盖同名插件"].exists)
+        XCTAssertTrue(app.staticTexts.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "先在手机内分析源码")
+        ).firstMatch.exists)
+        XCTAssertTrue(app.buttons["取消"].exists)
+        XCTAssertFalse(app.buttons["安装"].isEnabled)
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "plugin-github-install-sheet"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     func testLiveMarketplaceCatalogRPCOnDevice() throws {
         try XCTSkipUnless(
             ProcessInfo.processInfo.environment["HARNESS_RUN_LIVE_ISH_NETWORK_TEST"] == "1",

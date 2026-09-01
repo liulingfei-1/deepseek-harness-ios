@@ -62,6 +62,13 @@
 - 本轮不再改市场布局；刷新、导入、GitHub、清理缓存继续收在操作菜单中，符合渐进披露。
 - 专项测试：`HarnessMobilePluginManagementUITests/testCommunityMarketplaceUsesCompactSearchableList` 1/1 通过（`/tmp/hm-plugin-market-audit2/Logs/Test/Test-HarnessMobile-2026.08.30_17-41-31-+0800.xcresult`）。
 
+### GitHub 仓库安装 Sheet 收口（2026-09-01）
+
+- 调整前截图：`/tmp/plugin-github-before-attachments-0901/A67F9D76-100E-4356-83B2-C60AD5736C90.png`。Sheet 只有仓库地址和覆盖开关，却占据大面积空白，也没有解释原生优先、iSH 回退和 API Key 隔离边界。
+- 调整：复用原有 `List`、`Section` 和系统 Sheet，在分区 footer 补充安装边界，并将默认高度收为 340pt；仍保留 `.medium` 供键盘和较大字号使用，不改变下载、覆盖、编译或安装逻辑。
+- 调整后截图：`/tmp/plugin-github-final-attachments-0901b/08B9C7C3-FE66-49BD-8460-6C6F60F07199.png`。
+- 专项测试：`HarnessMobilePluginManagementUITests/testGitHubInstallSheetKeepsRepositoryAndReplaceControlsClear` 1/1 通过（`/tmp/hm-plugin-github-final-0901.xcresult`），覆盖入口、仓库地址、覆盖开关、安装边界和空地址禁用态。真实 GitHub 下载/安装、覆盖结果、键盘、极限 Dynamic Type、VoiceOver、横屏和真机仍为 `VERIFY`。
+
 ### 插件编译失败详情语义（2026-09-01）
 
 - 调整前截图：`/tmp/plugin-failure-before-attachments-0901/F332F9B2-7433-4456-97CC-6B6C19F8F13B.png`、`/tmp/plugin-failure-before-attachments-0901/5D7FFFCC-0772-422F-8936-99D19FDDFB15.png`。编译已在 Swift 校验阶段失败，但总摘要仍显示绿色“已结束”；日志混用英文 12 小时制，诊断状态与长错误码同排导致难读断行。
@@ -347,6 +354,7 @@
 | 插件编译失败详情 | 总状态、阶段、日志、结构化诊断和来源 | VERIFY |
 | 原生客户端详情 | 分区标签、命令与设置入口 | DONE |
 | 社区插件市场 | 市场/已安装、搜索、目录行和操作菜单 | DONE |
+| GitHub 仓库安装 | 仓库地址、覆盖开关、安装边界和紧凑 Sheet | VERIFY |
 | 插件设置 | Host 状态、namespace 列表、编辑器和冲突态 | VERIFY |
 | 服务商配置 | Profile 列表、添加和凭据状态 | DONE |
 | 模型行为 | 摘要路由、时间上下文双态和自动标题 | VERIFY |
