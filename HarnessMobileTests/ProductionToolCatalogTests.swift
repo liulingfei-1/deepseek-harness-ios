@@ -76,6 +76,7 @@ final class ProductionToolCatalogTests: XCTestCase {
                 "web_search",
                 "browser_use",
                 "workflow",
+                "work_state_get",
                 "work_state_replace_plan",
                 "work_state_replace_todos",
                 "work_state_set_goal",
