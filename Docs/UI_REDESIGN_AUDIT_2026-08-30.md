@@ -449,3 +449,12 @@
   - `testAgentPresetPickerShowsAllSystemPresets`：预设 sheet 的 medium detent 把下半列表挡在视口和懒加载树外（产品缺陷），改为 `[.large]`，提交 `ef80f71`。
   - `testSessionModelPickerShowsScopeAndSearchableModels`：关闭"跟随默认"触发列表重渲染并弹回顶部，手动模型 ID 掉出懒加载窗口；测试先滚动到字段再断言，提交 `ef80f71`。
 - 覆盖清单更新：下表多数 `VERIFY` 页面已具备"结构断言通过 + 深色/XXXL 截图"证据，升级为 `DONE`；VoiceOver 朗读顺序与 iPhone 16 Pro 真机触控仍无证据，继续 `VERIFY`。Setup/Onboarding 另经 simctl 传 `-reset-persistent-state-for-ui-testing` 启动实测（`/tmp/hm-verify-0902/08-onboarding-xxxl.png`，XXXL 深色布局正常），也已升级 `DONE`。至此覆盖清单仅剩 VoiceOver 与真机触控两类需要真机的边界。
+
+## 视觉打磨轮二（2026-09-02 下午，全量截图复查）
+
+- 逐张复查 30+ 张证据截图，新修 3 处（提交 `957c31d`）：
+  - **计划审阅列表巨大间距**：sheet 弹出动画的中间帧被 `ConversationMeasuredBlock` 的 `onGeometryChange` 捕获并固化为 `minHeight`（实测块间 140/244/157pt 空隙，与动画帧尺寸吻合）。`NativeMarkdownText` 新增 `measuresBlocks` 开关，一次性呈现的 sheet（计划审阅）禁用高度缓存；截图复核列表恢复 12pt 紧凑间距。
+  - **聊天空态与运行态叠加**：空会话启动运行后仍显示"有什么要处理？"引导，与"正在深入处理…"并存；现在运行中隐藏空态引导。
+  - **后台任务面板空态**：从列表行式改为 `ContentUnavailableView`，与插件设置 Host 空态一致。
+- 记录暂缓：社区插件市场底部悬浮搜索框遮挡列表尾部内容（`harnessCompactListChrome` 共享结构，影响所有列表页，需单独设计处理）。
+- 其余复查页面（手机权限、模型行为、Agent Bundle、插件详情、GitHub 安装、删除/导出确认、重命名）视觉质量合格，未做无意义改动。
