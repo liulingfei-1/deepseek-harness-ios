@@ -28,6 +28,7 @@
 - 搜索收口后截图：`/tmp/harness-home-projects-search-collapsed.png`
 - 调整前遮挡证据：`/tmp/harness-ui-chat-error-cold2.png`
 - 构建：arm64 iOS Simulator build succeeded（`/tmp/hm-ui-derived`）
+- **证据可用性（2026-09-02 核对）**：`/tmp` 重启后，本文件引用的 86 个截图路径中有 10 个早期截图已丢失：`/tmp/harness-ui-home-projects.png`、`/tmp/harness-home-projects-search-collapsed.png`、`/tmp/harness-ui-chat-error-cold2.png`、`/tmp/harness-ui-settings-progressive.png`、`/tmp/harness-ui-settings-agent-permissions.png`、`/tmp/harness-ui-community-market-audit.png`、`/tmp/harness-trajectory-live-audit-2.png`、`/tmp/harness-trajectory-localized-0831-2.png`、`/tmp/harness-setup-provider-aligned-0831.png`、`/tmp/harness-after-bootstrap-relaunch.png`。上述条目的"调整后"结论均另有 08-31/09-01/09-02 轮次的 `*-final-attachments-*` 证据在位；丢失的只是早期 before/after 原件，相关页面状态以在位 final 证据和覆盖清单为准。
 
 ## 自动化与剩余边界
 
@@ -434,3 +435,8 @@
 | Agent 编排 Bundle | 启用、安装状态、固定来源和安全说明 | VERIFY |
 
 `DONE` 表示已有代码调整并通过构建或专项证据；`VERIFY` 表示已检查结构但仍缺少完整的深色、极限 Dynamic Type、横屏、VoiceOver 或真机截图证据。当前未将 `VERIFY` 页面冒充为完成。
+
+## 新发现缺陷（2026-09-02，WorkBuddy 复查轮）
+
+- **首页搜索框在 XXXL 极限字号下 placeholder 被裁剪不可见**（深色、竖屏即可复现；medium 字号正常）。`SessionsView` 使用 `.searchable(placement: .navigationBarDrawer(displayMode: .automatic))`，系统搜索框高度未随 Accessibility 字号增长，大号 placeholder 超出框高被裁剪。属于系统组件在极限 Dynamic Type 下的布局边界，待评估统一修法（自定义搜索框或 iOS 26 `searchToolbarBehavior`），暂记 `VERIFY`。
+- **会话行相对时间曾随设备语言显示英文**（"34 min. ago"）：`SessionsView` 相对时间未固定 `zh_CN` locale。已按 `TrajectoryView`/插件市场惯例修复并经模拟器截图复核（"40分钟前"），提交 `1d5947c`。
