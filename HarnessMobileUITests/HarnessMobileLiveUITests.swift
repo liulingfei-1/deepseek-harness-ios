@@ -1522,6 +1522,10 @@ final class HarnessMobilePluginManagementUITests: XCTestCase {
         XCTAssertTrue(sourceSnapshotLog.waitForExistence(timeout: 5))
         let diagnosticTitle = app.staticTexts["结构化诊断 · UNSUPPORTED_CLIENT_CONTRIBUTION"]
         scrollUntilExists(diagnosticTitle, in: app)
+        // The iOS 26 bottom search glass counts as occlusion for hittability;
+        // keep scrolling until the title clears it instead of stopping at the
+        // first frame where it merely exists.
+        scrollUntilHittable(diagnosticTitle, in: app)
         XCTAssertTrue(diagnosticTitle.exists)
         XCTAssertTrue(diagnosticTitle.isHittable)
         XCTAssertTrue(app.staticTexts["该插件请求 Web client slot；手机端不动态加载 Web 或 Swift 代码。"].exists)
