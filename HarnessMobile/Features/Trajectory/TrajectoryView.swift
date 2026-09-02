@@ -949,6 +949,17 @@ private struct TrajectoryEventPresentation {
             systemImage = "stop.circle"
             tint = .secondary
 
+        case SessionEventVocabulary.modelSelection:
+            let route = event.data.objectValue
+            let provider = route?["provider"]?.stringValue
+            let model = route?["model"]?.stringValue
+            kind = "模型"
+            let joinedRoute = [provider, model].compactMap { $0 }.joined(separator: " / ")
+            title = joinedRoute.isEmpty ? "模型选择" : joinedRoute.trajectorySingleLine(limit: 240)
+            subtitle = route?["reasoningEffort"]?.stringValue.map { "推理强度 \($0)" }
+            systemImage = "cpu"
+            tint = .purple
+
         case SessionEventVocabulary.stepStart, SessionEventVocabulary.stepEnd:
             kind = "步骤"
             if let step = event.stepData {

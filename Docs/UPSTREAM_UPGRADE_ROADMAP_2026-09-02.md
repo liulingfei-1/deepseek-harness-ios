@@ -52,7 +52,11 @@
 - 文件：`HarnessMobile/Core/Trace/SessionEventTrajectory.swift`（事件常量 + 投影）、`HarnessMobile/App/AppModel.swift`（发送点）
 - 动作：新增事件常量；`/model` 执行成功时写入事件；轨迹视图加对应渲染分支
 - 验证：SwiftPM 新增单测；UI 测试断言切换模型后轨迹出现该事件
-- 状态：⬜
+- 状态：✅ 已完成（提交 `U-010` 段）
+  - 兼容表补齐上游 v0.1.2 全部新增事件名（7 个），上游 51 项**完全覆盖**
+  - `SessionEventVocabulary.modelSelection` 常量 + `/model` 成功后 `recordModelSelection(_:reasoning:)` 写入（payload 对齐上游 `provider`/`model`/`reasoningEffort`）
+  - 轨迹页新增中文渲染分支（"模型 · provider / model"，副标题显示推理强度）
+  - 新增 2 个测试：事件恢复取值 + 兼容表漂移守卫（含移动端自有 5 项不得丢失）
 
 ### U-011 新增事件 `subagent/model-selection-policy` ⭐ 必补
 - 关联上游工具：`list_subagent_models`（`packages/subagent/tool-subagent/src/list-models.ts`）

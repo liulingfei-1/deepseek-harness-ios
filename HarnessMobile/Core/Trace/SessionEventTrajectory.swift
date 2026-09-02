@@ -29,6 +29,9 @@ enum SessionEventVocabulary {
     /// Metadata for one structured-output contract result. Raw model output
     /// is intentionally never stored in this event.
     static let subagentOutput = "subagent/output"
+    /// Durable model route for one session, mirroring upstream v0.1.2
+    /// `ModelSelection` (`provider`, `model`, optional `reasoningEffort`).
+    static let modelSelection = "model/selection"
 
     static let upstreamKnown: Set<String> = [
         "agent-preset/selected",

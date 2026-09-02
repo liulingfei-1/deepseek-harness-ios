@@ -880,6 +880,61 @@ final class SessionEventTrajectoryTests: XCTestCase {
         try await store.close()
     }
 
+    func testModelSelectionEventRecoversUpstreamRouteFields() async throws {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        // Mirrors upstream v0.1.2 `ModelSelection`: provider, model, optional
+        // reasoningEffort.
+        let selection: JSONValue = .object([
+            "provider": .string("deepseek"),
+            "model": .string("deepseek-chat"),
+            "reasoningEffort": .string("high")
+        ])
+        let url = root.appendingPathComponent("model-selection.jsonl")
+        let writer = SessionEventJSONLStore(fileURL: url, streamID: "model-selection")
+        _ = try await writer.append(
+            SessionEventDraft(type: SessionEventVocabulary.modelSelection, time: 10, data: selection)
+        )
+        try await writer.close()
+
+        let reader = SessionEventJSONLStore(fileURL: url, streamID: "model-selection")
+        let recovered = try await reader.recover()
+        XCTAssertEqual(recovered.events.map(\.type), [SessionEventVocabulary.modelSelection])
+        XCTAssertEqual(recovered.events.first?.data, selection)
+        try await reader.close()
+    }
+
+    /// Drift guard: names upstream added in v0.1.2 must stay known so a log
+    /// written by a newer harness is still readable. Update this list when the
+    /// pinned upstream commit moves.
+    func testKnownEventTypesCoverUpstreamV012Additions() {
+        let addedInV012: Set<String> = [
+            "model/selection",
+            "subagent/model-selection-policy",
+            "session-log-deepseek/delivery-accepted",
+            "team/member",
+            "team/task",
+            "team/message/queued",
+            "team/message/delivered"
+        ]
+        XCTAssertTrue(
+            addedInV012.isSubset(of: SessionEventVocabulary.upstreamKnown),
+            "missing upstream v0.1.2 event names: \(addedInV012.subtracting(SessionEventVocabulary.upstreamKnown).sorted())"
+        )
+        // Mobile-only event names must survive vocabulary maintenance.
+        let mobileOwned: Set<String> = [
+            "llm/request-audit",
+            "question/requested",
+            "question/resolved",
+            "subagent/lifecycle",
+            "subagent/output"
+        ]
+        XCTAssertTrue(
+            mobileOwned.isSubset(of: SessionEventVocabulary.upstreamKnown),
+            "mobile-only event names dropped: \(mobileOwned.subtracting(SessionEventVocabulary.upstreamKnown).sorted())"
+        )
+    }
+
     private func makeRoot() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("SessionEventTrajectoryTests-\(UUID().uuidString)", isDirectory: true)

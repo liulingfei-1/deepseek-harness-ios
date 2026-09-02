@@ -6065,6 +6065,7 @@ final class AppModel {
                 }
             }
             try await setSessionModelConfiguration(draft)
+            try await recordModelSelection(draft, reasoning: selectedReasoning)
             let profile = providerDirectory.profile(matching: draft)
             let providerName = profile?.displayName
                 ?? ModelProviderCatalog.descriptor(for: draft.providerID).displayName
@@ -6111,6 +6112,28 @@ final class AppModel {
                 name: invocation.parsed.name,
                 args: invocation.recordInput ? invocation.parsed.rawInput : nil,
                 imageAttachments: imageAttachments
+            ),
+            sessionID: sessionID
+        )
+        scheduleTrajectoryRefresh(for: sessionID)
+    }
+
+    /// Appends upstream v0.1.2's durable `model/selection` event so the
+    /// trajectory explains which route later requests used. Only the route is
+    /// recorded; credentials and request bodies stay out of the log.
+    private func recordModelSelection(
+        _ configuration: AgentConfiguration,
+        reasoning: ReasoningMode?
+    ) async throws {
+        guard let sessionID = activeSessionID else { return }
+        _ = try await trajectoryRepository.append(
+            SessionEventDraft(
+                type: SessionEventVocabulary.modelSelection,
+                data: .object([
+                    "provider": .string(configuration.providerID.rawValue),
+                    "model": .string(configuration.model),
+                    "reasoningEffort": reasoning.map { JSONValue.string($0.rawValue) } ?? .null
+                ])
             ),
             sessionID: sessionID
         )
