@@ -45,7 +45,7 @@
 
 ---
 
-## P1 · 契约补齐（最高性价比，先做）
+## P1 · 契约补齐（最高性价比，先做）—— 4/4 已核对，1 项待产品决策
 
 ### U-010 新增事件 `model/selection` ⭐ 必补
 - 现状：上游 45 个事件类型，移动端 43；`model/selection` 缺失，导致 `/model` 切换不进轨迹
@@ -58,24 +58,32 @@
   - 轨迹页新增中文渲染分支（"模型 · provider / model"，副标题显示推理强度）
   - 新增 2 个测试：事件恢复取值 + 兼容表漂移守卫（含移动端自有 5 项不得丢失）
 
-### U-011 新增事件 `subagent/model-selection-policy` ⭐ 必补
-- 关联上游工具：`list_subagent_models`（`packages/subagent/tool-subagent/src/list-models.ts`）
-- 文件：同 U-010 + `HarnessMobile/Core/Tools/ToolImplementations/`（子 agent 工具）
-- 动作：新增事件 + 子 agent 模型策略持久化
-- 验证：单测 + 轨迹断言
-- 状态：⬜
+### U-011 事件 `subagent/model-selection-policy` —— 兼容层已补齐，能力层待决策
+- **兼容层**：✅ 已完成（事件名已进 `upstreamKnown`，读到上游日志不会被拒）
+- **能力层**：⏸ 待产品决策，原因（已核对上游契约）：
+  - 上游语义是**子 agent 模型选择的 opt-in 开关**：payload `{ allowedModels: [{provider, model}] }`，在首个模型请求前 append 一次，log-only，投影状态 `AllowedModelRoute[] | null`
+  - **缺失该事件在上游即表示"固定路由"**（子 agent 继承父会话模型）
+  - 移动端现状：子 agent 描述符事件（AppModel 4832-4833）只记录继承的 `agentProvider`/`agentModel`，无 `allowedModels`、无 `list_subagent_models` 工具 → **当前语义与"固定路由"一致，不写该事件是正确行为**
+  - 要补此事件，必须先实现能力：子 agent 可用模型白名单 + `list_subagent_models` 工具 + 委派时的路由校验（属 P2 U-020）
+- 决策选项：① 保持固定路由（推荐，移动端模型目录小、无必要让子 agent 换模型）② 实现可选模型能力（见 U-020）
+- 状态：兼容层 ✅ / 能力层 ⏸
 
 ### U-012 评估事件 `agent/inbox/spliced`
-- 背景：上游移除 `Inbox*` API、改为 `agent/inbox/spliced` 事件；移动端 inbox 是自有实现（`AppModel` 的 inbox 相关逻辑）
-- 动作：判断移动端是否需要该事件语义；若需要则补，不需要则在 parity 清单标注 `IOS-REPLACEMENT` 并说明
-- 验证：parity 文档条目
-- 状态：⬜
+- ~~动作：判断是否需要补该事件~~
+- 状态：✅ **无需改动**（核对更正）
+  - 初次自动化 diff 用 `"[a-z]+/[a-z-]+"` 正则，漏掉了含双斜杠的 `agent/inbox/spliced`，误报为缺失
+  - 实际 `SessionEventVocabulary.upstreamKnown` 原本就已包含该名字；本轮已用完整范围重新核对，上游 51 项全部覆盖
+  - inbox 语义移动端为自有实现，保持 `IOS-REPLACEMENT` 标注即可
 
 ### U-013 slash 命令词汇核对（预期无变化，用于回归）
 - 现状：上游命令词汇 17 项，锁定版同为 17 项，**本次无变化**；移动端 10 个命令为有意精简
 - 动作：升级后重跑命令词汇对比，确认仍为 17 且移动端 10 个未被上游语义变更影响
 - 验证：`Scripts/check-upstream-parity.sh` 的 Slash commands 段
-- 状态：⬜
+- 状态：✅ 已核对（无变化）
+  - 命令分包（`command-compact`/`command-feedback`/`command-goal`）清单 lock→new **完全一致**
+  - 全仓 `'/xxx'` 命令 token 对比：**新增 0、移除 0**
+  - `command-goal` 有改动但无行为变化：删除的 `invariant.ts` 是空实现样板；README 为文档扩充
+  - `/goal` 语义与移动端对齐（create/edit/pause/resume/clear）；移动端另有自有 `complete`/`block` 子命令，保留
 
 ---
 
