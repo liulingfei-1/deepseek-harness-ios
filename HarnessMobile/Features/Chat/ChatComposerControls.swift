@@ -226,7 +226,10 @@ private struct InputTriggerPalette: View {
                 ForEach(groups) { group in
                     Text(title(for: group.source))
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        // UIKit semantic colors render reliably here; SwiftUI
+                        // .secondary vibrancy text drops out on this
+                        // secondarySystemBackground container in the simulator.
+                        .foregroundStyle(Color(uiColor: .secondaryLabel))
                         .textCase(.uppercase)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 4)
@@ -249,7 +252,7 @@ private struct InputTriggerPalette: View {
                                     if let description = suggestion.description {
                                         Text(description)
                                             .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                            .foregroundStyle(Color(uiColor: .secondaryLabel))
                                             .lineLimit(1)
                                     }
                                 }
