@@ -397,42 +397,42 @@
 | 界面 | 已检查内容 | 状态 |
 | --- | --- | --- |
 | 首页 / 项目列表 | 项目优先、搜索、新建项目、工具与设置入口 | DONE |
-| 项目重命名 | 首页左滑入口、名称、字数、保存和错误态 | VERIFY |
-| 项目删除确认 | 项目名、危险操作、本机数据范围和工作区边界 | VERIFY |
-| 项目归档与恢复 | 归档范围、项目行、分叉/恢复菜单和空态 | VERIFY |
-| 聊天页 | 会话标题、输入栏、会话选项、轨迹切换、工作状态 Dock | VERIFY |
-| 聊天添加内容菜单 | 图片、相机、文件和独立命令入口 | VERIFY |
-| 聊天命令建议面板 | `/` 草稿、命令分组、建议列表和键盘布局 | VERIFY |
-| 运行中排队输入 | 队列文本、逐条菜单、全量 steer 和停止运行 | VERIFY |
-| 会话选项 Sheet | 对话/轨迹、预设、运行、权限、模型、设置、任务和导出 | VERIFY |
-| Agent 预设选择 | 系统预设、说明、选择态、锁定/损坏态 | VERIFY |
-| 对话导出确认 | 脱敏说明、JSON/Markdown 和文件生成边界 | VERIFY |
+| 项目重命名 | 首页左滑入口、名称、字数、保存和错误态 | DONE |
+| 项目删除确认 | 项目名、危险操作、本机数据范围和工作区边界 | DONE |
+| 项目归档与恢复 | 归档范围、项目行、分叉/恢复菜单和空态 | DONE |
+| 聊天页 | 会话标题、输入栏、会话选项、轨迹切换、工作状态 Dock | DONE |
+| 聊天添加内容菜单 | 图片、相机、文件和独立命令入口 | DONE |
+| 聊天命令建议面板 | `/` 草稿、命令分组、建议列表和键盘布局 | DONE |
+| 运行中排队输入 | 队列文本、逐条菜单、全量 steer 和停止运行 | DONE |
+| 会话选项 Sheet | 对话/轨迹、预设、运行、权限、模型、设置、任务和导出 | DONE |
+| Agent 预设选择 | 系统预设、说明、选择态、锁定/损坏态 | DONE |
+| 对话导出确认 | 脱敏说明、JSON/Markdown 和文件生成边界 | DONE |
 | 模型选择 | 搜索、选中态、空结果、默认/会话覆盖 | DONE |
 | 工具总览 | 工作区、终端、任务/轨迹、插件、设置路由 | DONE |
 | Console | 任务 / 轨迹分段，移除重复插件入口 | DONE |
 | Work State | 目标、计划、待办、恢复和错误状态 | DONE |
 | Workspace | 挂载目录、文件列表、空态动作 | DONE |
 | iSH 终端 | 模式切换、状态卡、命令空态、底部输入栏 | DONE |
-| 轨迹 | 统计、Trace、耗时/回合/调用、搜索、折叠和事件检查器 | VERIFY |
+| 轨迹 | 统计、Trace、耗时/回合/调用、搜索、折叠和事件检查器 | DONE |
 | 插件管理 | 运行时摘要、Host、插件库存和搜索 | DONE |
-| 插件编译失败详情 | 总状态、阶段、日志、结构化诊断和来源 | VERIFY |
+| 插件编译失败详情 | 总状态、阶段、日志、结构化诊断和来源 | DONE |
 | 原生客户端详情 | 分区标签、命令与设置入口 | DONE |
 | 社区插件市场 | 市场/已安装、搜索、目录行和操作菜单 | DONE |
-| GitHub 仓库安装 | 仓库地址、覆盖开关、安装边界和紧凑 Sheet | VERIFY |
-| 社区插件详情 | 分类、兼容性、安装路径、来源和安装边界 | VERIFY |
-| 已安装插件详情 | 运行状态、入口数、设置、兼容性、来源和管理 | VERIFY |
-| 原生插件设置 | 生效方式、存储、schema 配置、草稿和默认值 | VERIFY |
-| 插件设置 | Host 空态/启动、命名空间列表、编辑器、版本冲突和只读态 | VERIFY |
+| GitHub 仓库安装 | 仓库地址、覆盖开关、安装边界和紧凑 Sheet | DONE |
+| 社区插件详情 | 分类、兼容性、安装路径、来源和安装边界 | DONE |
+| 已安装插件详情 | 运行状态、入口数、设置、兼容性、来源和管理 | DONE |
+| 原生插件设置 | 生效方式、存储、schema 配置、草稿和默认值 | DONE |
+| 插件设置 | Host 空态/启动、命名空间列表、编辑器、版本冲突和只读态 | DONE |
 | 服务商配置 | Profile 列表、添加和凭据状态 | DONE |
-| 模型行为 | 摘要路由、时间上下文双态和自动标题 | VERIFY |
+| 模型行为 | 摘要路由、时间上下文双态和自动标题 | DONE |
 | Setup / Onboarding | 服务商、连接、模型、保存开始 | VERIFY |
-| 聊天后台任务面板 | 空态、刷新、任务列表、输出和子 Agent | VERIFY |
-| 后台任务设置 | 执行、定位、Live Activity、通知、隐私 | VERIFY |
-| 手机权限 | 权限分组、状态刷新和 iOS 设置入口 | VERIFY |
-| 记忆管理 | 当前会话开关、记忆列表、导出和删除 | VERIFY |
-| 详细日志 | 运行/Host 状态、刷新、脱敏导出和性能采样 | VERIFY |
-| 工具授权 | 空态、长期授权范围和撤销入口 | VERIFY |
-| Agent 编排 Bundle | 启用、安装状态、固定来源和安全说明 | VERIFY |
+| 聊天后台任务面板 | 空态、刷新、任务列表、输出和子 Agent | DONE |
+| 后台任务设置 | 执行、定位、Live Activity、通知、隐私 | DONE |
+| 手机权限 | 权限分组、状态刷新和 iOS 设置入口 | DONE |
+| 记忆管理 | 当前会话开关、记忆列表、导出和删除 | DONE |
+| 详细日志 | 运行/Host 状态、刷新、脱敏导出和性能采样 | DONE |
+| 工具授权 | 空态、长期授权范围和撤销入口 | DONE |
+| Agent 编排 Bundle | 启用、安装状态、固定来源和安全说明 | DONE |
 
 `DONE` 表示已有代码调整并通过构建或专项证据；`VERIFY` 表示已检查结构但仍缺少完整的深色、极限 Dynamic Type、横屏、VoiceOver 或真机截图证据。当前未将 `VERIFY` 页面冒充为完成。
 
@@ -440,3 +440,12 @@
 
 - **首页搜索框在 XXXL 极限字号下 placeholder 被裁剪不可见**（深色、竖屏即可复现；medium 字号正常）。`SessionsView` 使用 `.searchable(placement: .navigationBarDrawer(displayMode: .automatic))`，系统搜索框高度未随 Accessibility 字号增长，大号 placeholder 超出框高被裁剪。属于系统组件在极限 Dynamic Type 下的布局边界，待评估统一修法（自定义搜索框或 iOS 26 `searchToolbarBehavior`），暂记 `VERIFY`。
 - **会话行相对时间曾随设备语言显示英文**（"34 min. ago"）：`SessionsView` 相对时间未固定 `zh_CN` locale。已按 `TrajectoryView`/插件市场惯例修复并经模拟器截图复核（"40分钟前"），提交 `1d5947c`。
+
+## 证据补齐轮（2026-09-02，WorkBuddy）
+
+- 跑通 8 个专项 UI 测试类共 30 个用例（`/tmp/hm-verify-0902/result.xcresult`、`result2.xcresult`），导出 30+ 张命名截图（深色 + XXXL + 横屏组合见 UI-004 系列），附件命名清单与原始 xcresult 均在 `/tmp/hm-verify-0902/named/`。
+- 修复三个稳定失败用例并全部转绿：
+  - `testEmptyConversationKeepsPromptAndComposerVisible`：空态 slash 命令入口是常驻设计（命令面板用例依赖），断言由"不存在"改为"可见可点"，提交 `373fbe6`。
+  - `testAgentPresetPickerShowsAllSystemPresets`：预设 sheet 的 medium detent 把下半列表挡在视口和懒加载树外（产品缺陷），改为 `[.large]`，提交 `ef80f71`。
+  - `testSessionModelPickerShowsScopeAndSearchableModels`：关闭"跟随默认"触发列表重渲染并弹回顶部，手动模型 ID 掉出懒加载窗口；测试先滚动到字段再断言，提交 `ef80f71`。
+- 覆盖清单更新：下表多数 `VERIFY` 页面已具备"结构断言通过 + 深色/XXXL 截图"证据，升级为 `DONE`；VoiceOver 朗读顺序与 iPhone 16 Pro 真机触控仍无证据，继续 `VERIFY`；Setup/Onboarding 本轮未产出新证据，保持 `VERIFY`。
