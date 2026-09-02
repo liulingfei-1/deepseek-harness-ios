@@ -258,6 +258,10 @@ struct AnthropicStreamDecoder: Sendable {
     private var outputTokens = 0
     private var cacheCreationInputTokens = 0
     private var cacheReadInputTokens = 0
+    private var hasInputTokens = false
+    private var hasOutputTokens = false
+    private var hasCacheCreationInputTokens = false
+    private var hasCacheReadInputTokens = false
     private var thinkingTokens: Int?
     private var emittedUsage = false
 
@@ -367,15 +371,19 @@ struct AnthropicStreamDecoder: Sendable {
     private mutating func merge(_ usage: AnthropicStreamEnvelope.Usage) throws {
         if let value = usage.inputTokens {
             inputTokens = value
+            hasInputTokens = true
         }
         if let value = usage.outputTokens {
             outputTokens = value
+            hasOutputTokens = true
         }
         if let value = usage.cacheCreationInputTokens {
             cacheCreationInputTokens = value
+            hasCacheCreationInputTokens = true
         }
         if let value = usage.cacheReadInputTokens {
             cacheReadInputTokens = value
+            hasCacheReadInputTokens = true
         }
         if let value = usage.thinkingTokens {
             thinkingTokens = value
@@ -393,8 +401,8 @@ struct AnthropicStreamDecoder: Sendable {
     }
 
     private func currentUsageEvent() throws -> LLMStreamEvent? {
-        guard inputTokens > 0 || outputTokens > 0
-                || cacheCreationInputTokens > 0 || cacheReadInputTokens > 0 else {
+        guard hasInputTokens || hasOutputTokens || hasCacheCreationInputTokens
+                || hasCacheReadInputTokens || thinkingTokens != nil else {
             return nil
         }
         let prompt = try checkedSum(
@@ -408,8 +416,15 @@ struct AnthropicStreamDecoder: Sendable {
                 promptTokens: prompt,
                 completionTokens: outputTokens,
                 totalTokens: total,
-                cachedPromptTokens: cacheReadInputTokens > 0 ? cacheReadInputTokens : nil,
-                reasoningTokens: thinkingTokens
+                cachedPromptTokens: hasCacheReadInputTokens ? cacheReadInputTokens : nil,
+                reasoningTokens: thinkingTokens,
+                // Anthropic reports these fields independently. Keep the
+                // aggregate prompt count for wire compatibility, while
+                // preserving the three-way accounting used by the UI.
+                uncachedPromptTokens: hasInputTokens ? inputTokens : nil,
+                cacheWriteTokens: hasCacheCreationInputTokens
+                    ? cacheCreationInputTokens
+                    : nil
             )
         )
     }

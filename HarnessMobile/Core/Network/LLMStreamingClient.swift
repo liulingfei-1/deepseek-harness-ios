@@ -94,6 +94,9 @@ struct ModelTokenUsage: Sendable, Equatable {
     /// DeepSeek calls this `prompt_cache_miss_tokens`; other providers may
     /// omit it, in which case the client derives it from prompt and hit data.
     let uncachedPromptTokens: Int?
+    /// Provider-reported prompt tokens used to create or refresh a cache.
+    /// Anthropic calls this `cache_creation_input_tokens`; most providers omit it.
+    let cacheWriteTokens: Int?
     let reasoningTokens: Int?
 
     init(
@@ -102,13 +105,15 @@ struct ModelTokenUsage: Sendable, Equatable {
         totalTokens: Int,
         cachedPromptTokens: Int?,
         reasoningTokens: Int?,
-        uncachedPromptTokens: Int? = nil
+        uncachedPromptTokens: Int? = nil,
+        cacheWriteTokens: Int? = nil
     ) {
         self.promptTokens = promptTokens
         self.completionTokens = completionTokens
         self.totalTokens = totalTokens
         self.cachedPromptTokens = cachedPromptTokens
         self.uncachedPromptTokens = uncachedPromptTokens
+        self.cacheWriteTokens = cacheWriteTokens
         self.reasoningTokens = reasoningTokens
     }
 }

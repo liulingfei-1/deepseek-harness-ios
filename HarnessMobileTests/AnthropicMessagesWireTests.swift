@@ -263,7 +263,8 @@ final class AnthropicMessagesWireTests: XCTestCase {
                         completionTokens: 7,
                         totalTokens: 22,
                         cachedPromptTokens: 3,
-                        reasoningTokens: nil
+                        reasoningTokens: nil,
+                        uncachedPromptTokens: 12
                     )
                 ),
                 .finish(.toolCalls),
@@ -276,6 +277,57 @@ final class AnthropicMessagesWireTests: XCTestCase {
             try decoder.decodeEvents("{\"type\":\"message_stop\"}"),
             []
         )
+    }
+
+    func testStreamDecoderPreservesAnthropicCacheReadWriteAndUncachedCounts() throws {
+        var decoder = AnthropicStreamDecoder()
+
+        XCTAssertEqual(
+            try decoder.decodeEvents(
+                """
+                {"type":"message_start","message":{"usage":{"input_tokens":12,"cache_creation_input_tokens":5,"cache_read_input_tokens":3,"output_tokens":0}}}
+                """
+            ),
+            []
+        )
+
+        let events = try decoder.decodeEvents(
+            """
+            {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":7}}
+            """
+        )
+        guard case let .usage(usage) = try XCTUnwrap(events.first) else {
+            return XCTFail("Expected a usage event")
+        }
+        XCTAssertEqual(usage.promptTokens, 20)
+        XCTAssertEqual(usage.uncachedPromptTokens, 12)
+        XCTAssertEqual(usage.cachedPromptTokens, 3)
+        XCTAssertEqual(usage.cacheWriteTokens, 5)
+        XCTAssertEqual(usage.totalTokens, 27)
+    }
+
+    func testStreamDecoderPreservesExplicitZeroCacheFields() throws {
+        var decoder = AnthropicStreamDecoder()
+        XCTAssertEqual(
+            try decoder.decodeEvents(
+                """
+                {"type":"message_start","message":{"usage":{"input_tokens":12,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}}}
+                """
+            ),
+            []
+        )
+
+        let events = try decoder.decodeEvents(
+            """
+            {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}
+            """
+        )
+        guard case let .usage(usage) = try XCTUnwrap(events.first) else {
+            return XCTFail("Expected a usage event")
+        }
+        XCTAssertEqual(usage.uncachedPromptTokens, 12)
+        XCTAssertEqual(usage.cachedPromptTokens, 0)
+        XCTAssertEqual(usage.cacheWriteTokens, 0)
     }
 
     func testStreamErrorAndInvalidUsageAreRejected() throws {
