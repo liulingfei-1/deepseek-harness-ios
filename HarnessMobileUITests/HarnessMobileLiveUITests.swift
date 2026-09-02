@@ -114,7 +114,11 @@ final class HarnessMobileSessionModelPickerUITests: XCTestCase {
         app.buttons["session-model-option-deepseek-v4-pro"].tap()
         XCTAssertEqual(followDefault.value as? String, "0")
         XCTAssertTrue(app.buttons["session-model-provider-picker"].waitForExistence(timeout: 5))
+        // Selecting a model toggles follow-default off, which re-renders the
+        // list and resets scroll to the top; the manual-ID field falls out of
+        // the lazy list window, so scroll it back into view first.
         let modelField = app.textFields["session-model-field"]
+        scrollUntilExists(modelField, in: app)
         XCTAssertTrue(modelField.exists)
         XCTAssertEqual(modelField.value as? String, "deepseek-v4-pro")
         attachScreenshot(named: "model-picker-session-override")

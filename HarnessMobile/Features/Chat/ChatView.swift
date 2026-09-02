@@ -1313,7 +1313,10 @@ private struct AgentPresetPickerView: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        // All four presets must be reachable without a drag gesture; a medium
+        // detent hides the lower half of the lazy list from the accessibility
+        // tree as well as from the user.
+        .presentationDetents([.large])
     }
 
     private var selectedPresetID: String {
