@@ -184,7 +184,7 @@ private struct HarnessToolsView: View {
                     title: "iSH 终端",
                     detail: "在手机 Alpine 沙箱中执行命令",
                     systemImage: "terminal.fill",
-                    tint: .black,
+                    tint: .primary,
                     accessibilityIdentifier: "tool-route-terminal",
                     route: .terminal
                 )

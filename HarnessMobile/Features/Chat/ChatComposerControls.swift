@@ -220,7 +220,9 @@ private struct InputTriggerPalette: View {
 
     var body: some View {
         ScrollView(.vertical) {
-            LazyVStack(spacing: 0) {
+            // Candidates are capped at ~20 rows; LazyVStack mis-estimates
+            // height here and lets content spill past the 280pt frame.
+            VStack(spacing: 0) {
                 ForEach(groups) { group in
                     Text(title(for: group.source))
                         .font(.caption2.weight(.semibold))
@@ -243,7 +245,7 @@ private struct InputTriggerPalette: View {
                                 )
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(displayName(for: suggestion))
-                                        .font(.body.monospaced())
+                                        .font(.body.weight(.medium))
                                     if let description = suggestion.description {
                                         Text(description)
                                             .font(.caption)

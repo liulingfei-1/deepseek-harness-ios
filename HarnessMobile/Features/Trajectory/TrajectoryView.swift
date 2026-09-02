@@ -453,37 +453,66 @@ private struct TrajectoryMetricsHeader: View {
                 }
             }
 
-            ScrollView(.horizontal) {
+            ViewThatFits(in: .horizontal) {
                 HStack(spacing: 14) {
-                    TrajectorySecondaryMetric(
-                        title: "模型",
-                        value: TrajectoryFormat.duration(summary.modelMilliseconds)
-                    )
-                    TrajectorySecondaryMetric(
-                        title: "工具",
-                        value: TrajectoryFormat.duration(summary.toolMilliseconds)
-                    )
-                    TrajectorySecondaryMetric(
-                        title: "首字延迟",
-                        value: summary.averageTTFTMilliseconds.map(TrajectoryFormat.duration) ?? "—"
-                    )
-                    TrajectorySecondaryMetric(
-                        title: "输出",
-                        value: TrajectoryFormat.count(summary.outputTokens) + " tok"
-                    )
-                    TrajectorySecondaryMetric(
-                        title: "缓存",
-                        value: summary.cacheHitRate.map(TrajectoryFormat.percent) ?? "—"
-                    )
+                    secondaryMetrics
                 }
-                .padding(.horizontal, 14)
+                VStack(spacing: 6) {
+                    HStack(spacing: 14) {
+                        TrajectorySecondaryMetric(
+                            title: "模型",
+                            value: TrajectoryFormat.duration(summary.modelMilliseconds)
+                        )
+                        TrajectorySecondaryMetric(
+                            title: "工具",
+                            value: TrajectoryFormat.duration(summary.toolMilliseconds)
+                        )
+                        TrajectorySecondaryMetric(
+                            title: "首字延迟",
+                            value: summary.averageTTFTMilliseconds.map(TrajectoryFormat.duration) ?? "—"
+                        )
+                    }
+                    HStack(spacing: 14) {
+                        TrajectorySecondaryMetric(
+                            title: "输出",
+                            value: TrajectoryFormat.count(summary.outputTokens) + " tok"
+                        )
+                        TrajectorySecondaryMetric(
+                            title: "缓存",
+                            value: summary.cacheHitRate.map(TrajectoryFormat.percent) ?? "—"
+                        )
+                    }
+                }
             }
-            .scrollIndicators(.hidden)
+            .padding(.horizontal, 14)
         }
         .padding(.vertical, 10)
         .background(HarnessTheme.surface)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("轨迹统计")
+    }
+
+    @ViewBuilder private var secondaryMetrics: some View {
+        TrajectorySecondaryMetric(
+            title: "模型",
+            value: TrajectoryFormat.duration(summary.modelMilliseconds)
+        )
+        TrajectorySecondaryMetric(
+            title: "工具",
+            value: TrajectoryFormat.duration(summary.toolMilliseconds)
+        )
+        TrajectorySecondaryMetric(
+            title: "首字延迟",
+            value: summary.averageTTFTMilliseconds.map(TrajectoryFormat.duration) ?? "—"
+        )
+        TrajectorySecondaryMetric(
+            title: "输出",
+            value: TrajectoryFormat.count(summary.outputTokens) + " tok"
+        )
+        TrajectorySecondaryMetric(
+            title: "缓存",
+            value: summary.cacheHitRate.map(TrajectoryFormat.percent) ?? "—"
+        )
     }
 
     private var primaryMetrics: some View {
