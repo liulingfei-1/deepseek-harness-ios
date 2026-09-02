@@ -126,9 +126,13 @@
 
 ### U-025 目标/反馈工具
 - 上游：`create_goal`/`get_goal`/`update_goal`、`message_feedback`、`report_view`、`todo_write`
-- 移动端：`work_state_set_goal` / `work_state_replace_todos` / `work_state_replace_plan`、`/feedback` 命令
-- 动作：核对事件与命令覆盖；补齐缺失的查询语义（`get_goal`）
-- 状态：⬜
+- 移动端（修复前）：`work_state_set_goal` / `work_state_replace_todos` / `work_state_replace_plan`、`/feedback` 命令
+- 核对发现：工作区状态**既不注入模型上下文、也没有读取工具**（`workState` 只出现在 Compactor/目录/存储），模型在长任务或恢复会话后无法确认当前目标
+- 状态：✅ 已完成（提交 `db81cb0`）
+  - 新增只读工具 `work_state_get`（`WorkStateTools.swift`，risk `.pure`，返回 `coordinator.snapshot()` 编码）
+  - 注册进 `ProductionToolCatalog`（名称表 + 工具表）
+  - 新增测试 `testWorkStateGetReturnsCurrentGoalPlanAndTodos`（解码验证空态无 goal、设置后可读回）
+- 顺带修复（同提交）：`AgentRuntimeTests` 的 `eventually` 从次数预算改为**墙钟预算**；调度器测试去掉并行启动顺序的硬断言（保留 2 槽上限与提交顺序契约）——项目已知 flaky（1/3）降至约 1/10，未 100% 根除
 
 ---
 
