@@ -170,6 +170,15 @@
 | `test-support/session-snapshot`（快照回放基建） | 🟡 IOS-REPLACEMENT：移动端以 `CompatibilityFixtures/*.json` + 专项 fixture 测试承载同等"证据式"契约测试 | — |
 | `core/scope`、`boot/cmdline`、`subprocess`、`sandbox-windows-acl`、`shell pwsh*`、`context/tmux-context` | ❌ 平台不适用 | — |
 | CordisRuntime 换代 / `api` 控制器拆分 / `client` 49 包 / `host` 宿主 / `sdk` / `e2b` / `webhook` / `webworker` / `experimental` | ❌ 维持边界判定（AGENTS.md + 平台形态），见 `UPSTREAM_GAP_FULL_2026-09-02.md` 第 3 节 | — |
+
+### 全量 UI 回归判定（2026-09-03 02:30-03:05）
+
+- `ProductionToolCatalogTests` allowlist 缺 `work_state_get` → **真破坏**，已修（`11d1256`）
+- 以下 4 个经 checkout `dd33417`（改动前）对照**同样失败**，为既有问题、非本轮引入，待后续专项修复：
+  - `BackgroundAudioKeepAliveTests.testFailedStartRetries...`：模拟器 AVAudioSession 重试断言（1≠3），音频服务环境敏感
+  - `SessionQueryReadModelTests.testTenThousandSessionRebuild...`：sqlite-shm 临时文件删除冲突（NSCocoaErrorDomain 4）
+  - `HarnessMobileConversationModeUITests.testConversationSwitches...`、`HarnessMobileMarkdownUITests.testOneMillionCharacter...`：UI 全量久未跑，与本轮改动面无交集
+- SwiftPM 全量（823 项）在本轮全部提交后通过
 | `session-title`（first-prompt/all-prompts/llm） | ✅（核对即对齐：`SessionTitleAutomaticMode` 三档 + 预算/超时/校验） | — |
 | `skill-filesystem` | ✅（核对即对齐：`skillDocuments()` 扫描/frontmatter/发现，仅限私有工作区） | — |
 | 子 agent 多后端（ACP/Claude/Codex/SDK） | ⏸ 需产品决策 | — |
