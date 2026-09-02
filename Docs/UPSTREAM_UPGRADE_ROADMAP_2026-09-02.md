@@ -109,11 +109,14 @@
 - 动作：**评估**。若属产品边界外，标注 `OUT-OF-SCOPE`；若纳入，需单独能力项与真机验证
 - 状态：⬜
 
-### U-023 交互控制工具：`interrupt_agent` / `wait_agent` / `steer_next` / `abort_step`
-- 上游：`tool-subagent-control`、`experimental/tool-agent-team`
-- 移动端：有 `subagent_control`（对应 `/agent` 与停止能力）
-- 动作：核对 `steer_next`（排队输入分流）与移动端 `onSteerQueuedInput` 的语义是否等价；不等价则补齐
-- 状态：⬜
+### U-023 交互控制工具：`send_message` 的运行中语义 —— 已核对，行为差距待决策
+- 核对结果（推翻初判"语义等价"）：
+  - 上游 `send_message`：`If the target is still working, the message steers its nearest step; if it is idle, the message starts a turn.` 且失败即未送达
+  - 移动端 `send_message`（`JobTools.swift` 694-745）：走 `LocalSubagentRequest.continuation` + `startSubagentActivation`；子 agent 运行中时 `HarnessJobs.swift` 751-753 抛 **`subagentBusy`** → **运行中拒绝，空闲才继续**
+  - 移动端工具描述准确（只承诺"上一轮完成后继续"），**不会误导模型**，故非缺陷
+- 差距性质：**行为差距**（上游 steer / 移动端拒绝），非描述问题
+- 动作：需产品决策——是否实现"运行中转向最近步骤"（涉及 `HarnessJobs` 并发语义改动，风险中）
+- 状态：✅ 已核对 / 实现 ⏸ 待决策
 
 ### U-024 Cordis 工具面（`cordis_mount/unmount/define/undefine/run/stop/inspect`）
 - 上游：Cordis 工具族（部分随 CordisRuntime 新增）
