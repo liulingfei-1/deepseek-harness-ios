@@ -104,13 +104,6 @@ enum NativeToolEventPresentation: Equatable, Sendable {
                 output: output,
                 status: status
             )
-        case "ios_native":
-            return nativeOffloadTerminal(
-                arguments: arguments,
-                result: result,
-                output: output,
-                status: status
-            )
         default:
             return .generic
         }
@@ -484,53 +477,6 @@ private extension NativeToolEventPresentation {
                 isRunning: isRunning,
                 status: status
             )
-        )
-    }
-
-    static func nativeOffloadTerminal(
-        arguments: String,
-        result: String?,
-        output: [AgentToolOutputChunk],
-        status: AgentToolEventStatus
-    ) -> NativeToolEventPresentation {
-        guard let object = jsonObject(arguments),
-              let command = boundedString(object["command"], maximumBytes: 64),
-              IOSNativeOffloadTool.allowedCommands.contains(command) else {
-            return .generic
-        }
-        let rawArguments: [String]
-        if let value = object["arguments"] {
-            guard case let .array(values) = value, values.count <= 64 else {
-                return .generic
-            }
-            var parsed: [String] = []
-            parsed.reserveCapacity(values.count)
-            for value in values {
-                guard let argument = boundedString(value, maximumBytes: 2_048, allowEmpty: true) else {
-                    return .generic
-                }
-                parsed.append(argument)
-            }
-            rawArguments = parsed
-        } else {
-            rawArguments = []
-        }
-
-        var terminalArguments: [String: JSONValue] = [
-            "command": .string(
-                ([command] + rawArguments)
-                    .map(displayCommandToken)
-                    .joined(separator: " ")
-            )
-        ]
-        if let timeout = object["timeout_seconds"] {
-            terminalArguments["timeout_seconds"] = timeout
-        }
-        return terminal(
-            arguments: JSONValue.object(terminalArguments).displayText,
-            result: result,
-            output: output,
-            status: status
         )
     }
 

@@ -62,6 +62,20 @@ final class SessionBackgroundResumeCoordinatorTests: XCTestCase {
         XCTAssertEqual(resumeCount, 1)
     }
 
+    func testSystemScheduledRecoveryClaimsPendingIdentityExactlyOnce() async {
+        let coordinator = SessionBackgroundResumeCoordinator()
+        let identity = RunIdentity(sessionID: UUID(), runID: UUID(), generation: 3)
+
+        await coordinator.markSystemExpiration(identity)
+
+        let firstClaim = await coordinator.consumePending(identity)
+        let secondClaim = await coordinator.consumePending(identity)
+        let pending = await coordinator.pendingIdentity(sessionID: identity.sessionID)
+        XCTAssertTrue(firstClaim)
+        XCTAssertFalse(secondClaim)
+        XCTAssertNil(pending)
+    }
+
     private func waitUntil(
         _ predicate: @escaping @Sendable () async -> Bool,
         file: StaticString = #filePath,

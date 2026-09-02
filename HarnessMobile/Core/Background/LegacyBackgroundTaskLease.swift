@@ -15,7 +15,9 @@ final class LegacyBackgroundTaskLease {
     typealias SystemTaskIdentifier = UInt64
     typealias BeginSystemTask = (@escaping @Sendable () -> Void) -> SystemTaskIdentifier?
     typealias EndSystemTask = (SystemTaskIdentifier) -> Void
-    typealias ExpirationHandler = (RunIdentity) -> Void
+    /// Returns true when another healthy background mode owns process survival
+    /// and the finite UIKit lease should be re-armed without interrupting work.
+    typealias ExpirationHandler = (RunIdentity) -> Bool
 
     private struct Owner {
         let identity: RunIdentity
@@ -87,14 +89,21 @@ final class LegacyBackgroundTaskLease {
     }
 
     private func handleExpiration() {
-        guard systemTaskIdentifier != nil else { return }
-        // UIKit has already expired the handle. Clear only the OS handle;
-        // ownership tokens remain until terminal cleanup so registry invariants
-        // and later idempotent release calls stay intact.
+        guard let expiredIdentifier = systemTaskIdentifier else { return }
+        // UIKit requires every granted identifier to be ended from the
+        // expiration callback. Invalidate first so a re-entrant release cannot
+        // end it twice, then re-arm only after every owner has made its decision.
         systemTaskIdentifier = nil
+        endSystemTask(expiredIdentifier)
         let callbacks = owners.values.map { ($0.identity, $0.expirationHandler) }
-        callbacks.forEach { identity, callback in
-            callback(identity)
+        var shouldRearm = false
+        for (identity, callback) in callbacks {
+            if callback(identity) {
+                shouldRearm = true
+            }
+        }
+        if shouldRearm, !owners.isEmpty {
+            beginSharedSystemTask()
         }
     }
 

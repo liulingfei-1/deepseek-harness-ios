@@ -113,8 +113,8 @@ struct SystemDevicePermissionStatusProvider: DevicePermissionStatusProviding {
             snapshot(.mediaLibrary, mediaLibraryStatus),
             snapshot(.healthKit, healthKitStatus),
             // The current development profile does not carry HomeKit/NFC
-            // entitlements. Keep their real handlers compiled but report the
-            // signed app boundary instead of implying hardware is enough.
+            // entitlements. Report the signed app boundary instead of
+            // exposing tools that cannot start a valid system session.
             snapshot(.homeKit, .notIntegrated),
             snapshot(.nfc, .notIntegrated),
         ]
@@ -158,7 +158,7 @@ struct SystemDevicePermissionStatusProvider: DevicePermissionStatusProviding {
     }
 
     private var locationStatus: DevicePermissionStatus {
-        switch CLLocationManager.authorizationStatus() {
+        switch CLLocationManager().authorizationStatus {
         case .notDetermined: return .notDetermined
         case .restricted: return .restricted
         case .denied: return .denied

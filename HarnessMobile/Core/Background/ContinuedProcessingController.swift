@@ -190,13 +190,33 @@ struct ContinuedProcessingStateMachine: Sendable {
 
         run.phase = .finished(success: success)
         if run.isSystemTaskAttached {
-            run.isSystemTaskCompleted = true
+            if !run.isSystemTaskCompleted {
+                run.isSystemTaskCompleted = true
+                currentRun = run
+                return [.completeSystemTask(success: success)]
+            }
             currentRun = run
-            return [.completeSystemTask(success: success)]
+            return []
         }
 
         currentRun = run
         return [.cancelPendingRequest(identifier: run.descriptor.requestIdentifier)]
+    }
+
+    /// Release an expired OS-owned task without stopping the operation. A
+    /// healthy audio/location background mode may keep the same worker alive;
+    /// the run remains `.running` and later terminal cleanup owns its outcome.
+    mutating func expireSystemTask(runID: UUID) -> [ContinuedProcessingStateMachineEffect] {
+        guard var run = currentRun,
+              run.descriptor.id == runID,
+              run.phase == .running,
+              run.isSystemTaskAttached,
+              !run.isSystemTaskCompleted else {
+            return []
+        }
+        run.isSystemTaskCompleted = true
+        currentRun = run
+        return [.completeSystemTask(success: false)]
     }
 
     mutating func cancel(
@@ -215,10 +235,10 @@ struct ContinuedProcessingStateMachine: Sendable {
             run.isCancellationCallbackDelivered = true
             effects.append(.invokeCancellation(reason))
         }
-        if run.isSystemTaskAttached {
+        if run.isSystemTaskAttached, !run.isSystemTaskCompleted {
             run.isSystemTaskCompleted = true
             effects.append(.completeSystemTask(success: false))
-        } else {
+        } else if !run.isSystemTaskAttached {
             effects.append(.cancelPendingRequest(identifier: run.descriptor.requestIdentifier))
         }
         currentRun = run
@@ -367,6 +387,13 @@ struct ContinuedProcessingRunBook: Sendable {
         return effects
     }
 
+    mutating func expireSystemTask(runID: UUID) -> [ContinuedProcessingStateMachineEffect] {
+        guard var machine = machines[runID] else { return [] }
+        let effects = machine.expireSystemTask(runID: runID)
+        machines[runID] = machine
+        return effects
+    }
+
     mutating func cancel(
         runID: UUID,
         reason: ContinuedProcessingCancellationReason
@@ -393,7 +420,9 @@ import BackgroundTasks
 final class ContinuedProcessingController {
     typealias Operation = @Sendable (ContinuedProcessingContext) async throws -> Void
     typealias CancellationHandler = @Sendable (ContinuedProcessingCancellationReason) async -> Void
+    typealias SystemExpirationHandler = @Sendable () async -> Bool
     typealias SystemTaskAttachedHandler = @MainActor () -> Void
+    typealias SystemTaskDetachedHandler = @MainActor () -> Void
 
     let identifierPrefix: String
     let permittedIdentifier: String
@@ -405,11 +434,17 @@ final class ContinuedProcessingController {
     private var workers: [UUID: Task<Void, Never>] = [:]
     private var operations: [UUID: Operation] = [:]
     private var cancellationHandlers: [UUID: CancellationHandler] = [:]
+    private var systemExpirationHandlers: [UUID: SystemExpirationHandler] = [:]
     private var systemTaskAttachedHandlers: [UUID: SystemTaskAttachedHandler] = [:]
+    private var systemTaskDetachedHandlers: [UUID: SystemTaskDetachedHandler] = [:]
     private var completions: [UUID: ContinuedProcessingRunCompletion] = [:]
 
     var hasActiveRun: Bool {
         runBook.hasActiveRun
+    }
+
+    var hasAttachedSystemTask: Bool {
+        !systemTasks.isEmpty
     }
 
     init(identifierPrefix: String) throws {
@@ -453,7 +488,9 @@ final class ContinuedProcessingController {
         runID: UUID = UUID(),
         initialStatus: ContinuedProcessingStatus,
         cancellationHandler: @escaping CancellationHandler,
+        systemExpirationHandler: SystemExpirationHandler? = nil,
         systemTaskAttachedHandler: SystemTaskAttachedHandler? = nil,
+        systemTaskDetachedHandler: SystemTaskDetachedHandler? = nil,
         operation: @escaping Operation
     ) async throws -> ContinuedProcessingRunHandle {
         let effectiveRunID = identity?.runID ?? runID
@@ -476,8 +513,14 @@ final class ContinuedProcessingController {
         }
 
         cancellationHandlers[effectiveRunID] = cancellationHandler
+        if let systemExpirationHandler {
+            systemExpirationHandlers[effectiveRunID] = systemExpirationHandler
+        }
         if let systemTaskAttachedHandler {
             systemTaskAttachedHandlers[effectiveRunID] = systemTaskAttachedHandler
+        }
+        if let systemTaskDetachedHandler {
+            systemTaskDetachedHandlers[effectiveRunID] = systemTaskDetachedHandler
         }
         operations[effectiveRunID] = operation
         let completion = ContinuedProcessingRunCompletion()
@@ -530,16 +573,21 @@ final class ContinuedProcessingController {
         runID: UUID,
         identity: RunIdentity? = nil,
         reason: ContinuedProcessingCancellationReason = .user
-    ) {
+    ) async {
         guard identity == nil || runBook.accepts(identity!, for: runID) else { return }
         let worker = workers[runID]
-        worker?.cancel()
         let effects = runBook.cancel(runID: runID, reason: reason)
-        apply(effects, runID: runID)
+        // Publish the exact cancellation source before cancelling the worker.
+        // Otherwise the runtime can observe CancellationError first and
+        // durably mislabel an iOS background expiration as a user abort.
+        if effects.contains(.invokeCancellation(reason)),
+           let handler = cancellationHandlers[runID] {
+            await handler(reason)
+        }
+        worker?.cancel()
+        apply(effects, runID: runID, deliverCancellation: false)
         if !effects.isEmpty, worker == nil, let completion = completions[runID] {
-            Task {
-                await completion.resolve(.cancelledBeforeStart(reason))
-            }
+            await completion.resolve(.cancelledBeforeStart(reason))
         }
     }
 
@@ -595,11 +643,21 @@ final class ContinuedProcessingController {
         systemTasks[runID] = task
         task.expirationHandler = { [weak self] in
             Task { @MainActor [weak self] in
-            self?.cancel(
-                runID: runID,
-                identity: run.descriptor.identity,
-                reason: .systemExpiration
-            )
+                guard let self else { return }
+                let shouldContinue = await self.systemExpirationHandlers[runID]?() ?? false
+                if shouldContinue {
+                    self.apply(
+                        self.runBook.expireSystemTask(runID: runID),
+                        runID: runID
+                    )
+                    self.systemTaskDetachedHandlers[runID]?()
+                } else {
+                    await self.cancel(
+                        runID: runID,
+                        identity: run.descriptor.identity,
+                        reason: .systemExpiration
+                    )
+                }
             }
         }
         systemTaskAttachedHandlers[runID]?()
@@ -630,7 +688,11 @@ final class ContinuedProcessingController {
                 try await operation(context)
                 self?.finish(runID: runID, identity: runIdentity, success: true)
             } catch is CancellationError {
-                self?.cancel(runID: runID, identity: runIdentity, reason: .operationCancellation)
+                await self?.cancel(
+                    runID: runID,
+                    identity: runIdentity,
+                    reason: .operationCancellation
+                )
             } catch {
                 self?.finish(runID: runID, identity: runIdentity, success: false)
             }
@@ -649,7 +711,8 @@ final class ContinuedProcessingController {
 
     private func apply(
         _ effects: [ContinuedProcessingStateMachineEffect],
-        runID: UUID
+        runID: UUID,
+        deliverCancellation: Bool = true
     ) {
         for effect in effects {
             switch effect {
@@ -677,7 +740,7 @@ final class ContinuedProcessingController {
                 }
 
             case let .invokeCancellation(reason):
-                if let handler = cancellationHandlers[runID] {
+                if deliverCancellation, let handler = cancellationHandlers[runID] {
                     Task { await handler(reason) }
                 }
             }
@@ -691,7 +754,9 @@ final class ContinuedProcessingController {
         workers.removeValue(forKey: runID)
         operations.removeValue(forKey: runID)
         cancellationHandlers.removeValue(forKey: runID)
+        systemExpirationHandlers.removeValue(forKey: runID)
         systemTaskAttachedHandlers.removeValue(forKey: runID)
+        systemTaskDetachedHandlers.removeValue(forKey: runID)
     }
 }
 #endif

@@ -813,6 +813,10 @@ final class AppModel {
         await refreshAppIntentRunningSessionProjection()
         if let activeSessionID {
             await deliverPendingJobCompletions(for: activeSessionID)
+            // A system-expired run may have been journaled just before iOS
+            // terminated the process. Re-arm its exact identity after session
+            // state is restored so the next BGProcessing wake-up can resume it.
+            await scheduleSystemExpirationResume(for: activeSessionID)
         }
 #if os(iOS) && canImport(BackgroundTasks)
         if scheduleBackgroundTasksRegistered {
@@ -2587,9 +2591,13 @@ final class AppModel {
         }
     }
 
-    private func resumePendingRunNow() async {
+    private func resumePendingRunNow(useContinuedProcessing: Bool = true) async {
         guard hasResumableRun, !messages.isEmpty, !isRunning else { return }
-        await startRun(history: messages, workState: workState)
+        await startRun(
+            history: messages,
+            workState: workState,
+            useContinuedProcessing: useContinuedProcessing
+        )
     }
 
     func updateApplicationActivity(isActive: Bool, isBackgrounded: Bool = false) {
@@ -2671,8 +2679,8 @@ final class AppModel {
                 hasLiveRoot: liveRootCount > 0,
                 enhancedAudioRequested: backgroundPreferences.isEnhancedBackgroundEnabled,
                 locationRequested: backgroundPreferences.isBackgroundLocationKeepAliveEnabled,
-                hasFiniteBackgroundLease: legacyBackgroundTaskLease.activeTokenCount > 0,
-                hasContinuedProcessing: continuedProcessingController.hasActiveRun,
+                hasFiniteBackgroundLease: legacyBackgroundTaskLease.hasSystemTask,
+                hasContinuedProcessing: continuedProcessingController.hasAttachedSystemTask,
                 isLowPowerMode: processInfo.isLowPowerModeEnabled,
                 isThermallyConstrained: processInfo.thermalState == .serious
                     || processInfo.thermalState == .critical
@@ -2991,7 +2999,24 @@ final class AppModel {
                 )
             }
             ishPluginHostPackages = ping.packages
-            try await synchronizeISHPluginHost(client: client, ping: ping)
+            // Keep the initial handshake cheap. Context projection, settings,
+            // dynamic contributions and native-client registration are only
+            // needed when a session is active or a marketplace screen asks
+            // for them; doing all of them before the first usable ping made
+            // every Host cold start pay the full synchronization cost.
+            if activeSessionID != nil {
+                try await synchronizeISHPluginHost(client: client, ping: ping)
+            } else {
+                let inventory = try await client.inventory()
+                ishPluginHostInventory = inventory.entries
+                ishPluginHostPackages = ping.packages
+                ishPluginHostDiagnostics = await client.diagnostics()
+                ishPluginHostState = .running(
+                    hostVersion: ping.hostVersion,
+                    processID: processID(from: ishPluginHostDiagnostics)
+                )
+                await refreshNativePluginInventory()
+            }
             await refreshISHMarketplacePlugins(client: client)
             return true
         } catch where ISHPluginMarketplaceErrorPolicy.isCancellation(error) {
@@ -3001,6 +3026,12 @@ final class AppModel {
             await failISHPluginHost(error, reportErrorsGlobally: reportErrorsGlobally)
             return false
         }
+    }
+
+    private func processID(from diagnostics: ISHPluginHostClient.Diagnostics?) -> Int32? {
+        guard let diagnostics else { return nil }
+        if case let .running(pid) = diagnostics.state { return pid }
+        return nil
     }
 
     func stopISHPluginHost() async {
@@ -5426,6 +5457,11 @@ final class AppModel {
             },
             checkpointHandler: { [trajectoryRepository] in
                 try await trajectoryRepository.flush(sessionID: sessionID)
+            },
+            cancellationReasonProvider: {
+                await state.terminalOutcomeProposal(for: identity) == .interrupted
+                    ? .systemExpiration
+                    : .user
             }
             )
             try await runtime.run(
@@ -7073,16 +7109,7 @@ final class AppModel {
             contextWindowTokens: contextWindow(for: runConfiguration)
         )
 
-        let finiteLeaseToken = legacyBackgroundTaskLease.acquire(identity: identity) { [weak self] expiredIdentity in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                await self.runtimeTelemetryStore.recordBackgroundTimeout(
-                    identity: expiredIdentity,
-                    source: .finiteBackgroundLease
-                )
-                _ = try? await self.sessionRunRegistry.cancel(expiredIdentity)
-            }
-        }
+        let finiteLeaseToken = acquireFiniteBackgroundLease(for: identity)
         finiteBackgroundLeaseTokens[identity] = finiteLeaseToken
 
         let registration: SessionRunRegistration
@@ -7267,15 +7294,25 @@ final class AppModel {
                 identity: identity,
                 runID: runID,
                 initialStatus: initialStatus,
-                    cancellationHandler: { [weak self] reason in
+                cancellationHandler: { [weak self] reason in
                     await self?.handleContinuedProcessingCancellation(
                         identity: identity,
                         state: state,
                         reason: reason
                     )
                 },
+                systemExpirationHandler: { [weak self] in
+                    await self?.continueAfterContinuedProcessingExpiration(
+                        identity: identity,
+                        state: state
+                    ) ?? false
+                },
                 systemTaskAttachedHandler: { [weak self] in
                     self?.releaseFiniteBackgroundLeaseForHandoff(identity: identity)
+                },
+                systemTaskDetachedHandler: { [weak self] in
+                    self?.refreshBackgroundAudioKeepAlive()
+                    self?.refreshBackgroundLocationKeepAlive()
                 },
                 operation: { context in
                     switch await runOperation(context) {
@@ -7372,8 +7409,11 @@ final class AppModel {
         }
     }
 
-    private func cancelContinuedProcessing(identity: RunIdentity) {
-        continuedProcessingController.cancel(runID: identity.runID, identity: identity)
+    private func cancelContinuedProcessing(identity: RunIdentity) async {
+        await continuedProcessingController.cancel(
+            runID: identity.runID,
+            identity: identity
+        )
     }
 
     private func handleContinuedProcessingCancellation(
@@ -7382,12 +7422,19 @@ final class AppModel {
         reason: ContinuedProcessingCancellationReason
     ) async {
         guard reason == .systemExpiration else { return }
+        guard await state.proposeTerminalOutcome(.interrupted, for: identity) else { return }
         await runtimeTelemetryStore.recordBackgroundTimeout(
             identity: identity,
             source: .continuedProcessing
         )
-        guard await state.proposeTerminalOutcome(.interrupted, for: identity) else { return }
         await backgroundResumeCoordinator.markSystemExpiration(identity)
+        // A foreground transition is not guaranteed after iOS expires a
+        // continued-processing task. Ask the already-registered processing
+        // task for one best-effort local recovery opportunity; the scheduler
+        // still decides whether and when this request runs.
+#if os(iOS) && canImport(BackgroundTasks)
+        requestBackgroundRecovery()
+#endif
         let presentation = await state.snapshot()
         _ = await state.updateBackground(
             status: .interrupted,
@@ -7414,6 +7461,62 @@ final class AppModel {
         )
         await refreshHarnessTrace(for: identity)
 #endif
+    }
+
+    /// Continued Processing is foreground-submitted and cannot be endlessly
+    /// resubmitted from the background. If an actual audio/location background
+    /// mode is healthy, transition the same run onto that mode plus a fresh
+    /// finite UIKit lease instead of cancelling the Agent worker.
+    private func continueAfterContinuedProcessingExpiration(
+        identity: RunIdentity,
+        state: SessionRunState
+    ) async -> Bool {
+        guard appIsBackgrounded,
+              backgroundKeepAliveCoordinator.hasHealthyExtendedLease,
+              let snapshot = await sessionRunRegistry.snapshot(for: identity),
+              case let .running(status) = snapshot.presentation.backgroundRuntimeStatus,
+              await ensureFiniteBackgroundLease(for: identity) else {
+            return false
+        }
+
+        await runtimeTelemetryStore.recordBackgroundTimeout(
+            identity: identity,
+            source: .continuedProcessing
+        )
+        _ = await state.updateBackground(
+            status: .running(status),
+            submission: snapshot.presentation.continuedProcessingSubmission,
+            event: "continued_processing_expired_extended_lease",
+            for: identity
+        )
+
+        let layers = backgroundKeepAliveCoordinator.state.layers
+        try? await backgroundRunJournal.upsert(
+            BackgroundRunJournalEntry(
+                identity: identity,
+                phase: .running,
+                continuedProcessingRequestIdentifier: nil,
+                finiteBackgroundLeaseActive: legacyBackgroundTaskLease.hasSystemTask,
+                continuedProcessingActive: false,
+                audioKeepAliveActive: layers.contains(.extendedAudio),
+                locationKeepAliveActive: layers.contains(.extendedLocation),
+                liveActivityActive: backgroundPreferences.isLiveActivityEnabled
+            )
+        )
+        await traceStore.record(
+            HarnessTraceDraft(
+                kind: .backgroundTask,
+                sessionID: identity.sessionID,
+                runID: identity.runID,
+                name: "continued_processing/continued_with_extended_lease",
+                attributes: [
+                    "audio": .bool(layers.contains(.extendedAudio)),
+                    "location": .bool(layers.contains(.extendedLocation)),
+                    "finite_lease": .bool(legacyBackgroundTaskLease.hasSystemTask)
+                ]
+            )
+        )
+        return true
     }
 
     /// The registry's terminal owner invokes this exactly once after runtime
@@ -7571,6 +7674,9 @@ final class AppModel {
     private func auditBackgroundRunJournalOnLaunch() async {
         do {
             let audit = try await backgroundRunJournal.auditOnLaunch()
+            for identity in audit.interruptedIdentities {
+                await backgroundResumeCoordinator.markSystemExpiration(identity)
+            }
             guard audit.didCleanOrphans else { return }
             for identifier in audit.clearedRequestIdentifiers {
                 continuedProcessingController.cancelOrphanRequest(identifier: identifier)
@@ -7589,6 +7695,9 @@ final class AppModel {
     private func auditBackgroundRunJournalOnForeground() async {
         do {
             let audit = try await backgroundRunJournal.auditOnForeground()
+            for identity in audit.interruptedIdentities {
+                await backgroundResumeCoordinator.markSystemExpiration(identity)
+            }
             guard audit.didCleanOrphans else { return }
             for identifier in audit.clearedRequestIdentifiers {
                 continuedProcessingController.cancelOrphanRequest(identifier: identifier)
@@ -7610,6 +7719,62 @@ final class AppModel {
         legacyBackgroundTaskLease.release(token)
         Task { [sessionRunRegistry] in
             try? await sessionRunRegistry.removeBackgroundLease(token, from: identity)
+        }
+    }
+
+    private func acquireFiniteBackgroundLease(
+        for identity: RunIdentity
+    ) -> SessionRunBackgroundLeaseToken {
+        legacyBackgroundTaskLease.acquire(identity: identity) { [weak self] expiredIdentity in
+            guard let self else { return false }
+            let layers = self.backgroundKeepAliveCoordinator.state.layers
+            let shouldContinue = self.appIsBackgrounded
+                && self.backgroundKeepAliveCoordinator.hasHealthyExtendedLease
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.runtimeTelemetryStore.recordBackgroundTimeout(
+                    identity: expiredIdentity,
+                    source: .finiteBackgroundLease
+                )
+                if shouldContinue {
+                    await self.traceStore.record(
+                        HarnessTraceDraft(
+                            kind: .backgroundTask,
+                            sessionID: expiredIdentity.sessionID,
+                            runID: expiredIdentity.runID,
+                            name: "finite_background_lease/rearmed",
+                            attributes: [
+                                "audio": .bool(layers.contains(.extendedAudio)),
+                                "location": .bool(layers.contains(.extendedLocation))
+                            ]
+                        )
+                    )
+                    self.refreshBackgroundAudioKeepAlive()
+                    self.refreshBackgroundLocationKeepAlive()
+                } else {
+                    _ = try? await self.sessionRunRegistry.interrupt(expiredIdentity)
+                }
+            }
+            return shouldContinue
+        }
+    }
+
+    private func ensureFiniteBackgroundLease(for identity: RunIdentity) async -> Bool {
+        if finiteBackgroundLeaseTokens[identity] != nil {
+            return true
+        }
+        guard await sessionRunRegistry.snapshot(for: identity) != nil else { return false }
+
+        let token = acquireFiniteBackgroundLease(for: identity)
+        finiteBackgroundLeaseTokens[identity] = token
+        do {
+            try await sessionRunRegistry.addBackgroundLease(token, to: identity)
+            refreshBackgroundAudioKeepAlive()
+            refreshBackgroundLocationKeepAlive()
+            return true
+        } catch {
+            releaseFiniteBackgroundLease(token: token, for: identity)
+            return false
         }
     }
 
@@ -7647,6 +7812,34 @@ final class AppModel {
             }
         )
     }
+
+#if os(iOS) && canImport(BackgroundTasks)
+    private func requestBackgroundRecovery() {
+        guard scheduleBackgroundTasksRegistered else { return }
+        do {
+            // Recovery is a local wake-up opportunity. Requiring network here
+            // can prevent iOS from launching the bounded handler at all while
+            // connectivity is temporarily unavailable; the Agent's normal
+            // provider retry path handles the network once it is back.
+            try scheduleBackgroundController.submit(
+                earliestBeginDate: Date(timeIntervalSinceNow: 1),
+                requiresNetworkConnectivity: false
+            )
+            scheduleBackgroundEvent = "recovery_submitted"
+        } catch {
+            scheduleBackgroundEvent = "recovery_submit_failed"
+            Task { [traceStore] in
+                await traceStore.record(
+                    HarnessTraceDraft(
+                        kind: .backgroundTask,
+                        name: "background_recovery_submit_failed",
+                        error: error.localizedDescription
+                    )
+                )
+            }
+        }
+    }
+#endif
 
     private func deliverCompletionNotification(
         runID: UUID,
@@ -7701,9 +7894,8 @@ final class AppModel {
     private func handleScheduleBackgroundTask(_ task: BGProcessingTask) async {
         let claimOwner = "bg-\(UUID().uuidString.lowercased())"
         var didExpire = false
-        task.expirationHandler = { [weak self] in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
+        task.expirationHandler = {
+            Task { @MainActor in
                 didExpire = true
                 // Expiration must only release this task's schedule claim.
                 // The claimed record is requeued below after the bounded run
@@ -7712,8 +7904,17 @@ final class AppModel {
             }
         }
 
-        let due = await scheduleStore.claimDue(now: nil, limit: 1, owner: claimOwner)
         var succeeded = true
+        if await resumeInterruptedRunInBackgroundIfPossible() {
+            if let identity = selectedRunPresentation?.identity {
+                try? await sessionRunRegistry.awaitQuiescence(for: identity)
+            }
+            succeeded = !didExpire
+        }
+
+        let due = succeeded
+            ? await scheduleStore.claimDue(now: nil, limit: 1, owner: claimOwner)
+            : []
         for schedule in due {
             guard !Task.isCancelled else {
                 try? await scheduleStore.requeue(id: schedule.id, owner: claimOwner, reason: "task cancelled")
@@ -7784,6 +7985,26 @@ final class AppModel {
 
         await scheduleNextBackgroundTurn()
         task.setTaskCompleted(success: succeeded)
+    }
+
+    /// Continue one system-expired run inside the bounded BGProcessingTask
+    /// window. The run identity is claimed before starting so a foreground
+    /// monitor cannot launch a duplicate worker.
+    private func resumeInterruptedRunInBackgroundIfPossible() async -> Bool {
+        guard !isRunning,
+              let activeSessionID,
+              hasResumableRun,
+              let identity = await backgroundResumeCoordinator.pendingIdentity(
+                  sessionID: activeSessionID
+              ),
+              await backgroundResumeCoordinator.consumePending(identity) else {
+            return false
+        }
+        // BGProcessingTask already is the bounded background execution window.
+        // Do not submit another user-initiated continued-processing request
+        // while resuming the checkpointed run.
+        await resumePendingRunNow(useContinuedProcessing: false)
+        return true
     }
 #endif
 

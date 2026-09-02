@@ -63,6 +63,28 @@ final class ConversationMessageWindowTests: XCTestCase {
         XCTAssertEqual(window.totalCount, 2)
     }
 
+    func testMessageActionsRetryFromNearestDurableUserBoundary() {
+        let firstUser = AgentMessage.user("first")
+        let firstAssistant = AgentMessage.assistant("answer one")
+        let tool = AgentMessage.tool(callID: "call", content: "result")
+        let secondUser = AgentMessage.user("second")
+        let secondAssistant = AgentMessage.assistant("answer two")
+
+        let targets = ConversationMessageActionTargets.resolve([
+            firstUser,
+            firstAssistant,
+            tool,
+            secondUser,
+            secondAssistant
+        ]).retryUserMessageIDByMessageID
+
+        XCTAssertEqual(targets[firstUser.id], firstUser.id)
+        XCTAssertEqual(targets[firstAssistant.id], firstUser.id)
+        XCTAssertNil(targets[tool.id])
+        XCTAssertEqual(targets[secondUser.id], secondUser.id)
+        XCTAssertEqual(targets[secondAssistant.id], secondUser.id)
+    }
+
     func testLiveToolOutputReducerMergesChannelsAndPreservesOrder() {
         var output: [AgentToolOutputChunk] = []
 

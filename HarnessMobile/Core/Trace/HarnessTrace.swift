@@ -90,6 +90,7 @@ struct HarnessTraceTokenUsage: Codable, Sendable, Equatable {
     let totalTokens: Int
     let cachedPromptTokens: Int?
     let uncachedPromptTokens: Int?
+    let cacheWriteTokens: Int?
     let reasoningTokens: Int?
 
     init(_ usage: ModelTokenUsage) {
@@ -98,6 +99,7 @@ struct HarnessTraceTokenUsage: Codable, Sendable, Equatable {
         totalTokens = usage.totalTokens
         cachedPromptTokens = usage.cachedPromptTokens
         uncachedPromptTokens = usage.uncachedPromptTokens
+        cacheWriteTokens = usage.cacheWriteTokens
         reasoningTokens = usage.reasoningTokens
     }
 }

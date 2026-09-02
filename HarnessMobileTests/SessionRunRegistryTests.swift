@@ -335,6 +335,35 @@ final class SessionRunRegistryTests: XCTestCase {
         XCTAssertEqual(terminalRecord.terminalOutcomes, [.cancelled])
     }
 
+    func testInterruptPublishesSystemOutcomeBeforeCancellingRuntime() async throws {
+        let registry = SessionRunRegistry()
+        let recorder = SessionRunRegistryRecorder()
+        let identity = makeIdentity(generation: 4)
+        let registration = try await registry.register(identity: identity) {
+            SessionRunPreparedConfiguration(
+                trajectorySessionID: identity.sessionID,
+                cancellationHandler: { await recorder.recordCancellation() },
+                terminalCleanupHandler: { _, outcome, tokens in
+                    await recorder.recordTerminal(outcome: outcome, tokens: tokens)
+                }
+            )
+        }
+        let didBegin = await registration.handle.beginRunning(for: identity)
+        XCTAssertTrue(didBegin)
+
+        let didInterrupt = try await registry.interrupt(identity)
+        let proposedOutcome = await registration.state.terminalOutcomeProposal(for: identity)
+        let interruptedLookup = await registry.lookup(sessionID: identity.sessionID)
+        XCTAssertTrue(didInterrupt)
+        XCTAssertEqual(proposedOutcome, .interrupted)
+        XCTAssertEqual(interruptedLookup?.phase, .cancelling)
+
+        let outcome = await registration.handle.finish(.interrupted, for: identity)
+        let terminalRecord = await recorder.snapshot()
+        XCTAssertEqual(outcome, .interrupted)
+        XCTAssertEqual(terminalRecord.terminalOutcomes, [.interrupted])
+    }
+
     func testTerminalOwnerClaimsLeasesBeforeCleanupAndLeavesNoOrphan() async throws {
         let registry = SessionRunRegistry()
         let recorder = SessionRunRegistryRecorder()

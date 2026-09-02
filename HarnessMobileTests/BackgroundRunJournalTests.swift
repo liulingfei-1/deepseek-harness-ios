@@ -9,7 +9,7 @@ final class BackgroundRunJournalTests: XCTestCase {
                 beginSystemTask: { _ in nil },
                 endSystemTask: { _ in }
             )
-            let token = lease.acquire(identity: run, onExpiration: { _ in })
+            let token = lease.acquire(identity: run, onExpiration: { _ in false })
             XCTAssertEqual(lease.ownershipSnapshot[token], run)
             lease.release(token)
             XCTAssertTrue(lease.ownershipSnapshot.isEmpty)
@@ -59,6 +59,7 @@ final class BackgroundRunJournalTests: XCTestCase {
         )
         try await journal.upsert(entry)
         let first = try await journal.auditOnLaunch()
+        XCTAssertEqual(first.interruptedIdentities, [entry.identity])
         XCTAssertEqual(first.clearedRequestIdentifiers, ["com.test.orphan"])
         XCTAssertEqual(first.interruptedRunIDs, [entry.identity.runID])
         let second = try await journal.auditOnForeground()

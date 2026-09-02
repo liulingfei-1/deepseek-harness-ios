@@ -579,6 +579,18 @@ actor SessionRunRegistry {
         return accepted
     }
 
+    /// Signal an externally imposed interruption for one exact generation.
+    /// Commit the terminal proposal before task cancellation so an iOS
+    /// expiration cannot be durably misclassified as a user-requested stop.
+    @discardableResult
+    func interrupt(_ identity: RunIdentity) async throws -> Bool {
+        let entry = try requireExactEntry(identity)
+        _ = await entry.state.proposeTerminalOutcome(.interrupted, for: identity)
+        let accepted = await entry.handle.cancel()
+        _ = await refreshedSnapshot(for: entry)
+        return accepted
+    }
+
     /// Stop, drain, and remove one exact generation through its terminal owner.
     @discardableResult
     func dispose(_ identity: RunIdentity) async throws -> MobileAgentTerminalOutcome {

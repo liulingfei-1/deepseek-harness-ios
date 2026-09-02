@@ -47,6 +47,26 @@ extension AppModel {
         selectedRunPresentation = presentation
     }
 
+    func presentChatErrorForUITesting() {
+        isConfigured = true
+        messages = [
+            AgentMessage.user("继续完成当前任务"),
+            AgentMessage.assistant("当前进度已经保留在这个会话里。")
+        ]
+        errorMessage = "切换应用后连接中断，请重试上一条消息。"
+    }
+
+    func presentReasoningForUITesting() {
+        isConfigured = true
+        messages = [
+            AgentMessage.user("检查当前实现"),
+            AgentMessage.assistant(
+                "检查完成，没有修改模型原始推理内容。",
+                reasoning: "先核对入口，再检查状态与可见操作。"
+            )
+        ]
+    }
+
     func presentConcurrentSessionRunsForUITesting() async {
         guard let firstSessionID = activeSessionID else { return }
         let firstIdentity = await sessionRunRegistry.allocateIdentity(sessionID: firstSessionID)

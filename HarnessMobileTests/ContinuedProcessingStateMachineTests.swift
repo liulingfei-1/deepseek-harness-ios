@@ -141,6 +141,30 @@ final class ContinuedProcessingStateMachineTests: XCTestCase {
         XCTAssertEqual(machine.currentRun?.isSystemTaskCompleted, true)
     }
 
+    func testExpiredSystemTaskCanDetachWithoutCancellingRunningOperation() throws {
+        let fixture = try makeFixture()
+        let updated = try ContinuedProcessingStatus(
+            title: "Still running",
+            subtitle: "Using extended background lease",
+            completedUnitCount: 1,
+            totalUnitCount: 2
+        )
+        var machine = ContinuedProcessingStateMachine()
+        XCTAssertTrue(machine.begin(fixture.descriptor))
+        _ = machine.attachSystemTask(identifier: fixture.descriptor.requestIdentifier)
+
+        XCTAssertEqual(
+            machine.expireSystemTask(runID: fixture.descriptor.id),
+            [.completeSystemTask(success: false)]
+        )
+        XCTAssertEqual(machine.currentRun?.phase, .running)
+        XCTAssertEqual(machine.currentRun?.isSystemTaskCompleted, true)
+        XCTAssertEqual(machine.report(runID: fixture.descriptor.id, status: updated), [])
+        XCTAssertEqual(machine.expireSystemTask(runID: fixture.descriptor.id), [])
+        XCTAssertEqual(machine.finish(runID: fixture.descriptor.id, success: true), [])
+        XCTAssertEqual(machine.currentRun?.phase, .finished(success: true))
+    }
+
     func testCancelInvokesCallbackAndCompletesAttachedTaskExactlyOnce() throws {
         let fixture = try makeFixture()
         var machine = ContinuedProcessingStateMachine()

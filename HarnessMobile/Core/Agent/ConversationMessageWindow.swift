@@ -33,6 +33,35 @@ struct ConversationMessageWindow: Sendable, Equatable {
     }
 }
 
+/// Resolves the durable user message that a visible chat row should rerun.
+/// User rows rerun themselves; assistant rows rerun the nearest preceding
+/// user turn. Tool rows intentionally have no direct rerun action because
+/// replay must restart at a user-authored boundary.
+struct ConversationMessageActionTargets: Sendable, Equatable {
+    let retryUserMessageIDByMessageID: [UUID: UUID]
+
+    static func resolve(_ messages: [AgentMessage]) -> Self {
+        var latestUserMessageID: UUID?
+        var retryTargets: [UUID: UUID] = [:]
+        retryTargets.reserveCapacity(messages.count)
+
+        for message in messages where message.isChatVisible {
+            switch message.role {
+            case .user:
+                latestUserMessageID = message.id
+                retryTargets[message.id] = message.id
+            case .assistant:
+                if let latestUserMessageID {
+                    retryTargets[message.id] = latestUserMessageID
+                }
+            case .tool:
+                break
+            }
+        }
+        return Self(retryUserMessageIDByMessageID: retryTargets)
+    }
+}
+
 private extension AgentToolEvent {
     func collectCallIDs(into result: inout Set<String>) {
         result.insert(callID)

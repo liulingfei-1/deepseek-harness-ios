@@ -57,6 +57,7 @@ final class BackgroundKeepAliveCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.state.layers.contains(.finiteBackgroundTask))
         XCTAssertTrue(coordinator.state.layers.contains(.continuedProcessing))
         XCTAssertTrue(coordinator.state.layers.contains(.extendedAudio))
+        XCTAssertTrue(coordinator.hasHealthyExtendedLease)
     }
 
     func testThermalAndLowPowerConstraintsArePublishedAsDegradedLayers() {
@@ -156,6 +157,7 @@ final class BackgroundKeepAliveCoordinatorTests: XCTestCase {
         coordinator.update(.idle)
         XCTAssertEqual(coordinator.state.layers, [.foreground])
         XCTAssertTrue(coordinator.state.degradedDetails.isEmpty)
+        XCTAssertFalse(coordinator.hasHealthyExtendedLease)
     }
 }
 

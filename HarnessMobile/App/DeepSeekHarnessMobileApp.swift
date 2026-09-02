@@ -74,6 +74,13 @@ struct DeepSeekHarnessMobileApp: App {
                         }
                     }
 #endif
+#if os(iOS) && canImport(BackgroundTasks)
+                    // The app delegate registers the launch-time callback before
+                    // SwiftUI creates AppModel. Attach the model-owned handler
+                    // here so queued recovery tasks can actually drain after a
+                    // cold launch or a system-expiration wake-up.
+                    model.registerBackgroundTasksIfNeeded()
+#endif
                     await model.bootstrap()
 #if DEBUG
                     if ProcessInfo.processInfo.arguments.contains("-present-plugin-market-for-ui-testing") {
@@ -90,6 +97,12 @@ struct DeepSeekHarnessMobileApp: App {
                     }
                     if ProcessInfo.processInfo.arguments.contains("-present-long-conversation-for-ui-testing") {
                         model.presentLongConversationForUITesting()
+                    }
+                    if ProcessInfo.processInfo.arguments.contains("-present-chat-error-for-ui-testing") {
+                        model.presentChatErrorForUITesting()
+                    }
+                    if ProcessInfo.processInfo.arguments.contains("-present-reasoning-for-ui-testing") {
+                        model.presentReasoningForUITesting()
                     }
                     if ProcessInfo.processInfo.arguments.contains("-present-concurrent-session-runs-for-ui-testing") {
                         await model.presentConcurrentSessionRunsForUITesting()

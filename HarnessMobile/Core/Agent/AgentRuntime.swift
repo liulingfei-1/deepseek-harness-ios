@@ -14,6 +14,33 @@ enum AgentRuntimeEvent: Sendable, Equatable {
     case usage(ModelTokenUsage)
 }
 
+enum AgentRuntimeCancellationReason: Sendable, Equatable {
+    case user
+    case systemExpiration
+
+    var sessionTurnEndReason: JSONValue {
+        switch self {
+        case .user:
+            return .object([
+                "kind": .string("aborted"),
+                "reason": .object(["kind": .string("user")])
+            ])
+        case .systemExpiration:
+            return .object([
+                "kind": .string("interrupted"),
+                "reason": .object(["kind": .string("system_expiration")])
+            ])
+        }
+    }
+
+    var traceStatus: String {
+        switch self {
+        case .user: "cancelled"
+        case .systemExpiration: "interrupted"
+        }
+    }
+}
+
 /// One model-visible context contribution projected into the live conversation
 /// chrome. The complete text remains local and is only shown when the user
 /// expands the row; `sourceLabel` is derived from the durable source envelope.
@@ -99,6 +126,7 @@ actor AgentRuntime {
     typealias SessionEventHandler = @Sendable (SessionEventDraft) async throws -> SessionEvent?
     typealias SessionEventSnapshotProvider = @Sendable () async throws -> [SessionEvent]
     typealias CheckpointHandler = @Sendable () async throws -> Void
+    typealias CancellationReasonProvider = @Sendable () async -> AgentRuntimeCancellationReason
 
     private let agentID: UUID
     private let runID: UUID
@@ -128,6 +156,7 @@ actor AgentRuntime {
     private let sessionEventHandler: SessionEventHandler
     private let sessionEventSnapshotProvider: SessionEventSnapshotProvider?
     private let checkpointHandler: CheckpointHandler
+    private let cancellationReasonProvider: CancellationReasonProvider
     private var openSessionTurn: Int?
     private var openSessionStep: SessionStepData?
     private var promptContributionFingerprints: [String: String] = [:]
@@ -161,7 +190,8 @@ actor AgentRuntime {
         traceHandler: @escaping TraceHandler = { _ in },
         sessionEventHandler: @escaping SessionEventHandler = { _ in nil },
         sessionEventSnapshotProvider: SessionEventSnapshotProvider? = nil,
-        checkpointHandler: @escaping CheckpointHandler = {}
+        checkpointHandler: @escaping CheckpointHandler = {},
+        cancellationReasonProvider: @escaping CancellationReasonProvider = { .user }
     ) {
         self.agentID = agentID ?? runID
         self.runID = runID
@@ -191,6 +221,7 @@ actor AgentRuntime {
         self.sessionEventHandler = sessionEventHandler
         self.sessionEventSnapshotProvider = sessionEventSnapshotProvider
         self.checkpointHandler = checkpointHandler
+        self.cancellationReasonProvider = cancellationReasonProvider
     }
 
     func run(
@@ -248,13 +279,9 @@ actor AgentRuntime {
             await finishTrace(status: "succeeded", startedAt: startedAt)
             await publishAgentStopped()
         } catch is CancellationError {
-            await closeOpenSessionEvents(
-                reason: .object([
-                    "kind": .string("aborted"),
-                    "reason": .object(["kind": .string("user")])
-                ])
-            )
-            await finishTrace(status: "cancelled", startedAt: startedAt)
+            let cancellationReason = await cancellationReasonProvider()
+            await closeOpenSessionEvents(reason: cancellationReason.sessionTurnEndReason)
+            await finishTrace(status: cancellationReason.traceStatus, startedAt: startedAt)
             await publishAgentStopped()
             throw CancellationError()
         } catch {
@@ -3948,6 +3975,7 @@ actor AgentRuntime {
             ),
             outputTokens: max(0, usage.completionTokens),
             cacheReadTokens: usage.cachedPromptTokens.map { max(0, $0) },
+            cacheWriteTokens: usage.cacheWriteTokens.map { max(0, $0) },
             reasoningTokens: usage.reasoningTokens.map { max(0, $0) }
         )
     }

@@ -28,6 +28,17 @@ actor SessionBackgroundResumeCoordinator {
         pendingBySession[sessionID]
     }
 
+    /// Claims a pending expiration for a system-scheduled recovery attempt.
+    /// Foreground monitors use the same claim, so a run can only be resumed
+    /// once even when a scene activation and a BGProcessingTask race.
+    @discardableResult
+    func consumePending(_ identity: RunIdentity) -> Bool {
+        guard pendingBySession[identity.sessionID] == identity else { return false }
+        pendingBySession.removeValue(forKey: identity.sessionID)
+        monitorTasks.removeValue(forKey: identity.sessionID)?.cancel()
+        return true
+    }
+
     @discardableResult
     func startMonitor(
         for identity: RunIdentity,

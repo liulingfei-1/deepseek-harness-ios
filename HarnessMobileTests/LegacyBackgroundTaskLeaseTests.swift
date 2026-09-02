@@ -25,8 +25,8 @@ final class LegacyBackgroundTaskLeaseTests: XCTestCase {
         let first = RunIdentity(sessionID: UUID(), runID: UUID(), generation: 1)
         let second = RunIdentity(sessionID: UUID(), runID: UUID(), generation: 1)
 
-        let firstToken = lease.acquire(identity: first) { _ in }
-        let secondToken = lease.acquire(identity: second) { _ in }
+        let firstToken = lease.acquire(identity: first) { _ in false }
+        let secondToken = lease.acquire(identity: second) { _ in false }
         XCTAssertEqual(beginCount, 1)
         XCTAssertEqual(lease.activeTokenCount, 2)
         XCTAssertTrue(lease.hasSystemTask)
@@ -46,21 +46,29 @@ final class LegacyBackgroundTaskLeaseTests: XCTestCase {
     func testExpirationCallsOnlyExactOwnersAndLeavesTokensForCleanup() async {
         var expiration: (() -> Void)?
         var expired: [RunIdentity] = []
+        var ended: [UInt64] = []
         let lease = LegacyBackgroundTaskLease(
             beginSystemTask: { callback in
                 expiration = callback
                 return 7
             },
-            endSystemTask: { _ in XCTFail("expired system task must not be ended twice") }
+            endSystemTask: { ended.append($0) }
         )
         let first = RunIdentity(sessionID: UUID(), runID: UUID(), generation: 1)
         let second = RunIdentity(sessionID: UUID(), runID: UUID(), generation: 2)
-        let firstToken = lease.acquire(identity: first) { expired.append($0) }
-        let secondToken = lease.acquire(identity: second) { expired.append($0) }
+        let firstToken = lease.acquire(identity: first) {
+            expired.append($0)
+            return false
+        }
+        let secondToken = lease.acquire(identity: second) {
+            expired.append($0)
+            return false
+        }
 
         expiration?()
         await Task.yield()
         XCTAssertEqual(Set(expired), Set([first, second]))
+        XCTAssertEqual(ended, [7])
         XCTAssertEqual(lease.activeTokenCount, 2)
         XCTAssertFalse(lease.hasSystemTask)
 
@@ -77,13 +85,48 @@ final class LegacyBackgroundTaskLeaseTests: XCTestCase {
         )
         let first = RunIdentity(sessionID: UUID(), runID: UUID(), generation: 1)
         let second = RunIdentity(sessionID: UUID(), runID: UUID(), generation: 1)
-        _ = lease.acquire(identity: first) { _ in }
-        let secondToken = lease.acquire(identity: second) { _ in }
+        _ = lease.acquire(identity: first) { _ in false }
+        let secondToken = lease.acquire(identity: second) { _ in false }
 
         lease.releaseAll(for: first)
         XCTAssertEqual(lease.activeTokenCount, 1)
         XCTAssertEqual(endCount, 0)
         lease.release(secondToken)
         XCTAssertEqual(endCount, 1)
+    }
+
+    func testExpirationRearmsFiniteLeaseWhenExtendedModeOwnsSurvival() async {
+        var nextID: UInt64 = 70
+        var expirations: [() -> Void] = []
+        var callbacks = 0
+        var ended: [UInt64] = []
+        let lease = LegacyBackgroundTaskLease(
+            beginSystemTask: { callback in
+                expirations.append(callback)
+                defer { nextID += 1 }
+                return nextID
+            },
+            endSystemTask: { ended.append($0) }
+        )
+        let identity = RunIdentity(sessionID: UUID(), runID: UUID(), generation: 1)
+        let token = lease.acquire(identity: identity) { received in
+            XCTAssertEqual(received, identity)
+            callbacks += 1
+            return true
+        }
+
+        XCTAssertEqual(expirations.count, 1)
+        expirations[0]()
+        await Task.yield()
+
+        XCTAssertEqual(callbacks, 1)
+        XCTAssertEqual(expirations.count, 2)
+        XCTAssertEqual(ended, [70])
+        XCTAssertTrue(lease.hasSystemTask)
+        XCTAssertEqual(lease.activeTokenCount, 1)
+
+        lease.release(token)
+        XCTAssertEqual(ended, [70, 71])
+        XCTAssertFalse(lease.hasSystemTask)
     }
 }

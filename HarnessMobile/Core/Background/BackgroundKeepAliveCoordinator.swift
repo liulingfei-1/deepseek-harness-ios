@@ -54,6 +54,14 @@ final class BackgroundKeepAliveCoordinator {
         location.snapshot
     }
 
+    /// Only real, currently running long-lived modes qualify. A saved toggle,
+    /// pending retry, finite task, or Continued Processing request alone does
+    /// not prove that the process can survive after an OS task expires.
+    var hasHealthyExtendedLease: Bool {
+        state.layers.contains(.extendedAudio)
+            || state.layers.contains(.extendedLocation)
+    }
+
     func requestLocationAuthorizationIfEnabled() {
         location.requestAlwaysAuthorizationIfEnabled()
     }

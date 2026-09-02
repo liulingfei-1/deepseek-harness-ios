@@ -3147,6 +3147,64 @@ final class AgentRuntimeTests: XCTestCase {
         )
     }
 
+    func testSystemExpirationClosesTurnAsInterruptedInsteadOfUserAbort() async throws {
+        let script = ModelScript(turns: [[
+            .toolCallDelta(
+                index: 0,
+                id: "expired-call",
+                type: "function",
+                name: "approved_echo",
+                arguments: "{\"value\":\"hello\"}"
+            ),
+            .finish(.toolCalls)
+        ]])
+        let gate = ApprovalGate()
+        let sessionEvents = SessionEventRecorder()
+        let runtime = AgentRuntime(
+            client: ScriptedModelClient(script: script),
+            registry: LocalToolRegistry(tools: [ApprovalEchoTool()]),
+            approvalHandler: { _ in
+                await gate.markStarted()
+                do {
+                    try await Task.sleep(for: .seconds(30))
+                    return true
+                } catch {
+                    return false
+                }
+            },
+            eventHandler: { _ in },
+            sessionEventHandler: { draft in
+                try await sessionEvents.append(draft)
+            },
+            cancellationReasonProvider: { .systemExpiration }
+        )
+
+        let task = Task {
+            try await runtime.run(
+                history: [.user("background")],
+                configuration: AgentConfiguration(),
+                apiKey: "test-only"
+            )
+        }
+        await gate.waitUntilStarted()
+        task.cancel()
+        do {
+            try await task.value
+            XCTFail("Interrupted run should throw cancellation")
+        } catch is CancellationError {
+            // Expected; the durable reason distinguishes system expiration.
+        }
+
+        let events = await sessionEvents.events
+        XCTAssertEqual(
+            events.last?.turnEndData?.reason,
+            .object([
+                "kind": .string("interrupted"),
+                "reason": .object(["kind": .string("system_expiration")])
+            ])
+        )
+    }
+
     func testTextOnlyLengthFinishPersistsIncompleteAssistantMessage() async throws {
         let script = ModelScript(turns: [[
             .text("partial response"),

@@ -79,6 +79,9 @@ struct BackgroundRunJournalEntry: Codable, Sendable, Equatable, Identifiable {
 }
 
 struct BackgroundRunJournalAudit: Sendable, Equatable {
+    /// Full identities are needed to re-arm recovery after a cold launch.
+    /// Keep the legacy run-ID projection for diagnostics and compatibility.
+    let interruptedIdentities: [RunIdentity]
     let interruptedRunIDs: [UUID]
     let clearedRequestIdentifiers: [String]
 
@@ -165,7 +168,7 @@ actor BackgroundRunJournal {
 
     private func audit(now: Date) throws -> BackgroundRunJournalAudit {
         try ensureLoaded()
-        var interrupted: [UUID] = []
+        var interrupted: [RunIdentity] = []
         var cleared: [String] = []
         for (identity, entry) in entries {
             guard !entry.phase.isTerminal else { continue }
@@ -173,17 +176,21 @@ actor BackgroundRunJournal {
                 cleared.append(request)
             }
             entries[identity] = entry.terminalized(phase: .interrupted, now: now)
-            interrupted.append(identity.runID)
+            interrupted.append(identity)
         }
         guard !interrupted.isEmpty else {
             return BackgroundRunJournalAudit(
+                interruptedIdentities: [],
                 interruptedRunIDs: [],
                 clearedRequestIdentifiers: []
             )
         }
         try persist()
         return BackgroundRunJournalAudit(
-            interruptedRunIDs: interrupted.sorted { $0.uuidString < $1.uuidString },
+            interruptedIdentities: interrupted.sorted { $0.runID.uuidString < $1.runID.uuidString },
+            interruptedRunIDs: interrupted
+                .map(\.runID)
+                .sorted { $0.uuidString < $1.uuidString },
             clearedRequestIdentifiers: cleared.sorted()
         )
     }

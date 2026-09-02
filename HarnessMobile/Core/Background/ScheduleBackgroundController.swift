@@ -47,9 +47,12 @@ final class ScheduleBackgroundController {
         return true
     }
 
-    func submit(earliestBeginDate: Date?) throws {
+    func submit(
+        earliestBeginDate: Date?,
+        requiresNetworkConnectivity: Bool = true
+    ) throws {
         let request = BGProcessingTaskRequest(identifier: Self.identifier)
-        request.requiresNetworkConnectivity = true
+        request.requiresNetworkConnectivity = requiresNetworkConnectivity
         request.requiresExternalPower = false
         request.earliestBeginDate = earliestBeginDate
         try BGTaskScheduler.shared.submit(request)
