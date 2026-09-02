@@ -102,13 +102,33 @@ final class BackgroundAudioKeepAliveTests: XCTestCase {
             observeNotifications: false
         )
         keepAlive.update(isBackgrounded: true, requested: true)
-        try await Task.sleep(nanoseconds: 60_000_000)
+        // Each start attempt touches the real AVAudioSession, which on the
+        // simulator can block the main actor for well over the 10ms retry
+        // delay, so a fixed sleep under-waits and flaked. Poll instead.
+        try await pollUntil(timeoutNanoseconds: 5_000_000_000) {
+            factory.engines.count >= 3
+        }
         XCTAssertEqual(factory.engines.count, 3)
         XCTAssertEqual(keepAlive.snapshot.phase, .degraded)
         XCTAssertEqual(keepAlive.snapshot.attempt, 3)
 
         keepAlive.update(isBackgrounded: false, requested: false)
         XCTAssertEqual(keepAlive.snapshot.phase, .idle)
+    }
+
+    /// Polls a condition on the main actor until it holds or the wall-clock
+    /// budget is spent.
+    @MainActor
+    private func pollUntil(
+        timeoutNanoseconds: UInt64,
+        condition: @escaping () -> Bool
+    ) async throws {
+        let deadline = ContinuousClock.now + .nanoseconds(Int64(timeoutNanoseconds))
+        while ContinuousClock.now < deadline {
+            if condition() { return }
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTFail("condition not met within timeout")
     }
 
     func testNewBackgroundGenerationGetsFreshRetryBudgetAfterDegradation() async throws {
