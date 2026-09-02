@@ -5,6 +5,10 @@ import UIKit
 struct NativeMarkdownText: View {
     let source: String
     let documentID: String
+    /// Height caching amortizes streaming chat lists; one-shot surfaces
+    /// (sheets) should disable it because present-animation frames get
+    /// captured as inflated minimum heights.
+    var measuresBlocks = true
 
     private let shortDocumentBlocks: [NativeMarkdownBlockItem]
     private let requiresSegmentation: Bool
@@ -12,9 +16,10 @@ struct NativeMarkdownText: View {
     @State private var measuredWidth: CGFloat = 0
     @State private var segments: [NativeMarkdownSegmentItem]?
 
-    init(source: String, documentID: String = "markdown-document") {
+    init(source: String, documentID: String = "markdown-document", measuresBlocks: Bool = true) {
         self.source = source
         self.documentID = documentID
+        self.measuresBlocks = measuresBlocks
         let requiresSegmentation = NativeMarkdownSegmentation.requiresSegmentation(source)
         self.requiresSegmentation = requiresSegmentation
         segmentationTaskID = "\(documentID):\(source.utf8.count)"
@@ -82,7 +87,8 @@ struct NativeMarkdownText: View {
                         NativeMarkdownBlockView(
                             item: item,
                             documentID: documentID,
-                            availableWidth: measuredWidth
+                            availableWidth: measuredWidth,
+                            measuresBlocks: measuresBlocks
                         )
                     }
                 }
@@ -204,15 +210,20 @@ private struct NativeMarkdownBlockView: View {
     let item: NativeMarkdownBlockItem
     let documentID: String
     let availableWidth: CGFloat
+    var measuresBlocks = true
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        ConversationMeasuredBlock(
-            itemID: item.id,
-            kind: item.block.presentationKind,
-            content: item.block.presentationCacheSource
-        ) {
+        if measuresBlocks {
+            ConversationMeasuredBlock(
+                itemID: item.id,
+                kind: item.block.presentationKind,
+                content: item.block.presentationCacheSource
+            ) {
+                blockContent
+            }
+        } else {
             blockContent
         }
     }

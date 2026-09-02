@@ -348,6 +348,7 @@ private struct GenericUserQuestionSheet: View {
 private struct PlanReviewSheet: View {
     @Environment(AppModel.self) private var model
     let review: PlanReviewPresentation
+    @State private var documentID = "plan-review-\(UUID().uuidString)"
 
     var body: some View {
         NavigationStack {
@@ -363,10 +364,16 @@ private struct PlanReviewSheet: View {
                 .background(HarnessTheme.surface)
 
                 ScrollView {
-                    NativeMarkdownText(source: review.plan)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(20)
-                        .textSelection(.enabled)
+                    // Height caching captures present-animation frame sizes as
+                    // inflated minimums; the sheet renders once, so skip it.
+                    NativeMarkdownText(
+                        source: review.plan,
+                        documentID: documentID,
+                        measuresBlocks: false
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(20)
+                    .textSelection(.enabled)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 

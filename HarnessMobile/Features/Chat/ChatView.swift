@@ -942,7 +942,7 @@ private struct ConversationTimeline: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            if messages.isEmpty, streamingText.isEmpty {
+            if messages.isEmpty, streamingText.isEmpty, !isRunning {
                 Button(action: onStartInput) {
                     VStack(spacing: 12) {
                         HarnessIconTile(systemImage: "sparkles", tint: .secondary, size: 40)
@@ -1344,13 +1344,11 @@ private struct JobsPanelView: View {
         NavigationStack {
             Group {
                 if model.visibleJobs.isEmpty {
-                    List {
-                        Section {
-                            Label("暂无后台任务", systemImage: "checkmark.circle")
-                        } footer: {
-                            Text("后台工具和子 Agent 完成后会保留在这里。")
-                        }
-                    }
+                    ContentUnavailableView(
+                        "暂无后台任务",
+                        systemImage: "checkmark.circle",
+                        description: Text("后台工具和子 Agent 完成后会保留在这里。")
+                    )
                     .harnessCompactListChrome()
                 } else {
                     List {
