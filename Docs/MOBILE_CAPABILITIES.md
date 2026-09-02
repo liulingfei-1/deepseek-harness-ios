@@ -6,34 +6,36 @@ prompts. iOS still owns its
 privacy dialogs and may require visible interaction for every operation where
 the platform deliberately does not provide a permanent silent grant.
 
-The implementation reuses the pinned OpenMinis Native Offload layer where it
-already has a complete provider. The offloads execute in the embedded iSH
-process on the phone; they are not remote commands.
+The embedded iSH process is used only for Linux runtime capabilities such as
+shell, PTY, package installation, and local build tools. iOS capabilities are
+exposed through typed Swift providers; the former generic OpenMinis native
+offload bridge is not compiled or used as a fallback.
 
 ## General-purpose capabilities
 
 | Capability | iOS boundary | Agent surface | State |
 |---|---|---|---|
-| Camera and local OCR | Camera permission; visible camera UI | `camera_ocr`, `apple-vision` | Implemented |
+| Camera and local Vision | Camera permission; visible camera UI | `camera_ocr`, `vision_analyze` | Implemented; OCR/barcodes/classification/face rectangles |
 | Photo selection and workspace import | System Photos/File picker grants selected items | Chat composer, Workspace importer | Implemented |
-| Photo library query and changes | PhotoKit read/write or add-only permission | `ios_native` -> `apple-photos` | Integrated from OpenMinis |
-| Current location and geocoding | When-in-use location permission | `location_current`, `apple-location`, `apple-maps` | Implemented |
+| Photo library query and changes | PhotoKit read/write or add-only permission | `photo_library_list` | Metadata query implemented; mutation/export remains pending |
+| Current location and maps | When-in-use location permission; MapKit may use network | `location_current`, `maps_search`, `maps_route` | Implemented |
 | Motion activity | Motion & Fitness permission | `motion_activity` | Implemented |
-| Notifications | Notification authorization | `notification_schedule`, `apple-notification` | Implemented |
+| Notifications | Notification authorization | `notification_schedule` | Implemented |
 | Device owner authentication | Face ID, Touch ID, or device passcode UI per check | `secure_authenticate` | Implemented |
-| Microphone transcription | Microphone plus Speech Recognition permissions | `ios_native` -> `apple-speech` | Integrated from OpenMinis |
-| Text-to-speech | No privacy permission; active audio session | `ios_native` -> `apple-speak` | Integrated from OpenMinis |
-| Bluetooth LE | Bluetooth permission | `ios_native` -> `apple-bluetooth` | Integrated from OpenMinis |
+| Microphone transcription | Microphone plus Speech Recognition permissions | `speech_transcribe` | Foreground, bounded to 60 seconds |
+| Text-to-speech | No privacy permission; active audio session | `speech_synthesize` | Speak/stop/voice inventory implemented |
+| Bluetooth LE | Bluetooth permission | `bluetooth_scan` | Foreground bounded scan implemented; protocol-specific connect/read/write pending |
 | Contacts | Contacts permission, including limited access where available | `contacts_search` | Native typed provider |
-| Calendar | EventKit full or write-only access | `ios_native` -> `apple-calendar` | Integrated from OpenMinis |
-| Reminders | EventKit reminders access | `ios_native` -> `apple-reminders` | Integrated from OpenMinis |
-| Clipboard | iOS paste privacy can still present system UI | `ios_native` -> `apple-clipboard` | Integrated from OpenMinis |
-| Health data | HealthKit entitlement plus per-type read/write authorization | `ios_native` -> `apple-healthkit` | Entitlement-gated |
-| Smart home | HomeKit entitlement and home authorization | `ios_native` -> `apple-homekit` | Entitlement-gated |
-| NFC | NFC entitlement; every scan/write opens a visible NFC session | `ios_native` -> `apple-nfc` | Entitlement-gated |
-| Music library and playback | Media library permission | `ios_native` -> `apple-media` | Integrated from OpenMinis |
-| Device, battery, storage, thermal state | No privacy permission | `ios_native` -> `apple-device` | Integrated from OpenMinis |
-| On-device text analysis | No privacy permission | `ios_native` -> `apple-nlp` | Integrated from OpenMinis |
+| Calendar | EventKit full or write-only access | `calendar_events` | Native typed provider |
+| Reminders | EventKit reminders access | `reminders_list` | Native typed provider |
+| Clipboard | iOS paste privacy can still present system UI | `clipboard_read`, `clipboard_write` | Native typed provider |
+| Health data | HealthKit entitlement plus per-type authorization | `health_query` | Typed reads for steps, heart rate, HRV, weight, sleep and workouts |
+| Smart home | HomeKit entitlement and home authorization | None | Not integrated |
+| NFC | NFC entitlement; every scan/write opens a visible NFC session | None | Not integrated |
+| Music library and playback | Media library permission | `media_library_search`, `media_playback` | Search, now-playing and playback controls implemented |
+| Device, battery, storage, thermal state | No privacy permission | `device_status` | Native typed provider |
+| On-device text analysis | No privacy permission | `natural_language_analyze` | Language, tokenization, POS, entities and sentiment implemented |
+| System URL and App Deep Links | Foreground handoff controlled by iOS | `system_open` | Implemented |
 | Public or LAN HTTP(S) fetch | Native URLSession; LAN destinations may trigger Local Network privacy | `web_fetch` | Implemented |
 | Local Linux commands | App sandbox plus iSH guest policy | `shell_execute` | Implemented |
 | Siri, Spotlight, Shortcuts, Action Button | App Intents; no legacy Siri permission required | App Shortcuts | Implemented |

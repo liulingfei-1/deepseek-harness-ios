@@ -27,26 +27,26 @@ protocol DeviceCapabilityInventoryProviding: Sendable {
     func inventory() async -> DeviceCapabilityInventory
 }
 
-/// The catalog is intentionally data-only.  Adding a new native offload or a
-/// new Apple entitlement therefore has one obvious place to document its
-/// user-visible boundary, even when the implementation is supplied by an
-/// upstream OpenMinis bridge.
+/// The catalog is intentionally data-only. Adding a new typed native provider
+/// or Apple entitlement therefore has one obvious place to document its
+/// user-visible boundary. Every listed tool is a signed Swift provider in this
+/// build; unavailable capabilities stay explicit instead of using a bridge.
 enum DeviceCapabilityCatalog {
     static let records: [DeviceCapabilityRecord] = [
         permission(
-            "camera", "相机", tools: ["camera_ocr", "apple-vision"],
+            "camera", "相机", tools: ["camera_ocr"],
             interaction: true, notes: "首次使用由 iOS 显示相机授权；相机画面不会静默后台采集。"
         ),
         permission(
-            "microphone", "麦克风", tools: ["apple-speech"],
-            interaction: true, notes: "录音只在主动语音操作期间进行。"
+            "microphone", "麦克风", tools: ["speech_transcribe"],
+            interaction: true, notes: "仅在前台有界语音识别期间录音，不进行后台监听。"
         ),
         permission(
-            "speech", "语音识别", tools: ["apple-speech"],
-            interaction: true, notes: "识别结果会作为工具结果发送给模型。"
+            "speech", "语音识别", tools: ["speech_transcribe"],
+            interaction: true, notes: "使用 Apple Speech 进行最长 60 秒的前台转写，可要求设备端识别。"
         ),
         permission(
-            "location", "定位", tools: ["location_current", "apple-location", "apple-maps"],
+            "location", "定位", tools: ["location_current"],
             interaction: true, notes: "当前实现只请求使用期间定位；不用于保活或假定位。"
         ),
         permission(
@@ -54,50 +54,50 @@ enum DeviceCapabilityCatalog {
             interaction: true, notes: "读取有界时间窗口的活动估计。"
         ),
         permission(
-            "notifications", "通知", tools: ["notification_schedule", "apple-notification"],
+            "notifications", "通知", tools: ["notification_schedule"],
             interaction: true, notes: "本地通知由手机调度，不依赖推送服务器。"
         ),
         permission(
-            "bluetooth", "蓝牙 LE", tools: ["apple-bluetooth"],
-            interaction: true, notes: "可扫描、连接和读写已发现的 BLE 特征。"
+            "bluetooth", "蓝牙 LE", tools: ["bluetooth_scan"],
+            interaction: true, notes: "当前提供最长 20 秒的前台 BLE 扫描；连接和特征读写仍需按设备协议新增 typed provider。"
         ),
         permission(
             "contacts", "联系人", tools: ["contacts_search"],
             interaction: true, notes: "当前工具只读有限的姓名、电话和邮箱。"
         ),
         permission(
-            "photos", "照片图库", tools: ["camera_ocr", "apple-photos", "apple-vision"],
-            interaction: true, notes: "选择器和有限图库访问仍由 iOS 控制。"
+            "photos", "照片图库", tools: ["photo_library_list"],
+            interaction: true, notes: "可查询系统授予范围内的有限照片/视频元数据；聊天附件选择器继续负责显式导入。"
         ),
         permission(
-            "calendar", "日历", tools: ["apple-calendar"],
+            "calendar", "日历", tools: ["calendar_events"],
             interaction: true, notes: "iOS 17.4+ 可能区分完整访问和仅写入。"
         ),
         permission(
-            "reminders", "提醒事项", tools: ["apple-reminders"],
+            "reminders", "提醒事项", tools: ["reminders_list"],
             interaction: true, notes: "提醒事项授权由 EventKit 管理。"
         ),
         permission(
-            "mediaLibrary", "媒体资料库", tools: ["apple-media"],
+            "mediaLibrary", "媒体资料库", tools: ["media_library_search", "media_playback"],
             interaction: true, notes: "访问本机音乐资料库，不代表可以读取第三方服务的私有数据。"
         ),
         permission(
-            "healthKit", "HealthKit", tools: ["apple-healthkit"],
+            "healthKit", "HealthKit", tools: ["health_query"],
             interaction: true, entitlement: "com.apple.developer.healthkit",
-            notes: "需要签名 entitlement，并且每种健康数据类型分别授权。"
+            notes: "当前签名包含 HealthKit；步数、心率、HRV、体重、睡眠和锻炼仍由每种数据类型分别授权。"
         ),
         permission(
-            "homeKit", "HomeKit", tools: ["apple-homekit"],
+            "homeKit", "HomeKit", status: "notIntegrated", tools: [],
             interaction: true, entitlement: "com.apple.developer.homekit",
             notes: "需要 HomeKit entitlement 和家庭访问授权。"
         ),
         permission(
-            "nfc", "NFC", tools: ["apple-nfc"],
+            "nfc", "NFC", status: "notIntegrated", tools: [],
             interaction: true, entitlement: "com.apple.developer.nfc.readersession.formats",
             notes: "每次扫描都会开启可见的 NFC 系统会话，不能永久静默授权。"
         ),
         staticRecord(
-            "clipboard", "剪贴板", status: "session_only", tools: ["apple-clipboard"],
+            "clipboard", "剪贴板", status: "session_only", tools: ["clipboard_read", "clipboard_write"],
             interaction: true, notes: "读取其他 App 写入的内容可能触发 iOS 粘贴隐私提示。"
         ),
         staticRecord(
@@ -105,27 +105,27 @@ enum DeviceCapabilityCatalog {
             interaction: true, notes: "Face ID/Touch ID/密码界面由系统控制；生物特征不会返回给模型。"
         ),
         staticRecord(
-            "device_status", "设备状态", status: "available", tools: ["ios_native:apple-device", "device_time"],
+            "device_status", "设备状态", status: "available", tools: ["device_status", "device_time"],
             interaction: false, notes: "电量、存储、热状态和时间等不需要隐私授权。"
         ),
         staticRecord(
-            "vision", "Vision 本机视觉", status: "available", tools: ["camera_ocr", "ios_native:apple-vision"],
-            interaction: false, notes: "OCR、条码、分类和图像分析在手机本机执行。"
+            "vision", "Vision 本机视觉", status: "available", tools: ["camera_ocr", "vision_analyze"],
+            interaction: false, notes: "OCR、条码、分类和人脸矩形分析在手机本机执行。"
         ),
         staticRecord(
-            "natural_language", "NaturalLanguage 本机文本分析", status: "available", tools: ["ios_native:apple-nlp"],
+            "natural_language", "NaturalLanguage 本机文本分析", status: "available", tools: ["natural_language_analyze"],
             interaction: false, notes: "分词、语言识别、情感和实体分析不上传到模型服务。"
         ),
         staticRecord(
-            "text_to_speech", "系统朗读", status: "available", tools: ["ios_native:apple-speak"],
+            "text_to_speech", "系统朗读", status: "available", tools: ["speech_synthesize"],
             interaction: false, notes: "通过本机 AVSpeechSynthesizer 输出，不需要麦克风权限。"
         ),
         staticRecord(
-            "maps", "地图和地理编码", status: "available", tools: ["ios_native:apple-maps"],
+            "maps", "地图和地理编码", status: "available", tools: ["maps_search", "maps_route"],
             interaction: false, notes: "地图查询仍受 MapKit 网络和定位状态影响。"
         ),
         staticRecord(
-            "system_deep_links", "系统设置和 App Deep Link", status: "available", tools: ["ios_native:apple-open"],
+            "system_deep_links", "系统设置和 App Deep Link", status: "available", tools: ["system_open"],
             interaction: true, notes: "可打开电话、短信、邮件、网页、设置和已注册的 App scheme；iOS 决定目标 App 是否存在。"
         ),
         staticRecord(
@@ -206,6 +206,7 @@ enum DeviceCapabilityCatalog {
     private static func permission(
         _ id: String,
         _ title: String,
+        status: String = "unknown",
         tools: [String],
         interaction: Bool,
         entitlement: String? = nil,
@@ -214,7 +215,7 @@ enum DeviceCapabilityCatalog {
         DeviceCapabilityRecord(
             id: id,
             title: title,
-            status: "unknown",
+            status: status,
             tools: tools,
             requiresSystemInteraction: interaction,
             entitlement: entitlement,
@@ -253,7 +254,8 @@ enum DeviceCapabilityInventoryBuilder {
             }
         )
         let records = DeviceCapabilityCatalog.records.map { record in
-            guard let status = statuses[record.id] else { return record }
+            guard record.status != "notIntegrated",
+                  let status = statuses[record.id] else { return record }
             return DeviceCapabilityRecord(
                 id: record.id,
                 title: record.title,

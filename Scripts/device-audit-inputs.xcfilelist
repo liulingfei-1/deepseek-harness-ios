@@ -129,8 +129,8 @@ $(SRCROOT)/HarnessMobile/Core/Tools/ISH/ISHGuestNetworkMonitor.swift
 $(SRCROOT)/HarnessMobile/Core/Tools/ISH/ISHSandboxCoordinator.swift
 $(SRCROOT)/HarnessMobile/Core/Tools/ISH/ISHTerminalProvider.swift
 $(SRCROOT)/HarnessMobile/Core/Tools/ISH/ISHShellTool.swift
-$(SRCROOT)/HarnessMobile/Core/Tools/ISH/IOSNativeOffloadTool.swift
 $(SRCROOT)/HarnessMobile/Core/Tools/ISH/PluginMarketplaceTool.swift
+$(SRCROOT)/HarnessMobile/Core/Tools/IOSCapabilityTools.swift
 $(SRCROOT)/HarnessMobile/Core/Tools/ScheduleTools.swift
 $(SRCROOT)/HarnessMobile/Core/Permissions/DevicePermissionCenter.swift
 $(SRCROOT)/HarnessMobile/Core/Tools/LocalAgentTool.swift
@@ -235,7 +235,6 @@ $(SRCROOT)/HarnessMobileTests/ISHPluginHostDynamicLifecycleCoordinatorTests.swif
 $(SRCROOT)/HarnessMobileTests/ISHPluginSettingsDraftTests.swift
 $(SRCROOT)/HarnessMobileTests/ISHSandboxCoordinatorTests.swift
 $(SRCROOT)/HarnessMobileTests/ISHTerminalProviderTests.swift
-$(SRCROOT)/HarnessMobileTests/IOSNativeOffloadToolTests.swift
 $(SRCROOT)/HarnessMobileTests/LiveModelAPIIntegrationTests.swift
 $(SRCROOT)/HarnessMobileTests/LSPToolTests.swift
 $(SRCROOT)/HarnessMobileTests/MCPClientTests.swift

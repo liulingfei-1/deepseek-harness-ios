@@ -113,7 +113,6 @@ bridge_abi_guard_patch="$component_dir/patches/0004-openminis-ish-abi-guard.patc
 task_start_patch="$component_dir/patches/0005-checked-task-start.patch"
 runtime_robustness_patch="$component_dir/patches/0006-ish-runtime-robustness.patch"
 persistent_process_patch="$component_dir/patches/0007-persistent-process-stdin.patch"
-native_offload_core_patch="$component_dir/patches/0008-native-offload-core-set.patch"
 
 verify_checkout() {
   local checkout="$1"
@@ -163,7 +162,6 @@ verify_gitlink "$openminis_checkout" "$openminis_commit" \
 [ -f "$task_start_patch" ] || fail "checked task-start patch is missing: $task_start_patch"
 [ -f "$runtime_robustness_patch" ] || fail "iSH runtime robustness patch is missing: $runtime_robustness_patch"
 [ -f "$persistent_process_patch" ] || fail "persistent process patch is missing: $persistent_process_patch"
-[ -f "$native_offload_core_patch" ] || fail "native offload core patch is missing: $native_offload_core_patch"
 
 developer_dir="${DEVELOPER_DIR:-$(/usr/bin/xcode-select -p)}"
 [ -d "$developer_dir" ] || fail "invalid DEVELOPER_DIR: $developer_dir"
@@ -318,9 +316,6 @@ log "added embedded iSH runtime robustness fixes"
 /usr/bin/patch -d "$openminis_source_dir" -p1 -C -s -i "$persistent_process_patch"
 /usr/bin/patch -d "$openminis_source_dir" -p1 -f -s -i "$persistent_process_patch"
 log "added independently piped persistent guest processes"
-/usr/bin/patch -d "$openminis_source_dir" -p1 -C -s -i "$native_offload_core_patch"
-/usr/bin/patch -d "$openminis_source_dir" -p1 -f -s -i "$native_offload_core_patch"
-log "enabled the device-native OpenMinis offload core set"
 
 render_cross_file() {
   local template="$1"
@@ -399,31 +394,11 @@ build_bridge_slice() {
   local target
   local build_dir="$work_root/bridge-$platform"
   local bridge_source="$openminis_source_dir/src/ios/iSH"
-  local native_offload_source="$openminis_source_dir/src/ios/NativeOffloads"
   local objects=()
   local sources=(
     "$bridge_source/CurrentRoot.m"
     "$bridge_source/ISHKernel.m"
     "$bridge_source/ISHShellExecutor.m"
-    "$native_offload_source/NativeOffloadUtils.m"
-    "$native_offload_source/DeviceOffload.m"
-    "$native_offload_source/ClipboardOffload.m"
-    "$native_offload_source/OpenOffload.m"
-    "$native_offload_source/VisionOffload.m"
-    "$native_offload_source/LocationOffload.m"
-    "$native_offload_source/MapsOffload.m"
-    "$native_offload_source/NLPOffload.m"
-    "$native_offload_source/SpeakOffload.m"
-    "$native_offload_source/NotificationOffload.m"
-    "$native_offload_source/BluetoothOffload.m"
-    "$native_offload_source/CalendarOffload.m"
-    "$native_offload_source/MediaOffload.m"
-    "$native_offload_source/PhotosOffload.m"
-    "$native_offload_source/RemindersOffload.m"
-    "$native_offload_source/SpeechOffload.m"
-    "$native_offload_source/HealthKitOffload.m"
-    "$native_offload_source/HomeKitOffload.m"
-    "$native_offload_source/NFCOffload.m"
   )
   local source
   local object
@@ -452,7 +427,6 @@ build_bridge_slice() {
       -I"$headers" \
       -I"$headers/ish" \
       -I"$bridge_source" \
-      -I"$native_offload_source" \
       -Wno-nullability-completeness \
       -c "$source" \
       -o "$object"
@@ -657,8 +631,10 @@ build_libraries() {
     || fail "network policy API is missing from the device library"
   grep -F '_OBJC_CLASS_$_ISHKernel' "$device_symbols" >/dev/null \
     || fail "OpenMinis ISHKernel bridge is missing from the device library"
+  # Keep the interpreter's internal offload primitives available for its
+  # optimized Linux execution path, but never link the product-specific
+  # Build the minimal iSH runtime slice used by the remaining shell and host paths.
   for symbol in \
-    _native_offload_add_handler \
     _device_offload_register \
     _clipboard_offload_register \
     _open_offload_register \
@@ -677,8 +653,9 @@ build_libraries() {
     _healthkit_offload_register \
     _homekit_offload_register \
     _nfc_offload_register; do
-    grep -F "$symbol" "$device_symbols" >/dev/null \
-      || fail "native offload symbol is missing from the device library: $symbol"
+    if grep -F "$symbol" "$device_symbols" >/dev/null; then
+      fail "legacy OpenMinis capability handler leaked into the device library: $symbol"
+    fi
   done
 
   rm -rf "$artifact_dir/HarnessISH.xcframework"
@@ -733,19 +710,23 @@ download_alpine() {
 build_rootfs() {
   local alpine_archive
   local rootfs_deps="$work_root/rootfs-deps"
+  local rootfs_tool_dir="$rootfs_deps/tool-bin"
   local rootfs_source
   local alpine_series="${alpine_version%.*}"
   alpine_archive="$(download_alpine)"
 
-  mkdir -p "$rootfs_deps/.cache"
+  mkdir -p "$rootfs_deps/.cache" "$rootfs_tool_dir"
   cp "$openminis_checkout/deps/prepare_alpine_rootfs.sh" "$rootfs_deps/"
   ln -s "$source_dir" "$rootfs_deps/ish"
+  # The pinned Meson release exposes meson.py rather than a `meson` basename,
+  # while the upstream rootfs helper discovers it through PATH.
+  ln -s "$meson" "$rootfs_tool_dir/meson"
   cp "$alpine_archive" "$rootfs_deps/.cache/$(basename "$alpine_archive")"
 
   log "creating Alpine fakefs with the pinned OpenMinis script"
   (
     cd "$rootfs_deps"
-    /bin/bash ./prepare_alpine_rootfs.sh "$alpine_series"
+    PATH="$rootfs_tool_dir:$PATH" /bin/bash ./prepare_alpine_rootfs.sh "$alpine_series"
   )
 
   rootfs_source="$rootfs_deps/resources/alpine-rootfs"

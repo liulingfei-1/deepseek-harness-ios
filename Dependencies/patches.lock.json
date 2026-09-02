@@ -42,12 +42,6 @@
       "sha256": "130722366fb24e60cfc03f050873f85162df6b38dc5fa6c9f6a64536d24d9902",
       "upstream": "openminis",
       "baseCommit": "9cf3a855fecd27bb5735b84cacbd56852a3ab8dd"
-    },
-    {
-      "path": "Vendor/OpenMinisISH/patches/0008-native-offload-core-set.patch",
-      "sha256": "eb5bad319b809e6eca739ac239ca8455a9d202f83689ea86d4439dbee3186c1d",
-      "upstream": "openminis",
-      "baseCommit": "9cf3a855fecd27bb5735b84cacbd56852a3ab8dd"
     }
   ]
 }

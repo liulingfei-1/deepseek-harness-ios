@@ -15,6 +15,26 @@ final class DeviceCapabilitiesToolTests: XCTestCase {
             DeviceCapabilityCatalog.records.first(where: { $0.id == "healthKit" })?.entitlement,
             "com.apple.developer.healthkit"
         )
+        XCTAssertEqual(
+            DeviceCapabilityCatalog.records.first(where: { $0.id == "speech" })?.tools,
+            ["speech_transcribe"]
+        )
+        XCTAssertEqual(
+            DeviceCapabilityCatalog.records.first(where: { $0.id == "photos" })?.tools,
+            ["photo_library_list"]
+        )
+        XCTAssertEqual(
+            DeviceCapabilityCatalog.records.first(where: { $0.id == "healthKit" })?.tools,
+            ["health_query"]
+        )
+        XCTAssertEqual(
+            DeviceCapabilityCatalog.records.first(where: { $0.id == "natural_language" })?.status,
+            "available"
+        )
+        XCTAssertEqual(
+            DeviceCapabilityCatalog.records.first(where: { $0.id == "maps" })?.tools,
+            ["maps_search", "maps_route"]
+        )
     }
 
     func testInventoryUsesLivePermissionStatusesAndSupportsFiltering() async throws {

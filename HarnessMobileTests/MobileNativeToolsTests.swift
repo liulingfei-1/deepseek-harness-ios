@@ -203,6 +203,29 @@ final class MobileNativeToolsTests: XCTestCase {
         }
     }
 
+    func testMigratedCapabilityCatalogIsTypedAndDoesNotExposeGenericBridge() {
+        XCTAssertEqual(IOSCapabilityToolKit.approvedNames.count, 12)
+        XCTAssertTrue(IOSCapabilityToolKit.approvedNames.contains("health_query"))
+        XCTAssertTrue(IOSCapabilityToolKit.approvedNames.contains("speech_transcribe"))
+        XCTAssertTrue(IOSCapabilityToolKit.approvedNames.contains("vision_analyze"))
+        XCTAssertFalse(IOSCapabilityToolKit.approvedNames.contains("ios_native"))
+    }
+
+    func testNaturalLanguageAnalyzeRunsLocallyAndUsesStrictSchema() async throws {
+        let tool = NaturalLanguageAnalyzeTool()
+        XCTAssertThrowsError(try tool.validate(arguments: ["text": .string("hello"), "extra": .bool(true)]))
+        XCTAssertThrowsError(try tool.validate(arguments: ["text": .string("hello"), "mode": .string("unknown")]))
+
+        let output = try decodeObject(try await tool.execute(arguments: [
+            "text": .string("Apple announced a great product in Cupertino."),
+            "mode": .string("analyze")
+        ]))
+        XCTAssertEqual(output["mode"], .string("analyze"))
+        XCTAssertNotNil(output["language"])
+        XCTAssertNotNil(output["tokens"])
+        XCTAssertNotNil(output["sentiment"])
+    }
+
     private func decodeObject(_ text: String) throws -> [String: JSONValue] {
         let data = try XCTUnwrap(text.data(using: .utf8))
         guard case let .object(object) = try JSONDecoder().decode(JSONValue.self, from: data) else {

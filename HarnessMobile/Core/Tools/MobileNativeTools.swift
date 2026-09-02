@@ -3,7 +3,9 @@ import Foundation
 #if os(iOS)
 import CoreLocation
 import CoreMotion
+import EventKit
 import LocalAuthentication
+import UIKit
 import UserNotifications
 #endif
 
@@ -67,25 +69,37 @@ protocol DeviceOwnerAuthenticating: Sendable {
 // MARK: - Tool catalog fragment
 
 enum MobileNativeToolKit {
-    static let approvedNames: Set<String> = [
+    private static let coreApprovedNames: Set<String> = [
+        "calendar_events",
+        "clipboard_read",
+        "clipboard_write",
         "contacts_search",
         "device_capabilities",
+        "device_status",
         "location_current",
         "motion_activity",
         "notification_schedule",
+        "reminders_list",
         "secure_authenticate"
     ]
+    static let approvedNames = coreApprovedNames.union(IOSCapabilityToolKit.approvedNames)
 
 #if os(iOS)
-    static func makeSystemTools() -> [any LocalAgentTool] {
-        [
+    static func makeSystemTools(workspaceStore: WorkspaceStore) -> [any LocalAgentTool] {
+        let coreTools: [any LocalAgentTool] = [
+            CalendarEventsTool(),
+            ClipboardReadTool(),
+            ClipboardWriteTool(),
             ContactsSearchTool(provider: SystemDeviceContactSearcher()),
             DeviceCapabilitiesTool(),
+            DeviceStatusTool(),
             LocationCurrentTool(provider: SystemDeviceLocationProvider()),
             MotionActivityTool(provider: SystemDeviceMotionActivityProvider()),
             NotificationScheduleTool(provider: SystemLocalNotificationScheduler()),
+            RemindersListTool(),
             SecureAuthenticateTool(provider: SystemDeviceOwnerAuthenticator())
         ]
+        return coreTools + IOSCapabilityToolKit.makeSystemTools(workspaceStore: workspaceStore)
     }
 #endif
 }
@@ -359,6 +373,275 @@ struct SecureAuthenticateTool: LocalAgentTool {
     }
 }
 
+struct ClipboardReadTool: LocalAgentTool {
+    let definition = ModelToolDefinition(
+        name: "clipboard_read",
+        description: "Read the current plain-text iPhone clipboard contents.",
+        parameters: .object([
+            "type": .string("object"),
+            "properties": .object([:]),
+            "additionalProperties": .bool(false)
+        ])
+    )
+    let risk: ToolRisk = .sensitiveRead
+
+    func validate(arguments: [String: JSONValue]) throws { try arguments.requireOnlyKeys([]) }
+    func summary(arguments: [String: JSONValue]) -> String { "读取本机剪贴板文本" }
+    func approvalResources(arguments: [String: JSONValue]) throws -> Set<String> {
+        try validate(arguments: arguments)
+        return ["clipboard:read"]
+    }
+
+    func execute(arguments: [String: JSONValue]) async throws -> String {
+        try validate(arguments: arguments)
+        #if os(iOS)
+        let value = await MainActor.run { UIPasteboard.general.string }
+        let text = Self.bounded(value ?? "", maximumBytes: 32 * 1_024)
+        return JSONValue.object([
+            "hasText": .bool(!text.isEmpty),
+            "text": .string(text),
+            "characterCount": .number(Double(text.count)),
+            "byteCount": .number(Double(text.utf8.count))
+        ]).displayText
+        #else
+        throw MobileNativeToolError.hardwareUnavailable("剪贴板")
+        #endif
+    }
+
+    private static func bounded(_ value: String, maximumBytes: Int) -> String {
+        var result = ""
+        result.reserveCapacity(min(value.count, maximumBytes))
+        for character in value {
+            let bytes = String(character).utf8.count
+            guard result.utf8.count + bytes <= maximumBytes else { break }
+            result.append(character)
+        }
+        return result
+    }
+}
+
+struct ClipboardWriteTool: LocalAgentTool {
+    let definition = ModelToolDefinition(
+        name: "clipboard_write",
+        description: "Write bounded plain text to the current iPhone clipboard.",
+        parameters: .object([
+            "type": .string("object"),
+            "properties": .object([
+                "text": .object([
+                    "type": .string("string"),
+                    "maxLength": .number(32 * 1_024)
+                ])
+            ]),
+            "required": .array([.string("text")]),
+            "additionalProperties": .bool(false)
+        ])
+    )
+    let risk: ToolRisk = .sideEffect
+
+    func validate(arguments: [String: JSONValue]) throws {
+        try arguments.requireOnlyKeys(["text"])
+        _ = try arguments.requiredString("text", maximumUTF8Bytes: 32 * 1_024, allowEmpty: true)
+    }
+    func summary(arguments: [String: JSONValue]) -> String {
+        let bytes = arguments["text"]?.stringValue?.utf8.count ?? 0
+        return "写入 \(bytes) 字节到本机剪贴板"
+    }
+    func approvalResources(arguments: [String: JSONValue]) throws -> Set<String> {
+        try validate(arguments: arguments)
+        return ["clipboard:write"]
+    }
+
+    func execute(arguments: [String: JSONValue]) async throws -> String {
+        try validate(arguments: arguments)
+        let text = try arguments.requiredString("text", maximumUTF8Bytes: 32 * 1_024, allowEmpty: true)
+        #if os(iOS)
+        await MainActor.run { UIPasteboard.general.string = text }
+        return JSONValue.object([
+            "written": .bool(true),
+            "characterCount": .number(Double(text.count)),
+            "byteCount": .number(Double(text.utf8.count))
+        ]).displayText
+        #else
+        throw MobileNativeToolError.hardwareUnavailable("剪贴板")
+        #endif
+    }
+}
+
+struct DeviceStatusTool: LocalAgentTool {
+    let definition = ModelToolDefinition(
+        name: "device_status",
+        description: "Return current iPhone system, battery, thermal, memory, and process status.",
+        parameters: .object([
+            "type": .string("object"),
+            "properties": .object([:]),
+            "additionalProperties": .bool(false)
+        ])
+    )
+    let risk: ToolRisk = .localState
+
+    func validate(arguments: [String: JSONValue]) throws { try arguments.requireOnlyKeys([]) }
+    func summary(arguments: [String: JSONValue]) -> String { "读取本机设备运行状态" }
+    func isConcurrencySafe(arguments: [String: JSONValue]) throws -> Bool {
+        try validate(arguments: arguments)
+        return true
+    }
+
+    func execute(arguments: [String: JSONValue]) async throws -> String {
+        try validate(arguments: arguments)
+        #if os(iOS)
+        return await MainActor.run {
+            let device = UIDevice.current
+            let process = ProcessInfo.processInfo
+            let batteryWasEnabled = device.isBatteryMonitoringEnabled
+            device.isBatteryMonitoringEnabled = true
+            let level = device.batteryLevel
+            let state: String
+            switch device.batteryState {
+            case .unplugged: state = "unplugged"
+            case .charging: state = "charging"
+            case .full: state = "full"
+            default: state = "unknown"
+            }
+            device.isBatteryMonitoringEnabled = batteryWasEnabled
+
+            var battery: [String: JSONValue] = ["state": .string(state)]
+            if level >= 0, level.isFinite {
+                battery["level"] = .number(Double(level))
+                battery["levelPercent"] = .number(Double((level * 100).rounded()))
+            }
+            return JSONValue.object([
+                "systemName": .string(device.systemName),
+                "systemVersion": .string(device.systemVersion),
+                "model": .string(device.model),
+                "localizedModel": .string(device.localizedModel),
+                "battery": .object(battery),
+                "lowPowerMode": .bool(process.isLowPowerModeEnabled),
+                "thermalState": .string(Self.thermalName(process.thermalState)),
+                "physicalMemoryBytes": .number(Double(process.physicalMemory)),
+                "processUptimeSeconds": .number(process.systemUptime)
+            ]).displayText
+        }
+        #else
+        throw MobileNativeToolError.hardwareUnavailable("设备状态")
+        #endif
+    }
+
+    #if os(iOS)
+    @MainActor private static func thermalName(_ state: ProcessInfo.ThermalState) -> String {
+        switch state {
+        case .nominal: return "nominal"
+        case .fair: return "fair"
+        case .serious: return "serious"
+        case .critical: return "critical"
+        @unknown default: return "unknown"
+        }
+    }
+    #endif
+}
+
+struct CalendarEventsTool: LocalAgentTool {
+    let definition = ModelToolDefinition(
+        name: "calendar_events",
+        description: "List calendar events in a bounded date range from the iPhone EventKit store.",
+        parameters: .object([
+            "type": .string("object"),
+            "properties": .object([
+                "start_date": .object(["type": .string("string"), "description": .string("ISO-8601 start date")]),
+                "end_date": .object(["type": .string("string"), "description": .string("ISO-8601 end date")]),
+                "limit": .object(["type": .string("integer"), "minimum": .number(1), "maximum": .number(100)])
+            ]),
+            "required": .array([.string("start_date"), .string("end_date")]),
+            "additionalProperties": .bool(false)
+        ])
+    )
+    let risk: ToolRisk = .sensitiveRead
+
+    func validate(arguments: [String: JSONValue]) throws {
+        try arguments.requireOnlyKeys(["start_date", "end_date", "limit"])
+        _ = try EventKitToolSupport.date(arguments, key: "start_date")
+        _ = try EventKitToolSupport.date(arguments, key: "end_date")
+        _ = try arguments.boundedInteger("limit", default: 50, range: 1...100)
+    }
+    func summary(arguments: [String: JSONValue]) -> String { "读取指定日期范围内的本机日历事件" }
+    func approvalResources(arguments: [String: JSONValue]) throws -> Set<String> {
+        try validate(arguments: arguments)
+        return ["calendar:read"]
+    }
+    func execute(arguments: [String: JSONValue]) async throws -> String {
+        try validate(arguments: arguments)
+        let start = try EventKitToolSupport.date(arguments, key: "start_date")
+        let end = try EventKitToolSupport.date(arguments, key: "end_date")
+        guard start <= end else { throw LocalToolError.invalidArguments }
+        let limit = try arguments.boundedInteger("limit", default: 50, range: 1...100)
+        #if os(iOS)
+        return try await EventKitReadBridge.events(start: start, end: end, limit: limit)
+        #else
+        throw MobileNativeToolError.hardwareUnavailable("日历")
+        #endif
+    }
+}
+
+struct RemindersListTool: LocalAgentTool {
+    let definition = ModelToolDefinition(
+        name: "reminders_list",
+        description: "List bounded iPhone reminders, optionally filtered by title.",
+        parameters: .object([
+            "type": .string("object"),
+            "properties": .object([
+                "query": .object(["type": .string("string"), "maxLength": .number(128)]),
+                "include_completed": .object(["type": .string("boolean")]),
+                "limit": .object(["type": .string("integer"), "minimum": .number(1), "maximum": .number(100)])
+            ]),
+            "additionalProperties": .bool(false)
+        ])
+    )
+    let risk: ToolRisk = .sensitiveRead
+
+    func validate(arguments: [String: JSONValue]) throws {
+        try arguments.requireOnlyKeys(["query", "include_completed", "limit"])
+        if let query = arguments["query"] {
+            guard let text = query.stringValue, text.utf8.count <= 128,
+                  !text.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
+                throw LocalToolError.invalidArguments
+            }
+        }
+        if let include = arguments["include_completed"] {
+            guard case .bool = include else { throw LocalToolError.invalidArguments }
+        }
+        _ = try arguments.boundedInteger("limit", default: 50, range: 1...100)
+    }
+    func summary(arguments: [String: JSONValue]) -> String { "读取本机提醒事项" }
+    func approvalResources(arguments: [String: JSONValue]) throws -> Set<String> {
+        try validate(arguments: arguments)
+        return ["reminders:read"]
+    }
+    func execute(arguments: [String: JSONValue]) async throws -> String {
+        try validate(arguments: arguments)
+        let query = arguments["query"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let includeCompleted: Bool
+        if case let .bool(value) = arguments["include_completed"] {
+            includeCompleted = value
+        } else {
+            includeCompleted = false
+        }
+        let limit = try arguments.boundedInteger("limit", default: 50, range: 1...100)
+        #if os(iOS)
+        return try await EventKitReadBridge.reminders(query: query, includeCompleted: includeCompleted, limit: limit)
+        #else
+        throw MobileNativeToolError.hardwareUnavailable("提醒事项")
+        #endif
+    }
+}
+
+private enum EventKitToolSupport {
+    static func date(_ arguments: [String: JSONValue], key: String) throws -> Date {
+        let value = try arguments.requiredString(key, maximumUTF8Bytes: 128)
+        let formatter = ISO8601DateFormatter()
+        guard let date = formatter.date(from: value) else { throw LocalToolError.invalidArguments }
+        return date
+    }
+}
+
 // MARK: - Typed failures
 
 enum MobileNativeToolError: LocalizedError, Sendable, Equatable {
@@ -455,6 +738,136 @@ private extension Dictionary where Key == String, Value == JSONValue {
 }
 
 #if os(iOS)
+@MainActor
+private final class EventKitReadBridge {
+    private struct ReminderSnapshot: Sendable {
+        let identifier: String
+        let title: String
+        let completed: Bool
+        let list: String
+        let dueDate: Date?
+    }
+
+    static func events(start: Date, end: Date, limit: Int) async throws -> String {
+        let store = EKEventStore()
+        try await requestEventsAccess(store)
+        let predicate = store.predicateForEvents(withStart: start, end: end, calendars: nil)
+        let values = store.events(matching: predicate)
+            .sorted { $0.startDate < $1.startDate }
+            .prefix(limit)
+            .map { event in
+                JSONValue.object([
+                    "identifier": .string(Self.bounded(event.eventIdentifier ?? "", maximumBytes: 256)),
+                    "title": .string(Self.bounded(event.title ?? "", maximumBytes: 512)),
+                    "startDate": .string(Self.iso8601(event.startDate)),
+                    "endDate": .string(Self.iso8601(event.endDate)),
+                    "allDay": .bool(event.isAllDay),
+                    "location": .string(Self.bounded(event.location ?? "", maximumBytes: 512)),
+                    "calendar": .string(Self.bounded(event.calendar?.title ?? "", maximumBytes: 256))
+                ])
+            }
+        return JSONValue.object([
+            "startDate": .string(Self.iso8601(start)),
+            "endDate": .string(Self.iso8601(end)),
+            "count": .number(Double(values.count)),
+            "events": .array(Array(values))
+        ]).displayText
+    }
+
+    static func reminders(query: String?, includeCompleted: Bool, limit: Int) async throws -> String {
+        let store = EKEventStore()
+        try await requestRemindersAccess(store)
+        let reminders = try await fetchReminders(store)
+        let normalizedQuery = query?.lowercased() ?? ""
+        let values = reminders
+            .filter { includeCompleted || !$0.completed }
+            .filter { normalizedQuery.isEmpty || $0.title.lowercased().contains(normalizedQuery) }
+            .sorted { ($0.dueDate ?? .distantFuture) < ($1.dueDate ?? .distantFuture) }
+            .prefix(limit)
+            .map { reminder in
+                var object: [String: JSONValue] = [
+                    "identifier": .string(reminder.identifier),
+                    "title": .string(reminder.title),
+                    "completed": .bool(reminder.completed),
+                    "list": .string(reminder.list)
+                ]
+                if let date = reminder.dueDate {
+                    object["dueDate"] = .string(Self.iso8601(date))
+                }
+                return JSONValue.object(object)
+            }
+        return JSONValue.object([
+            "query": .string(query ?? ""),
+            "includeCompleted": .bool(includeCompleted),
+            "count": .number(Double(values.count)),
+            "reminders": .array(Array(values))
+        ]).displayText
+    }
+
+    private static func requestEventsAccess(_ store: EKEventStore) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            store.requestFullAccessToEvents { granted, error in
+                if granted { continuation.resume() }
+                else if EKEventStore.authorizationStatus(for: .event) == .restricted {
+                    continuation.resume(throwing: MobileNativeToolError.restricted("日历"))
+                } else if error != nil || EKEventStore.authorizationStatus(for: .event) == .denied {
+                    continuation.resume(throwing: MobileNativeToolError.permissionDenied("日历"))
+                } else {
+                    continuation.resume(throwing: MobileNativeToolError.operationFailed("日历授权"))
+                }
+            }
+        }
+    }
+
+    private static func requestRemindersAccess(_ store: EKEventStore) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            store.requestFullAccessToReminders { granted, error in
+                if granted { continuation.resume() }
+                else if EKEventStore.authorizationStatus(for: .reminder) == .restricted {
+                    continuation.resume(throwing: MobileNativeToolError.restricted("提醒事项"))
+                } else if error != nil || EKEventStore.authorizationStatus(for: .reminder) == .denied {
+                    continuation.resume(throwing: MobileNativeToolError.permissionDenied("提醒事项"))
+                } else {
+                    continuation.resume(throwing: MobileNativeToolError.operationFailed("提醒事项授权"))
+                }
+            }
+        }
+    }
+
+    private static func fetchReminders(_ store: EKEventStore) async throws -> [ReminderSnapshot] {
+        try await withCheckedThrowingContinuation { continuation in
+            let predicate = store.predicateForReminders(in: nil)
+            store.fetchReminders(matching: predicate) { reminders in
+                let snapshots = (reminders ?? []).map { reminder in
+                    ReminderSnapshot(
+                        identifier: bounded(reminder.calendarItemIdentifier, maximumBytes: 256),
+                        title: bounded(reminder.title ?? "", maximumBytes: 512),
+                        completed: reminder.isCompleted,
+                        list: bounded(reminder.calendar?.title ?? "", maximumBytes: 256),
+                        dueDate: reminder.dueDateComponents?.date
+                    )
+                }
+                continuation.resume(returning: snapshots)
+            }
+        }
+    }
+
+    private static func iso8601(_ date: Date?) -> String {
+        guard let date else { return "" }
+        return ISO8601DateFormatter().string(from: date)
+    }
+
+    private static func bounded(_ value: String, maximumBytes: Int) -> String {
+        var result = ""
+        for character in value {
+            let bytes = String(character).utf8.count
+            guard result.utf8.count + bytes <= maximumBytes else { break }
+            result.append(character)
+        }
+        return result
+    }
+}
+
 // MARK: - Real iOS providers
 
 struct SystemDeviceLocationProvider: DeviceLocationProviding {

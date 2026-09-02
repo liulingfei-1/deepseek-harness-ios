@@ -31,6 +31,7 @@
 		121EA8AF2576B0683503E05C /* LocalAgentTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = B58EE72410120DD1BD69E971 /* LocalAgentTool.swift */; };
 		12FE116DBF2AF249238EBB0E /* WebFetchToolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13D7517B58B7DF2363C1FE7B /* WebFetchToolTests.swift */; };
 		13EB68188DBF07C6E12737BF /* MobileNativeTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = 770E17D0C7999336D1F91FE4 /* MobileNativeTools.swift */; };
+		A4E78C10B3D84C7E9A2F6101 /* IOSCapabilityTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4E78C10B3D84C7E9A2F6102 /* IOSCapabilityTools.swift */; };
 		14CBE6F48E44EA3395A80E29 /* SettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AED134E6A0ECB51C60A9D8C /* SettingsStore.swift */; };
 		14D320E9E8375A3566F4736C /* DeepSeekFilesClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D5C90F44976064FF01F9A6E /* DeepSeekFilesClient.swift */; };
 		161A864B9345DA3C266845FF /* ISHPluginHostDynamicLifecycleCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4AF3C73E99B7AA02A7ED1E6 /* ISHPluginHostDynamicLifecycleCoordinatorTests.swift */; };
@@ -58,7 +59,6 @@
 		2207D60257AF13CEFF9D07F4 /* HarnessReferenceSyntax.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5CECA6EAF3BBB1D75F45FD6 /* HarnessReferenceSyntax.swift */; };
 		22584D56C3E2FC03D182D922 /* ContinuedProcessingStateMachineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AF3904092910DE5C567F27B /* ContinuedProcessingStateMachineTests.swift */; };
 		22B97E247044DE952728F4E4 /* package-lock.json in Resources */ = {isa = PBXBuildFile; fileRef = 31A9EBB062E8C71A88A84D2A /* package-lock.json */; };
-		232ACA7FED56787C8E5C20A2 /* IOSNativeOffloadToolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A22B35C12FD868853CC9BA1C /* IOSNativeOffloadToolTests.swift */; };
 		2401751DADC514E4BFEE76D7 /* SessionBackgroundResumeCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 114CF64B06997DC8ADF7ADF3 /* SessionBackgroundResumeCoordinator.swift */; };
 		25292D1997EBBA2677B86C1B /* LegacyBackgroundTaskLease.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A0B629CAD9B499BC61BE451 /* LegacyBackgroundTaskLease.swift */; };
 		2603D70C67DD8DAD9CC908B6 /* HarnessLiveActivityStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62A39D7333CB1C8C9D2C60B4 /* HarnessLiveActivityStateTests.swift */; };
@@ -171,7 +171,6 @@
 		908F9D2EFF924F55854017D4 /* ChatAPIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC1A1D8D3FFA89CCDE646BF4 /* ChatAPIModels.swift */; };
 		91A8CF932E9D5B178C6BCE40 /* AppModel+PluginMarketplaceTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0568195733C86DFEBC2E762C /* AppModel+PluginMarketplaceTool.swift */; };
 		925114BBA29743CD9C34CDDD /* libresolv.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 2DADFE0727C443F2DD82A537 /* libresolv.tbd */; };
-		92F75747A9CEDF2B3340C7C1 /* IOSNativeOffloadTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BD69B2A28E09C5C00F27081 /* IOSNativeOffloadTool.swift */; };
 		93CD5B6A1FB500EFC53AFD99 /* SlashCommandCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E440C5809A3398611857A48 /* SlashCommandCore.swift */; };
 		96489795CE62F88DD3BDBED9 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 286E1C43D1DC55CE4BF1A65E /* ChatView.swift */; };
 		9811D11E08BC2C5E0EFD18CB /* HarnessMobileLiveActivity.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 36984C60D2EE63360F1C56B4 /* HarnessMobileLiveActivity.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -419,7 +418,6 @@
 		27B7F084316F1148B139806E /* ISHNativeClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ISHNativeClientTests.swift; sourceTree = "<group>"; };
 		286E1C43D1DC55CE4BF1A65E /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 		2A61C0C03A79911A8AAAC0F4 /* AgentRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRuntime.swift; sourceTree = "<group>"; };
-		2BD69B2A28E09C5C00F27081 /* IOSNativeOffloadTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSNativeOffloadTool.swift; sourceTree = "<group>"; };
 		2BED27AB6311A59FDCBC2149 /* ISHPluginSettingsDraft.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ISHPluginSettingsDraft.swift; sourceTree = "<group>"; };
 		2D095E59E98F5FFA00A7A21B /* MobileSkillRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileSkillRegistryTests.swift; sourceTree = "<group>"; };
 		2D139429ACC9C4CDDACAB431 /* HarnessMobileUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = HarnessMobileUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -517,6 +515,7 @@
 		73AC7C312F65028E79E715ED /* TerminalBuffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalBuffer.swift; sourceTree = "<group>"; };
 		766852BED305AAAB4BEEF552 /* OpenAICompatibleClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAICompatibleClient.swift; sourceTree = "<group>"; };
 		770E17D0C7999336D1F91FE4 /* MobileNativeTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileNativeTools.swift; sourceTree = "<group>"; };
+		A4E78C10B3D84C7E9A2F6102 /* IOSCapabilityTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSCapabilityTools.swift; sourceTree = "<group>"; };
 		77DED968A233B404775ACFDE /* MCPToolSuite.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPToolSuite.swift; sourceTree = "<group>"; };
 		7964682BA9817CA88DA89E71 /* DeviceCapabilitiesToolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceCapabilitiesToolTests.swift; sourceTree = "<group>"; };
 		797E5610200BF5139D53248B /* NativeToolEventViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeToolEventViews.swift; sourceTree = "<group>"; };
@@ -562,7 +561,6 @@
 		9FA6C4695C377EDA1D6609F2 /* ToolResultSpillStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolResultSpillStore.swift; sourceTree = "<group>"; };
 		9FBAE9F76A8F49349D173680 /* HarnessMobile.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = HarnessMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10A45991589447E917E303D /* ProviderModelDiscoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderModelDiscoveryTests.swift; sourceTree = "<group>"; };
-		A22B35C12FD868853CC9BA1C /* IOSNativeOffloadToolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSNativeOffloadToolTests.swift; sourceTree = "<group>"; };
 		A4E0B0F1F08981E3443D3060 /* ToolResultOutputPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolResultOutputPolicy.swift; sourceTree = "<group>"; };
 		A6A91A9B5CAEFE150779D304 /* HarnessLLMSessionRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HarnessLLMSessionRegistry.swift; sourceTree = "<group>"; };
 		A6DDF81B9FC7900BC3264A21 /* ConversationControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationControls.swift; sourceTree = "<group>"; };
@@ -838,6 +836,7 @@
 				B58EE72410120DD1BD69E971 /* LocalAgentTool.swift */,
 				0CB624FD94F65154D4F546EA /* LocalToolRegistry.swift */,
 				770E17D0C7999336D1F91FE4 /* MobileNativeTools.swift */,
+				A4E78C10B3D84C7E9A2F6102 /* IOSCapabilityTools.swift */,
 				AE48A6BD716FC78E9C655C40 /* ProductionToolCatalog.swift */,
 				DA4EF480F879FF4ED74318D3 /* RalphTool.swift */,
 				1BC1BA0940E31B5E0D9F7F5E /* ScheduleTools.swift */,
@@ -1099,7 +1098,6 @@
 				E5770D4A8BE07CC2C8B06396 /* HarnessScheduleTests.swift */,
 				BB59DE4DFAD47EA438D634BB /* HarnessSyncEnvelopeTests.swift */,
 				9EB63A021AD51E46FCD76CBB /* HarnessTraceStoreTests.swift */,
-				A22B35C12FD868853CC9BA1C /* IOSNativeOffloadToolTests.swift */,
 				27B7F084316F1148B139806E /* ISHNativeClientTests.swift */,
 				C4AF3C73E99B7AA02A7ED1E6 /* ISHPluginHostDynamicLifecycleCoordinatorTests.swift */,
 				3BC09C726CF15A704C37C75F /* ISHPluginHostNodeSmoke.mjs */,
@@ -1355,7 +1353,6 @@
 		D28739EB34E9DA2D36C3277E /* ISH */ = {
 			isa = PBXGroup;
 			children = (
-				2BD69B2A28E09C5C00F27081 /* IOSNativeOffloadTool.swift */,
 				3E41743BA383FB2E4AE97ED8 /* ISHGuestNetworkMonitor.swift */,
 				0ECC3694952A7BFA614C7985 /* ISHRootfsInstaller.swift */,
 				54E076433B6EC2711B874E58 /* ISHSandboxCoordinator.swift */,
@@ -1714,7 +1711,6 @@
 				4ACB8802B7E55BC936E525C2 /* HarnessScheduleTests.swift in Sources */,
 				01E014BDA7AD38613B096D4E /* HarnessSyncEnvelopeTests.swift in Sources */,
 				1B1A37C8401727D0525A800F /* HarnessTraceStoreTests.swift in Sources */,
-				232ACA7FED56787C8E5C20A2 /* IOSNativeOffloadToolTests.swift in Sources */,
 				17F4F33DCF1EFFABB6108D51 /* ISHNativeClientTests.swift in Sources */,
 				161A864B9345DA3C266845FF /* ISHPluginHostDynamicLifecycleCoordinatorTests.swift in Sources */,
 				EFA3B2B129A0A9E1C21D2E51 /* ISHPluginHostTests.swift in Sources */,
@@ -1852,7 +1848,6 @@
 				295A01997CFB4411C55B5289 /* HarnessTrace.swift in Sources */,
 				2103701734C1D4EC49FAF419 /* HarnessTraceRedaction.swift in Sources */,
 				46F64A1C4CFEFF3F02A75623 /* HarnessWidgetProjection.swift in Sources */,
-				92F75747A9CEDF2B3340C7C1 /* IOSNativeOffloadTool.swift in Sources */,
 				1EC97185D03B6784B7A408A1 /* ISHGuestNetworkMonitor.swift in Sources */,
 				BF18EDA96EB1EF10CE73418D /* ISHInteractiveTerminalView.swift in Sources */,
 				DA16AA27E34DA1B75131BBCD /* ISHMCPStdioTransport.swift in Sources */,
@@ -1891,6 +1886,7 @@
 				E4A5CDB0129A06B2E8176589 /* MobileAgentHandle.swift in Sources */,
 				7E3E0B9C126C6A6213E6B48A /* MobileHarnessPrompt.swift in Sources */,
 				13EB68188DBF07C6E12737BF /* MobileNativeTools.swift in Sources */,
+				A4E78C10B3D84C7E9A2F6101 /* IOSCapabilityTools.swift in Sources */,
 				B4A30E8550E35D330B1AB0CD /* MobileSkillRegistry.swift in Sources */,
 				C774D0AA5C6FF283DE1ADAA3 /* ModelDiscoveryCache.swift in Sources */,
 				0027D5DD1756BC587EE92F87 /* ModelProviderAdapter.swift in Sources */,

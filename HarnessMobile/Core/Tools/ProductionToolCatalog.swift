@@ -10,7 +10,6 @@ enum ProductionToolCatalog {
         "exit_plan_mode",
         "glob",
         "grep",
-        "ios_native",
         "job_kill",
         "job_list",
         "job_output",
@@ -112,10 +111,6 @@ enum ProductionToolCatalog {
                     sessionID: sessionID,
                     resolver: codeModeResolver
                 ),
-                IOSNativeOffloadTool(
-                    store: workspaceStore,
-                    sessionID: sessionID
-                ),
                 OnDeviceLSPTool(
                     store: workspaceStore,
                     sessionID: sessionID
@@ -178,7 +173,7 @@ enum ProductionToolCatalog {
             maximumDepth: subagentPolicy.maximumDepth
         ))
 #if os(iOS)
-        tools.append(contentsOf: MobileNativeToolKit.makeSystemTools())
+        tools.append(contentsOf: MobileNativeToolKit.makeSystemTools(workspaceStore: workspaceStore))
 #endif
         let resolvedTools = tools
         codeModeResolver.install { name in
