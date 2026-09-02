@@ -51,6 +51,9 @@ enum SessionEventVocabulary {
         "llm/retry",
         "llm/retry-started",
         "llm/request-audit",
+        /// Mirrors upstream v0.1.2 `ModelSelection`; appended when the user
+        /// selects a provider/model route for the session.
+        "model/selection",
         "permission/preset",
         "plan/mode",
         questionRequested,
@@ -60,13 +63,25 @@ enum SessionEventVocabulary {
         "sandbox/mode",
         "schedule/change",
         sessionEndSeed,
+        /// Upstream v0.1.2 `session-log-deepseek` package; a delivery the
+        /// DeepSeek session log has accepted.
+        "session-log-deepseek/delivery-accepted",
         "session/title",
         "session/title-llm-request",
         stepEnd,
         stepStart,
         "subagent/descriptor",
         subagentLifecycle,
+        /// Upstream v0.1.2: the model-selection policy a subagent run inherits.
+        "subagent/model-selection-policy",
         subagentOutput,
+        /// Upstream v0.1.2 `experimental/tool-agent-team`. Names are known so a
+        /// log written by an agent-team build stays readable; the mobile build
+        /// does not implement team orchestration itself.
+        "team/member",
+        "team/message/delivered",
+        "team/message/queued",
+        "team/task",
         "todo/write",
         "tool-workflow/agent-end",
         "tool-workflow/agent-start",
