@@ -478,6 +478,18 @@ final class ISHPluginHostTests: XCTestCase {
         await client.stop()
     }
 
+    func testMarketplaceNativeInstallStrategyIsOptionalForLegacyCatalogs() throws {
+        let legacy = Data("""
+        {"id":"legacy","name":"Legacy","repositoryURL":"https://github.com/example/legacy","repositoryKey":"example/legacy","description":"","category":"tools","compatibility":"supported","unsupportedReason":null,"installed":false,"installedPluginID":null,"installedVersion":null}
+        """.utf8)
+        let item = try JSONDecoder().decode(ISHMarketplaceCatalogItem.self, from: legacy)
+        XCTAssertNil(item.nativeInstallStrategy)
+        XCTAssertEqual(
+            ISHMarketplaceNativeInstallStrategy(rawValue: "native-first"),
+            .nativeFirst
+        )
+    }
+
     func testClientPreparesNativeSourceAndReusesTokenForFallbackInstall() async throws {
         let token = String(repeating: "a", count: 32)
         let digest = String(repeating: "b", count: 64)
@@ -772,6 +784,21 @@ final class ISHPluginHostTests: XCTestCase {
 
         XCTAssertThrowsError(try ISHPluginSettingsForm(namespace: namespace)) { error in
             XCTAssertEqual(error as? ISHPluginSettingsSchemaError, .missingSchema)
+        }
+    }
+
+    func testCredentialFirewallAllowsDocumentationMentionsButRejectsBearerToken() {
+        XCTAssertNoThrow(
+            try ISHPluginHostCredentialFirewall.validate(
+                .string("Replace the word Bearer 令牌 with a redacted placeholder.")
+            )
+        )
+        XCTAssertThrowsError(
+            try ISHPluginHostCredentialFirewall.validate(
+                .string("Authorization: Bearer abcdefghijklmnop")
+            )
+        ) { error in
+            XCTAssertEqual(error as? ISHPluginHostError, .credentialsForbidden)
         }
     }
 

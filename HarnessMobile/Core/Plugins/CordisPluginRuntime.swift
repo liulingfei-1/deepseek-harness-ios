@@ -246,6 +246,8 @@ struct CordisPluginContext: Sendable {
         pluginID = owner.id
     }
 
+    var generationID: UInt64 { owner.generation }
+
     @discardableResult
     func effect(
         _ label: String,

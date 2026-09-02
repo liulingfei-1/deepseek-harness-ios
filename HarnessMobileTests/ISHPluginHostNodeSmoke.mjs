@@ -23,7 +23,7 @@ const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'harness-mobile-plugi
 const importsDirectory = path.join(workspaceRoot, '.harness-mobile', 'plugin-imports')
 await mkdir(importsDirectory, { recursive: true })
 
-const child = spawn(process.execPath, ['--jitless', '--expose-internals', 'host.mjs'], {
+const child = spawn(process.execPath, ['--expose-internals', 'host.mjs'], {
   cwd: resolvedHostDirectory,
   env: {
     ...process.env,
@@ -764,6 +764,7 @@ try {
     MarketplaceError,
     MarketplaceManager,
     parseGitHubLocation,
+    parseMarketReadme,
     validateArchiveEntryName,
   } = await import(pathToFileURL(path.join(resolvedHostDirectory, 'marketplace.mjs')).href)
   assert.throws(
@@ -773,6 +774,10 @@ try {
   assert.equal(
     parseGitHubLocation('https://github.com/example/plugin/tree/main/packages/mobile').archiveURL,
     'https://codeload.github.com/example/plugin/zip/main',
+  )
+  assert.equal(
+    parseMarketReadme('### 工具与能力\n- [Native hint](https://github.com/example/native-hint) - safe tools\n')[0].nativeInstallStrategy,
+    'native-first',
   )
 
   const originalFetch = globalThis.fetch

@@ -74,7 +74,17 @@ const NATIVE_CLIENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
 const NATIVE_CLIENT_COMMAND_PATTERN = /^[a-z][a-z0-9_-]{0,63}$/
 const NATIVE_CLIENT_SERVICE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/
 const NATIVE_COMPILATION_FAILURES = new Set([
+  // These are compatibility/packaging failures, not trust failures. Keep
+  // their bounded source snapshot available so the Swift NativeAgent compiler
+  // can often replace the missing JS/Loader adapter with a declarative native
+  // manifest instead of immediately falling back to iSH.
+  'invalid-manifest',
+  'invalid-patch',
   'missing-entrypoint',
+  'missing-package',
+  'npm-install-failed',
+  'npm-pack-failed',
+  'unsupported-entry',
   'unsupported-patch',
 ])
 const NATIVE_COMPILATION_EXTENSIONS = new Set([
@@ -429,6 +439,14 @@ function catalogCompatibility(category) {
   }
 }
 
+function catalogNativeInstallStrategy(category) {
+  // This is only a catalog hint. prepare-native performs the source-level
+  // decision and Swift validation remains authoritative.
+  return category === '主题与外观' || category === '桌面与外观'
+    ? 'ish-required'
+    : 'native-first'
+}
+
 export function parseMarketReadme(markdown) {
   if (typeof markdown !== 'string') fail('invalid-market', 'Market README must be text.')
   const items = []
@@ -459,6 +477,7 @@ export function parseMarketReadme(markdown) {
       description: publicText(match[3], 600) ?? '',
       category,
       compatibility: compatibility.compatibility,
+      nativeInstallStrategy: catalogNativeInstallStrategy(category),
       ...(compatibility.reason === undefined ? {} : { unsupportedReason: compatibility.reason }),
     })
     if (items.length >= 1200) break
@@ -926,6 +945,20 @@ async function makeNativeCompilationCandidate(root, publicSource, failureReason)
     ...(version === undefined ? {} : { version }),
     ...(description === undefined ? {} : { description }),
     files,
+  }
+}
+
+async function attachNativeCompilationCandidate(error, root, publicSource) {
+  if (!(error instanceof MarketplaceError) || !NATIVE_COMPILATION_FAILURES.has(error.code)) {
+    return
+  }
+  const nativeCandidate = await makeNativeCompilationCandidate(
+    root,
+    publicSource,
+    error.code,
+  ).catch(() => undefined)
+  if (nativeCandidate !== undefined) {
+    error.data = { ...(error.data ?? {}), nativeCandidate }
   }
 }
 
@@ -2016,32 +2049,54 @@ export class MarketplaceManager {
   }
 
   async start() {
+    const startedAt = performance.now()
     await this.ensureLayout()
+    const layoutReadyAt = performance.now()
     this.records = await this.loadRegistry()
+    const registryReadyAt = performance.now()
     await this.removeOrphanStorage()
     await this.writeRuntimeManifest(this.records)
     await this.healHostPackages()
+    const runtimeReadyAt = performance.now()
     let changed = false
-    for (let index = 0; index < this.records.length; index += 1) {
-      const record = this.records[index]
-      if (!record.enabled) continue
-      try {
-        await this.validateRuntimeEntryPackages(record.entries)
-        await this.load(record)
-        if (record.lastError !== undefined) {
-          this.records[index] = { ...record, lastError: undefined }
+    // Loader activation is independent per marketplace package. Restoring
+    // them serially made one slow or broken plugin delay every other plugin
+    // and made cold-start time grow linearly with the registry size. Validate
+    // and activate with a small bounded fan-out while keeping each record's
+    // rollback state isolated.
+    const enabledRecords = this.records
+      .map((record, index) => ({ record, index }))
+      .filter(candidate => candidate.record.enabled)
+    const concurrency = Math.min(4, Math.max(1, enabledRecords.length))
+    let cursor = 0
+    const worker = async () => {
+      for (;;) {
+        const candidate = enabledRecords[cursor]
+        cursor += 1
+        if (candidate === undefined) return
+        const pluginStartedAt = performance.now()
+        try {
+          await this.validateRuntimeEntryPackages(candidate.record.entries)
+          await this.load(candidate.record)
+          if (candidate.record.lastError !== undefined) {
+            this.records[candidate.index] = { ...candidate.record, lastError: undefined }
+            changed = true
+          }
+          console.error(`[plugin-host] restored ${candidate.record.id} in ${Math.round(performance.now() - pluginStartedAt)}ms`)
+        } catch (error) {
+          this.records[candidate.index] = {
+            ...candidate.record,
+            enabled: false,
+            lastError: error instanceof Error ? error.message : String(error),
+          }
           changed = true
+          console.error(`[plugin-host] failed ${candidate.record.id} in ${Math.round(performance.now() - pluginStartedAt)}ms: ${error instanceof Error ? error.message : String(error)}`)
         }
-      } catch (error) {
-        this.records[index] = {
-          ...record,
-          enabled: false,
-          lastError: error instanceof Error ? error.message : String(error),
-        }
-        changed = true
       }
     }
+    await Promise.all(Array.from({ length: concurrency }, worker))
     if (changed) await this.saveRegistry(this.records)
+    console.error(`[plugin-host] marketplace phases layout=${Math.round(layoutReadyAt - startedAt)}ms registry=${Math.round(registryReadyAt - layoutReadyAt)}ms runtime=${Math.round(runtimeReadyAt - registryReadyAt)}ms restore=${Math.round(performance.now() - runtimeReadyAt)}ms plugins=${enabledRecords.length}`)
   }
 
   async ensureLayout() {
@@ -2353,16 +2408,7 @@ export class MarketplaceManager {
         try {
           validated = await validateBundleDirectory(stagingPath)
         } catch (error) {
-          if (error instanceof MarketplaceError && NATIVE_COMPILATION_FAILURES.has(error.code)) {
-            const nativeCandidate = await makeNativeCompilationCandidate(
-              stagingPath,
-              prepared.publicSource,
-              error.code,
-            ).catch(() => undefined)
-            if (nativeCandidate !== undefined) {
-              error.data = { ...(error.data ?? {}), nativeCandidate }
-            }
-          }
+          await attachNativeCompilationCandidate(error, stagingPath, prepared.publicSource)
           throw error
         }
         const existingIndex = this.records.findIndex(record => record.id === validated.id || record.name === validated.name)
@@ -2433,6 +2479,11 @@ export class MarketplaceManager {
           await this.saveRegistry(nextRecords)
           this.records = nextRecords
         } catch (error) {
+          await attachNativeCompilationCandidate(
+            error,
+            storedPluginDirectory ?? stagingPath,
+            prepared.publicSource,
+          )
           await this.unload(nextRecord.id).catch(() => {})
           const rollbackErrors = []
           try { await this.reconcileRuntime(previousRecords) } catch (rollback) { rollbackErrors.push(rollback) }

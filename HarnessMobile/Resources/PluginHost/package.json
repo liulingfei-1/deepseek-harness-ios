@@ -7,7 +7,7 @@
     "node": ">=20.17.0"
   },
   "scripts": {
-    "start": "node --jitless --expose-internals host.mjs",
+    "start": "node --expose-internals host.mjs",
     "check": "node --check host.mjs && node --check marketplace.mjs"
   },
   "dependencies": {

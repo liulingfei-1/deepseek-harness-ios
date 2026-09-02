@@ -109,6 +109,92 @@ final class CordisAgentServicesTests: XCTestCase {
         XCTAssertEqual(assembly.systemPrompt, "Replacement")
     }
 
+    func testOnlyOneCompletePromptSectionCanBeActive() async throws {
+        let runtime = CordisPluginRuntime()
+        let services = CordisAgentServices()
+        _ = try await runtime.install(services.pluginDefinition(baseSystemPrompt: "Base"))
+
+        let first = CordisPluginDefinition(
+            id: "prompt.complete.first",
+            version: "1",
+            dependencies: [CordisAgentServiceKeys.systemPrompt.name]
+        ) { context in
+            try await context.promptSection(
+                CordisPromptSection(name: "first", order: 0, complete: true, text: "First")
+            )
+        }
+        let second = CordisPluginDefinition(
+            id: "prompt.complete.second",
+            version: "1",
+            dependencies: [CordisAgentServiceKeys.systemPrompt.name]
+        ) { context in
+            try await context.promptSection(
+                CordisPromptSection(name: "second", order: 0, complete: true, text: "Second")
+            )
+        }
+
+        let firstSnapshot = try await runtime.install(first)
+        let secondSnapshot = try await runtime.install(second)
+        XCTAssertEqual(firstSnapshot.state, .active)
+        XCTAssertEqual(secondSnapshot.state, .failed)
+        XCTAssertNotNil(secondSnapshot.error)
+
+        let assembly = try await services.systemPrompt.assemble(
+            CordisPromptAssemblyInput(
+                runID: UUID(),
+                step: 1,
+                configuration: AgentConfiguration(),
+                messages: []
+            )
+        )
+        XCTAssertEqual(assembly.systemPrompt, "First")
+    }
+
+    func testToolReplacementSwapsGenerationAndRollsBackOnFailure() async throws {
+        let runtime = CordisPluginRuntime()
+        let services = CordisAgentServices()
+        _ = try await runtime.install(services.pluginDefinition())
+
+        let original = CordisPluginDefinition(
+            id: "tool.replace",
+            version: "1",
+            dependencies: [CordisAgentServiceKeys.tools.name]
+        ) { context in
+            try await context.registerTool(CordisTestTool(description: "old"))
+        }
+        let replacement = CordisPluginDefinition(
+            id: "tool.replace",
+            version: "2",
+            dependencies: [CordisAgentServiceKeys.tools.name]
+        ) { context in
+            try await context.registerTool(CordisTestTool(description: "new"))
+        }
+
+        _ = try await runtime.install(original)
+        _ = try await runtime.replace(original.id, with: replacement)
+        var tools = await services.tools.snapshots()
+        XCTAssertEqual(tools.map(\.definition.description), ["new"])
+
+        let broken = CordisPluginDefinition(
+            id: "tool.replace",
+            version: "3",
+            dependencies: [CordisAgentServiceKeys.tools.name]
+        ) { context in
+            try await context.registerTool(CordisTestTool(description: "broken"))
+            throw CordisAgentServicesTestError.replacementFailed
+        }
+        do {
+            _ = try await runtime.replace(original.id, with: broken)
+            XCTFail("Broken tool replacement must report its rollback.")
+        } catch let error as CordisPluginRuntimeError {
+            guard case .replacementRolledBack = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+        }
+        tools = await services.tools.snapshots()
+        XCTAssertEqual(tools.map(\.definition.description), ["new"])
+    }
+
     func testToolGuardCanOnlyReturnDenialAndRetractsOnDisable() async throws {
         let runtime = CordisPluginRuntime()
         let services = CordisAgentServices()

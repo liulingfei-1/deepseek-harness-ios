@@ -28,8 +28,8 @@ final class NativeAgentPluginTests: XCTestCase {
         XCTAssertEqual(decoded.preparedToken, "prepared-1")
     }
 
-    func testNativePluginPolicyExposesAuditedPhoneCapabilitiesOnly() {
-        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("ios_native"))
+    func testNativePluginPolicyExposesDeveloperProductionCatalogWithGraphBoundaries() {
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("browser_use"))
         XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("diagnostics_read"))
         XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("contacts_search"))
         XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("device_capabilities"))
@@ -37,8 +37,57 @@ final class NativeAgentPluginTests: XCTestCase {
         XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("ask_user_question"))
         XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("work_state_set_goal"))
         XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("job_output"))
-        XCTAssertFalse(NativeAgentPluginPolicy.approvedBaseToolNames.contains("shell_execute"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("grep"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("workspace_search"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("workspace_diff"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("web_search"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("read_image"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("deliverable_write"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("session_search"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("session_trace"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("session_event_get"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("session_event_types"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("schedule_list"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("schedule_create"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("schedule_delete"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("str_replace_editor"))
+        XCTAssertFalse(NativeAgentPluginPolicy.approvedBaseToolNames.contains("workflow"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("code_execute"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("shell_execute"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("terminal_open"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("lsp"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("workspace_write_text"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("calendar_events"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("reminders_list"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("clipboard_read"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("clipboard_write"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("device_status"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("natural_language_analyze"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("speech_synthesize"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("speech_transcribe"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("maps_search"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("maps_route"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("system_open"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("photo_library_list"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("media_library_search"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("media_playback"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("health_query"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("bluetooth_scan"))
+        XCTAssertTrue(NativeAgentPluginPolicy.approvedBaseToolNames.contains("vision_analyze"))
         XCTAssertFalse(NativeAgentPluginPolicy.approvedBaseToolNames.contains("plugin_marketplace"))
+        XCTAssertFalse(NativeAgentPluginPolicy.approvedBaseToolNames.contains("ralph"))
+        XCTAssertFalse(NativeAgentPluginPolicy.approvedBaseToolNames.contains("subagent"))
+        XCTAssertEqual(NativeAgentPluginPolicy.executionBackendByToolName["shell_execute"], "ish-runtime")
+        XCTAssertNil(NativeAgentPluginPolicy.executionBackendByToolName["ios_native"])
+        XCTAssertEqual(NativeAgentPluginPolicy.executionBackendByToolName["workspace_search"], "swift-native")
+        XCTAssertEqual(NativeAgentPluginPolicy.executionBackendByToolName["calendar_events"], "swift-native")
+        XCTAssertEqual(NativeAgentPluginPolicy.executionBackendByToolName["reminders_list"], "swift-native")
+        XCTAssertEqual(NativeAgentPluginPolicy.executionBackendByToolName["clipboard_read"], "swift-native")
+        XCTAssertEqual(NativeAgentPluginPolicy.executionBackendByToolName["clipboard_write"], "swift-native")
+        XCTAssertEqual(NativeAgentPluginPolicy.executionBackendByToolName["device_status"], "swift-native")
+        XCTAssertEqual(NativeAgentPluginPolicy.executionBackendByToolName["health_query"], "swift-native")
+        XCTAssertEqual(NativeAgentPluginPolicy.executionBackendByToolName["bluetooth_scan"], "swift-native")
+        XCTAssertEqual(NativeAgentPluginPolicy.executionBackendByToolName["vision_analyze"], "swift-native")
     }
 
     func testOnlyDefinitiveNativeCompilationFailuresFallBackToISH() {
@@ -47,6 +96,57 @@ final class NativeAgentPluginTests: XCTestCase {
         XCTAssertFalse(NativeAgentPluginError.compilerDidNotReturnManifest.shouldFallbackToISH)
         XCTAssertFalse(NativeAgentPluginError.invalidSourceSnapshot.shouldFallbackToISH)
         XCTAssertFalse(NativeAgentPluginError.alreadyInstalled("native-agent.demo").shouldFallbackToISH)
+    }
+
+    func testManifestValidationReportsAllowedToolFieldAndRepair() throws {
+        XCTAssertThrowsError(
+            try makePlugin(allowedTools: ["plugin_marketplace"])
+                .validated(allowedBaseTools: NativeAgentPluginPolicy.approvedBaseToolNames)
+        ) { error in
+            let message = error.localizedDescription
+            XCTAssertTrue(message.contains("tools[0].allowed_tools"), message)
+            XCTAssertTrue(message.contains("plugin_marketplace"), message)
+            XCTAssertTrue(message.contains("allowed_native_tools"), message)
+        }
+    }
+
+    func testManifestValidationReportsCredentialFieldWithoutLeakingValue() throws {
+        XCTAssertThrowsError(
+            try makePlugin(instructions: "Authorization: Bearer abcdefghijklmnop")
+                .validated(allowedBaseTools: NativeAgentPluginPolicy.approvedBaseToolNames)
+        ) { error in
+            let message = error.localizedDescription
+            XCTAssertTrue(message.contains("tools[0].instructions"), message)
+            XCTAssertFalse(message.contains("abcdefghijklmnop"), message)
+        }
+    }
+
+    func testManifestValidationReportsMultipleCompleteSections() throws {
+        XCTAssertThrowsError(
+            try makePlugin(
+                promptSections: [
+                    NativeAgentPromptSection(order: 0, text: "One", complete: true),
+                    NativeAgentPromptSection(order: 1, text: "Two", complete: true)
+                ]
+            ).validated(allowedBaseTools: NativeAgentPluginPolicy.approvedBaseToolNames)
+        ) { error in
+            let message = error.localizedDescription
+            XCTAssertTrue(message.contains("prompt_sections"), message)
+            XCTAssertTrue(message.contains("complete=true"), message)
+        }
+    }
+
+    func testManifestValidationReportsMalformedToolSchemaField() throws {
+        XCTAssertThrowsError(
+            try makePlugin(
+                parameters: .object(["type": .string("string")])
+            ).validated(allowedBaseTools: NativeAgentPluginPolicy.approvedBaseToolNames)
+        ) { error in
+            XCTAssertTrue(
+                error.localizedDescription.contains("tools[0].parameters"),
+                error.localizedDescription
+            )
+        }
     }
 
     func testSkillRadarManifestWithLocalizedToolGuardMaterializes() throws {
@@ -289,8 +389,18 @@ final class NativeAgentPluginTests: XCTestCase {
         XCTAssertTrue(prompt.contains("Never generate list/enumerate -> contains/exists -> read"))
         XCTAssertTrue(prompt.contains("treat not-found as the initial empty state"))
         XCTAssertTrue(prompt.contains("diagnostics_read"))
-        XCTAssertTrue(prompt.contains("ios_native"))
-        XCTAssertTrue(prompt.contains("apple-healthkit"))
+        XCTAssertTrue(prompt.contains("NaturalLanguage"))
+        XCTAssertTrue(prompt.contains("HealthKit"))
+        XCTAssertTrue(prompt.contains("BLE scanning"))
+        XCTAssertTrue(prompt.contains("generated directory is authoritative"))
+        XCTAssertTrue(prompt.contains("must be reported in compatibility_notes"))
+        XCTAssertTrue(prompt.contains("read_image"))
+        XCTAssertTrue(prompt.contains("deliverable_write"))
+        XCTAssertTrue(prompt.contains("session_trace"))
+        XCTAssertTrue(prompt.contains("schedule_create"))
+        XCTAssertTrue(prompt.contains("code execution"))
+        XCTAssertTrue(prompt.contains("terminal"))
+        XCTAssertTrue(prompt.contains("plugin installation"))
         XCTAssertTrue(prompt.contains("<session-storage>"))
         XCTAssertTrue(prompt.contains("<plugin-storage>/<filename>"))
         XCTAssertTrue(prompt.contains(".harness-mobile/native-agent-plugins/<plugin-id>/<filename>"))
@@ -399,7 +509,7 @@ final class NativeAgentPluginTests: XCTestCase {
         let execution = CordisToolExecution(
             runID: UUID(),
             step: 1,
-            call: AgentToolCall(id: "call-1", name: "ios_native", arguments: "{}"),
+            call: AgentToolCall(id: "call-1", name: "calendar_events", arguments: "{}"),
             arguments: [:],
             risk: .sideEffect,
             summary: "Native action"
@@ -586,6 +696,15 @@ final class NativeAgentPluginTests: XCTestCase {
     private func makePlugin(
         instructions: String = "Write memory under <plugin-id>.",
         allowedTools: [String] = ["workspace_write_text"],
+        parameters: JSONValue = .object([
+            "type": .string("object"),
+            "properties": .object([
+                "text": .object(["type": .string("string")])
+            ]),
+            "required": .array([.string("text")]),
+            "additionalProperties": .bool(false)
+        ]),
+        promptSections: [NativeAgentPromptSection] = [],
         promptContexts: [NativeAgentPromptContext] = [],
         settings: NativeAgentPluginSettings? = nil,
         toolGuards: [NativeAgentToolGuard] = [],
@@ -606,21 +725,14 @@ final class NativeAgentPluginTests: XCTestCase {
             compilerProviderID: "deepseek-official",
             compilerModel: "deepseek-v4-flash",
             enabled: false,
-            promptSections: [],
+            promptSections: promptSections,
             promptContexts: promptContexts,
             settings: settings,
             tools: [
                 NativeAgentCompiledTool(
                     name: "memory_add",
                     description: "Persist memory.",
-                    parameters: .object([
-                        "type": .string("object"),
-                        "properties": .object([
-                            "text": .object(["type": .string("string")])
-                        ]),
-                        "required": .array([.string("text")]),
-                        "additionalProperties": .bool(false)
-                    ]),
+                    parameters: parameters,
                     risk: .localState,
                     instructions: instructions,
                     allowedTools: allowedTools

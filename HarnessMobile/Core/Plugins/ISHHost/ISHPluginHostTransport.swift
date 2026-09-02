@@ -138,7 +138,7 @@ actor ISHPersistentPluginHostTransport: ISHPluginHostTransport {
             // Some iSH/network combinations return an unreachable IPv6
             // address first. Prefer IPv4 for the Host's public HTTPS fetches;
             // this does not affect the native model networking path.
-            "NODE_OPTIONS": "--jitless --dns-result-order=ipv4first",
+            "NODE_OPTIONS": "--dns-result-order=ipv4first",
             "HARNESS_PLUGIN_HOST_ON_DEVICE": "1"
         ]
         let outputRelay = ISHPluginHostOutputRelay(onStdout: onStdout, onStderr: onStderr)

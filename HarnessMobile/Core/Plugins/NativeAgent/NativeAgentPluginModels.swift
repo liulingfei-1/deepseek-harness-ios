@@ -57,32 +57,67 @@ struct NativeAgentPluginSourceSnapshot: Codable, Sendable, Equatable {
     }
 }
 
-/// The only production tools that a compiled native plugin may delegate to.
-/// Keep this list separate from the full Agent catalog: recursive plugin
-/// installation, arbitrary shell execution, and plan control must not become
-/// ambient capabilities of every downloaded plugin.
+/// The production tools that a compiled native plugin may delegate to.
+/// Developer plugins can use local execution and filesystem capabilities; only
+/// recursive graph control and plugin installation stay outside this boundary.
 enum NativeAgentPluginPolicy {
-    static let approvedBaseToolNames: Set<String> = Set([
-        "ask_user_question",
-        "camera_ocr",
-        "device_time",
-        "diagnostics_read",
-        "edit",
-        "ios_native",
-        "job_kill",
-        "job_list",
-        "job_output",
-        "read",
-        "skill",
-        "web_fetch",
-        "work_state_replace_plan",
-        "work_state_replace_todos",
-        "work_state_set_goal",
-        "write",
-        "workspace_list_files",
-        "workspace_read_text",
-        "workspace_write_text"
-    ]).union(MobileNativeToolKit.approvedNames)
+    /// Native plugins should see almost the complete production catalog. Keep
+    /// the deny list explicit because these tools can create recursive work or
+    /// install more plugins. Keep this mirrored with ProductionToolCatalog as
+    /// new production tools are added.
+    static let deniedBaseToolNames: Set<String> = [
+        // These boundaries prevent a downloaded plugin from installing more
+        // plugins or recursively controlling the parent Agent graph. All
+        // ordinary production tools, including local code/shell/terminal/LSP
+        // tools, remain available to developer-oriented native plugins.
+        "plugin_marketplace",
+        "ralph",
+        "subagent",
+        "subagent_control",
+        "subagent_fork",
+        "subagent_list",
+        "workflow"
+    ]
+
+    private static let productionBaseToolNames: Set<String> = [
+        "ask_user_question", "camera_ocr", "code_execute", "diagnostics_read",
+        "device_time", "edit", "exit_plan_mode", "glob", "grep",
+        "job_kill", "job_list", "job_output", "lsp", "schedule_create",
+        "schedule_list", "schedule_delete", "read", "read_image", "ralph",
+        "run_code", "session_event_get", "session_event_types", "session_search",
+        "session_trace", "send_message", "shell_execute", "skill",
+        "str_replace_editor", "subagent", "subagent_fork", "subagent_control",
+        "subagent_list", "terminal_open", "terminal_read", "terminal_send",
+        "terminal_signal", "terminal_list", "terminal_close", "web_fetch",
+        "web_search", "browser_use", "workflow", "workspace_search",
+        "workspace_diff", "deliverable_write", "work_state_replace_plan",
+        "work_state_replace_todos", "work_state_set_goal", "write",
+        "workspace_list_files", "workspace_read_text", "workspace_write_text",
+        "plugin_marketplace"
+    ]
+
+    static let approvedBaseToolNames: Set<String> =
+        productionBaseToolNames.union(MobileNativeToolKit.approvedNames)
+            .subtracting(deniedBaseToolNames)
+
+    private static let ishRuntimeToolNames: Set<String> = [
+        "code_execute", "lsp", "run_code", "shell_execute",
+        "terminal_close", "terminal_list", "terminal_open", "terminal_read",
+        "terminal_send", "terminal_signal"
+    ]
+
+    static let executionBackendByToolName: [String: String] =
+        Dictionary(uniqueKeysWithValues: approvedBaseToolNames.sorted().map { name in
+            let backend: String
+            if ishRuntimeToolNames.contains(name) {
+                backend = "ish-runtime"
+            } else if ["job_kill", "job_list", "job_output", "schedule_create", "schedule_delete", "schedule_list", "send_message"].contains(name) {
+                backend = "swift-orchestration"
+            } else {
+                backend = "swift-native"
+            }
+            return (name, backend)
+        })
 }
 
 /// The declarative compilation result authored either by the main Agent or by
@@ -367,6 +402,7 @@ struct NativeAgentCompiledPlugin: Codable, Sendable, Equatable, Identifiable {
               sourceDigest.allSatisfy(\.isHexDigit),
               compilerProviderID.utf8.count <= 128,
               compilerModel.utf8.count <= 256,
+              (description?.utf8.count ?? 0) <= 1_000,
               promptSections.count <= 8,
               promptContexts.count <= 12,
               tools.count <= 16,
@@ -376,32 +412,46 @@ struct NativeAgentCompiledPlugin: Codable, Sendable, Equatable, Identifiable {
               compatibilityNotes.count <= 16 else {
             throw NativeAgentPluginError.invalidCompiledPlugin("插件元数据不合法。")
         }
+        if let description {
+            try Self.validateCredentialSafety(.string(description), field: "description")
+        }
 
         var totalTextBytes = 0
         guard promptSections.count(where: { $0.complete == true }) <= 1 else {
             throw NativeAgentPluginError.invalidCompiledPlugin(
-                "同一个插件只能声明一个完整系统提示替换段。"
+                "prompt_sections 最多只能有一个 complete=true；请把其余段设为 complete=false，或合并到同一个完整段。"
             )
         }
-        for section in promptSections {
+        for (index, section) in promptSections.enumerated() {
             guard (-10_000...10_000).contains(section.order),
                   !section.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                   section.text.utf8.count <= 24 * 1_024 else {
-                throw NativeAgentPluginError.invalidCompiledPlugin("系统提示贡献不合法。")
+                throw NativeAgentPluginError.invalidCompiledPlugin(
+                    "prompt_sections[\(index)] 不合法：order 必须在 -10000..10000，text 必须非空且不超过 24576 UTF-8 字节。"
+                )
             }
-            try ISHPluginHostCredentialFirewall.validate(.string(section.text))
+            try Self.validateCredentialSafety(
+                .string(section.text),
+                field: "prompt_sections[\(index)].text"
+            )
             totalTextBytes += section.text.utf8.count
         }
 
         var contextNames = Set<String>()
         for (index, context) in promptContexts.enumerated() {
-            guard contextNames.insert(context.name).inserted,
-                  Self.isContributionName(context.name),
+            guard contextNames.insert(context.name).inserted else {
+                throw NativeAgentPluginError.invalidCompiledPlugin(
+                    "prompt_contexts[\(index)].name 与前面的上下文重复。"
+                )
+            }
+            guard Self.isContributionName(context.name),
                   (-10_000...10_000).contains(context.order),
                   (1...32_768).contains(context.maximumCharacters),
                   context.prefix.utf8.count <= 8 * 1_024,
                   context.suffix.utf8.count <= 8 * 1_024 else {
-                throw NativeAgentPluginError.invalidCompiledPlugin("动态上下文贡献不合法。")
+                throw NativeAgentPluginError.invalidCompiledPlugin(
+                    "prompt_contexts[\(index)] 不合法：name/order/maximum_characters 或 prefix/suffix 长度不符合约束。"
+                )
             }
             switch context.source {
             case .file:
@@ -416,8 +466,14 @@ struct NativeAgentCompiledPlugin: Codable, Sendable, Equatable, Identifiable {
                     )
                 }
             }
-            try ISHPluginHostCredentialFirewall.validate(.string(context.prefix))
-            try ISHPluginHostCredentialFirewall.validate(.string(context.suffix))
+            try Self.validateCredentialSafety(
+                .string(context.prefix),
+                field: "prompt_contexts[\(index)].prefix"
+            )
+            try Self.validateCredentialSafety(
+                .string(context.suffix),
+                field: "prompt_contexts[\(index)].suffix"
+            )
             totalTextBytes += context.prefix.utf8.count + context.suffix.utf8.count
         }
 
@@ -429,7 +485,9 @@ struct NativeAgentCompiledPlugin: Codable, Sendable, Equatable, Identifiable {
                   try JSONEncoder().encode(settings.schema).count <= 32 * 1_024,
                   try JSONEncoder().encode(settings.defaults).count <= 32 * 1_024,
                   try JSONEncoder().encode(settings.values).count <= 32 * 1_024 else {
-                throw NativeAgentPluginError.invalidCompiledPlugin("插件设置不合法。")
+                throw NativeAgentPluginError.invalidCompiledPlugin(
+                    "settings 不合法：schema/defaults/values 必须是 object，且每项编码后不超过 32768 字节。"
+                )
             }
             try NativeAgentJSONSchemaValidator.validate(
                 value: settings.defaults,
@@ -439,34 +497,78 @@ struct NativeAgentCompiledPlugin: Codable, Sendable, Equatable, Identifiable {
                 value: settings.values,
                 schema: settings.schema
             )
-            try ISHPluginHostCredentialFirewall.validate(settings.defaults)
-            try ISHPluginHostCredentialFirewall.validate(settings.values)
+            try Self.validateCredentialSafety(settings.defaults, field: "settings.defaults")
+            try Self.validateCredentialSafety(settings.values, field: "settings.values")
         }
 
         var names = Set<String>()
-        for tool in tools {
-            guard names.insert(tool.name).inserted,
-                  Self.isToolName(tool.name),
-                  !allowedBaseTools.contains(tool.name),
-                  !tool.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  tool.description.utf8.count <= 1_024,
-                  tool.instructions.utf8.count <= 24 * 1_024,
-                  !tool.instructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  Set(tool.allowedTools).count == tool.allowedTools.count,
-                  tool.allowedTools.count <= 24,
-                  Set(tool.allowedTools).isSubset(of: allowedBaseTools) else {
-                throw NativeAgentPluginError.invalidCompiledPlugin("工具贡献不合法。")
+        for (index, tool) in tools.enumerated() {
+            guard names.insert(tool.name).inserted else {
+                throw NativeAgentPluginError.invalidCompiledPlugin(
+                    "tools[\(index)].name 与前面的工具重复。"
+                )
+            }
+            guard Self.isToolName(tool.name) else {
+                throw NativeAgentPluginError.invalidCompiledPlugin(
+                    "tools[\(index)].name 不合法：必须以小写字母开头，只能包含小写字母、数字、连字符或下划线，最多 64 字节。"
+                )
+            }
+            guard !allowedBaseTools.contains(tool.name) else {
+                throw NativeAgentPluginError.invalidCompiledPlugin(
+                    "tools[\(index)].name 不能覆盖内置原生工具；请改用插件专属的小写名称。"
+                )
+            }
+            guard !tool.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  tool.description.utf8.count <= 1_024 else {
+                throw NativeAgentPluginError.invalidCompiledPlugin(
+                    "tools[\(index)].description 必须非空且不超过 1024 UTF-8 字节。"
+                )
+            }
+            guard tool.instructions.utf8.count <= 24 * 1_024,
+                  !tool.instructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw NativeAgentPluginError.invalidCompiledPlugin(
+                    "tools[\(index)].instructions 必须非空且不超过 24576 UTF-8 字节。"
+                )
+            }
+            guard Set(tool.allowedTools).count == tool.allowedTools.count,
+                  tool.allowedTools.count <= 24 else {
+                throw NativeAgentPluginError.invalidCompiledPlugin(
+                    "tools[\(index)].allowed_tools 不能重复，且最多 24 项。"
+                )
+            }
+            let unsupportedAllowedTools = tool.allowedTools.filter {
+                !allowedBaseTools.contains($0)
+            }
+            guard unsupportedAllowedTools.isEmpty else {
+                let safeNames = unsupportedAllowedTools
+                    .filter(Self.isToolName)
+                    .prefix(8)
+                    .joined(separator: ", ")
+                let suffix = safeNames.isEmpty ? "" : "（例如：\(safeNames)）"
+                throw NativeAgentPluginError.invalidCompiledPlugin(
+                    "tools[\(index)].allowed_tools 含未批准的原生工具\(suffix)；只能使用 install 返回的 allowed_native_tools，删除或替换未批准名称。"
+                )
             }
             guard case let .object(schema) = tool.parameters,
                   schema["type"] == .string("object") else {
-                throw NativeAgentPluginError.invalidCompiledPlugin("工具参数必须是 JSON object schema。")
+                throw NativeAgentPluginError.invalidCompiledPlugin(
+                    "tools[\(index)].parameters 必须是 type=object 的 JSON Schema。"
+                )
             }
             let schemaBytes = try JSONEncoder().encode(tool.parameters).count
             guard schemaBytes <= 32 * 1_024 else {
-                throw NativeAgentPluginError.invalidCompiledPlugin("工具参数 schema 过大。")
+                throw NativeAgentPluginError.invalidCompiledPlugin(
+                    "tools[\(index)].parameters schema 编码后超过 32768 字节。"
+                )
             }
-            try ISHPluginHostCredentialFirewall.validate(tool.parameters)
-            try ISHPluginHostCredentialFirewall.validate(.string(tool.instructions))
+            try Self.validateCredentialSafety(
+                tool.parameters,
+                field: "tools[\(index)].parameters"
+            )
+            try Self.validateCredentialSafety(
+                .string(tool.instructions),
+                field: "tools[\(index)].instructions"
+            )
             try Self.validatePrivateStorageInstructions(tool)
             totalTextBytes += tool.description.utf8.count + tool.instructions.utf8.count
         }
@@ -516,14 +618,38 @@ struct NativeAgentCompiledPlugin: Codable, Sendable, Equatable, Identifiable {
                         "deny 工具策略必须提供原因。"
                     )
                 }
-                try ISHPluginHostCredentialFirewall.validate(.string(reason))
+                try Self.validateCredentialSafety(
+                    .string(reason),
+                    field: "tool_guards[\(index)].reason"
+                )
             }
         }
         guard totalTextBytes <= 128 * 1_024,
               compatibilityNotes.allSatisfy({ $0.utf8.count <= 1_024 }) else {
-            throw NativeAgentPluginError.invalidCompiledPlugin("原生插件内容过大。")
+            throw NativeAgentPluginError.invalidCompiledPlugin(
+                "原生插件内容过大：prompt/tool 文本总量最多 131072 UTF-8 字节，compatibility_notes 每项最多 1024 字节。"
+            )
+        }
+        for (index, note) in compatibilityNotes.enumerated() {
+            try Self.validateCredentialSafety(
+                .string(note),
+                field: "compatibility_notes[\(index)]"
+            )
         }
         return self
+    }
+
+    private static func validateCredentialSafety(
+        _ value: JSONValue,
+        field: String
+    ) throws {
+        do {
+            try ISHPluginHostCredentialFirewall.validate(value)
+        } catch {
+            throw NativeAgentPluginError.invalidCompiledPlugin(
+                "\(field) 含疑似凭据或敏感字段；删除真实令牌/密钥，只保留脱敏类别的说明文字。"
+            )
+        }
     }
 
     private static func validatePrivateStorageInstructions(

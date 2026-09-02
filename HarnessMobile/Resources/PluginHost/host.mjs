@@ -225,7 +225,9 @@ const marketplace = new MarketplaceManager(ctx, {
 })
 let marketplaceStartupError
 try {
+  const startupStartedAt = performance.now()
   await marketplace.start()
+  stderrLog(`[plugin-host] marketplace restored in ${Math.round(performance.now() - startupStartedAt)}ms`)
 } catch (error) {
   marketplaceStartupError = error
   stderrLog(`[plugin-host] community plugin registry unavailable: ${safeErrorMessage(error)}`)

@@ -111,6 +111,7 @@ actor CordisToolRuntime {
     private struct ToolEntry: Sendable {
         let registrationID: UUID
         let pluginID: CordisPluginID
+        let generationID: UInt64
         let mcpGenerationID: UUID?
         let tool: any LocalAgentTool
     }
@@ -127,22 +128,30 @@ actor CordisToolRuntime {
 
     fileprivate func register(
         _ tool: any LocalAgentTool,
-        pluginID: CordisPluginID
+        pluginID: CordisPluginID,
+        generationID: UInt64
     ) throws -> CordisDisposer {
         let name = tool.definition.name
         try Self.validateContributionName(name)
-        guard toolEntries[name] == nil else {
+        let previous = toolEntries[name]
+        if let previous,
+           previous.pluginID != pluginID || previous.generationID == generationID {
             throw CordisAgentServiceError.duplicateTool(name)
         }
         let registrationID = UUID()
         toolEntries[name] = ToolEntry(
             registrationID: registrationID,
             pluginID: pluginID,
+            generationID: generationID,
             mcpGenerationID: nil,
             tool: tool
         )
         return { [runtime = self] in
-            await runtime.removeTool(name: name, registrationID: registrationID)
+            await runtime.restoreTool(
+                name: name,
+                registrationID: registrationID,
+                previous: previous
+            )
         }
     }
 
@@ -169,6 +178,7 @@ actor CordisToolRuntime {
             replacements[name] = ToolEntry(
                 registrationID: UUID(),
                 pluginID: pluginID,
+                generationID: 0,
                 mcpGenerationID: generationID,
                 tool: tool
             )
@@ -252,9 +262,17 @@ actor CordisToolRuntime {
         return nil
     }
 
-    private func removeTool(name: String, registrationID: UUID) {
+    private func restoreTool(
+        name: String,
+        registrationID: UUID,
+        previous: ToolEntry?
+    ) {
         guard toolEntries[name]?.registrationID == registrationID else { return }
-        toolEntries.removeValue(forKey: name)
+        if let previous {
+            toolEntries[name] = previous
+        } else {
+            toolEntries.removeValue(forKey: name)
+        }
     }
 
     private func removeGuard(id: UUID) {
@@ -411,18 +429,21 @@ actor CordisSystemPromptRuntime {
     private struct SectionEntry: Sendable {
         let registrationID: UUID
         let pluginID: CordisPluginID
+        let generationID: UInt64
         let contribution: CordisPromptSection
     }
 
     private struct ContextEntry: Sendable {
         let registrationID: UUID
         let pluginID: CordisPluginID
+        let generationID: UInt64
         let contribution: CordisPromptContextContribution
     }
 
     private struct VariableEntry: Sendable {
         let registrationID: UUID
         let pluginID: CordisPluginID
+        let generationID: UInt64
         let name: String
         let provider: CordisPromptVariableProvider
     }
@@ -433,62 +454,95 @@ actor CordisSystemPromptRuntime {
 
     fileprivate func register(
         _ section: CordisPromptSection,
-        pluginID: CordisPluginID
+        pluginID: CordisPluginID,
+        generationID: UInt64
     ) throws -> CordisDisposer {
         try Self.validateContributionName(section.name)
-        guard sections[section.name] == nil else {
+        let previous = sections[section.name]
+        if let previous,
+           previous.pluginID != pluginID || previous.generationID == generationID {
             throw CordisAgentServiceError.duplicatePromptSection(section.name)
+        }
+        if section.complete,
+           let existing = sections.values.first(where: {
+               $0.contribution.complete && $0.contribution.name != section.name
+           }) {
+            throw CordisAgentServiceError.multipleCompletePromptSections([
+                existing.contribution.name,
+                section.name
+            ].sorted())
         }
         let registrationID = UUID()
         sections[section.name] = SectionEntry(
             registrationID: registrationID,
             pluginID: pluginID,
+            generationID: generationID,
             contribution: section
         )
         return { [runtime = self] in
-            await runtime.removeSection(name: section.name, registrationID: registrationID)
+            await runtime.restoreSection(
+                name: section.name,
+                registrationID: registrationID,
+                previous: previous
+            )
         }
     }
 
     fileprivate func register(
         _ context: CordisPromptContextContribution,
-        pluginID: CordisPluginID
+        pluginID: CordisPluginID,
+        generationID: UInt64
     ) throws -> CordisDisposer {
         try Self.validateContributionName(context.name)
-        guard contexts[context.name] == nil else {
+        let previous = contexts[context.name]
+        if let previous,
+           previous.pluginID != pluginID || previous.generationID == generationID {
             throw CordisAgentServiceError.duplicatePromptContext(context.name)
         }
         let registrationID = UUID()
         contexts[context.name] = ContextEntry(
             registrationID: registrationID,
             pluginID: pluginID,
+            generationID: generationID,
             contribution: context
         )
         return { [runtime = self] in
-            await runtime.removeContext(name: context.name, registrationID: registrationID)
+            await runtime.restoreContext(
+                name: context.name,
+                registrationID: registrationID,
+                previous: previous
+            )
         }
     }
 
     fileprivate func registerVariable(
         name: String,
         pluginID: CordisPluginID,
+        generationID: UInt64,
         provider: @escaping CordisPromptVariableProvider
     ) throws -> CordisDisposer {
         guard Self.isVariableName(name) else {
             throw CordisAgentServiceError.invalidPromptVariableName(name)
         }
-        guard variables[name] == nil else {
+        let previous = variables[name]
+        if let previous,
+           previous.pluginID != pluginID || previous.generationID == generationID {
             throw CordisAgentServiceError.duplicatePromptVariable(name)
         }
         let registrationID = UUID()
         variables[name] = VariableEntry(
             registrationID: registrationID,
             pluginID: pluginID,
+            generationID: generationID,
             name: name,
             provider: provider
         )
         return { [runtime = self] in
-            await runtime.removeVariable(name: name, registrationID: registrationID)
+            await runtime.restoreVariable(
+                name: name,
+                registrationID: registrationID,
+                previous: previous
+            )
         }
     }
 
@@ -609,19 +663,34 @@ actor CordisSystemPromptRuntime {
         )
     }
 
-    private func removeSection(name: String, registrationID: UUID) {
+    private func restoreSection(
+        name: String,
+        registrationID: UUID,
+        previous: SectionEntry?
+    ) {
         guard sections[name]?.registrationID == registrationID else { return }
-        sections.removeValue(forKey: name)
+        if let previous { sections[name] = previous }
+        else { sections.removeValue(forKey: name) }
     }
 
-    private func removeContext(name: String, registrationID: UUID) {
+    private func restoreContext(
+        name: String,
+        registrationID: UUID,
+        previous: ContextEntry?
+    ) {
         guard contexts[name]?.registrationID == registrationID else { return }
-        contexts.removeValue(forKey: name)
+        if let previous { contexts[name] = previous }
+        else { contexts.removeValue(forKey: name) }
     }
 
-    private func removeVariable(name: String, registrationID: UUID) {
+    private func restoreVariable(
+        name: String,
+        registrationID: UUID,
+        previous: VariableEntry?
+    ) {
         guard variables[name]?.registrationID == registrationID else { return }
-        variables.removeValue(forKey: name)
+        if let previous { variables[name] = previous }
+        else { variables.removeValue(forKey: name) }
     }
 
     private nonisolated static func validateContributionName(_ name: String) throws {
@@ -704,7 +773,8 @@ extension CordisPluginContext {
         let acquire: @Sendable () async throws -> CordisDisposer? = {
             let disposer: CordisDisposer = try await runtime.register(
                 tool,
-                pluginID: pluginID
+                pluginID: pluginID,
+                generationID: context.generationID
             )
             await context.emit(
                 CordisAgentLoopEvents.toolsChange,
@@ -762,8 +832,13 @@ extension CordisPluginContext {
         in runtime: CordisSystemPromptRuntime
     ) async throws -> CordisEffectHandle {
         let pluginID = pluginID
+        let context = self
         return try await effect("systemPrompt.section(\(section.name))") {
-            let disposer = try await runtime.register(section, pluginID: pluginID)
+            let disposer = try await runtime.register(
+                section,
+                pluginID: pluginID,
+                generationID: context.generationID
+            )
             return Optional(disposer)
         }
     }
@@ -780,8 +855,13 @@ extension CordisPluginContext {
         in runtime: CordisSystemPromptRuntime
     ) async throws -> CordisEffectHandle {
         let pluginID = pluginID
+        let context = self
         return try await effect("systemPrompt.context(\(contribution.name))") {
-            let disposer = try await runtime.register(contribution, pluginID: pluginID)
+            let disposer = try await runtime.register(
+                contribution,
+                pluginID: pluginID,
+                generationID: context.generationID
+            )
             return Optional(disposer)
         }
     }
@@ -801,10 +881,12 @@ extension CordisPluginContext {
         provider: @escaping CordisPromptVariableProvider
     ) async throws -> CordisEffectHandle {
         let pluginID = pluginID
+        let context = self
         return try await effect("systemPrompt.variable(\(name))") {
             let disposer = try await runtime.registerVariable(
                 name: name,
                 pluginID: pluginID,
+                generationID: context.generationID,
                 provider: provider
             )
             return Optional(disposer)

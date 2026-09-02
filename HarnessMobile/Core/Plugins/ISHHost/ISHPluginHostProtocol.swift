@@ -647,6 +647,33 @@ struct ISHMarketplaceCatalog: Codable, Sendable, Equatable {
     let items: [ISHMarketplaceCatalogItem]
 }
 
+/// Installation is native-first for every catalog entry. The value is a
+/// conservative catalog hint; the source snapshot and signed Swift validator
+/// remain authoritative at install time.
+enum ISHMarketplaceNativeInstallStrategy: String, Codable, Sendable, Equatable {
+    case nativeFirst = "native-first"
+    case nativeInstalled = "native-installed"
+    case ishFallback = "ish-fallback"
+    case ishRequired = "ish-required"
+
+    var title: String {
+        switch self {
+        case .nativeFirst: "原生优先"
+        case .nativeInstalled: "已原生安装"
+        case .ishFallback: "iSH 回退"
+        case .ishRequired: "仅 iSH"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .nativeFirst, .nativeInstalled: "iphone"
+        case .ishFallback: "arrow.triangle.2.circlepath"
+        case .ishRequired: "shippingbox"
+        }
+    }
+}
+
 struct ISHMarketplaceCatalogItem: Codable, Sendable, Equatable, Identifiable {
     let id: String
     let name: String
@@ -659,6 +686,59 @@ struct ISHMarketplaceCatalogItem: Codable, Sendable, Equatable, Identifiable {
     let installed: Bool
     let installedPluginID: String?
     let installedVersion: String?
+    let nativeInstallStrategy: ISHMarketplaceNativeInstallStrategy?
+
+    init(
+        id: String,
+        name: String,
+        repositoryURL: String,
+        repositoryKey: String,
+        description: String,
+        category: String,
+        compatibility: ISHMarketplaceCompatibility,
+        unsupportedReason: String?,
+        installed: Bool,
+        installedPluginID: String?,
+        installedVersion: String?,
+        nativeInstallStrategy: ISHMarketplaceNativeInstallStrategy? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.repositoryURL = repositoryURL
+        self.repositoryKey = repositoryKey
+        self.description = description
+        self.category = category
+        self.compatibility = compatibility
+        self.unsupportedReason = unsupportedReason
+        self.installed = installed
+        self.installedPluginID = installedPluginID
+        self.installedVersion = installedVersion
+        self.nativeInstallStrategy = nativeInstallStrategy
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, repositoryURL, repositoryKey, description, category
+        case compatibility, unsupportedReason, installed, installedPluginID
+        case installedVersion, nativeInstallStrategy
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try container.decode(String.self, forKey: .id),
+            name: try container.decode(String.self, forKey: .name),
+            repositoryURL: try container.decode(String.self, forKey: .repositoryURL),
+            repositoryKey: try container.decode(String.self, forKey: .repositoryKey),
+            description: try container.decode(String.self, forKey: .description),
+            category: try container.decode(String.self, forKey: .category),
+            compatibility: try container.decode(ISHMarketplaceCompatibility.self, forKey: .compatibility),
+            unsupportedReason: try container.decodeIfPresent(String.self, forKey: .unsupportedReason),
+            installed: try container.decode(Bool.self, forKey: .installed),
+            installedPluginID: try container.decodeIfPresent(String.self, forKey: .installedPluginID),
+            installedVersion: try container.decodeIfPresent(String.self, forKey: .installedVersion),
+            nativeInstallStrategy: try container.decodeIfPresent(ISHMarketplaceNativeInstallStrategy.self, forKey: .nativeInstallStrategy)
+        )
+    }
 }
 
 enum ISHMarketplacePluginSourceKind: String, Codable, Sendable, Equatable {
@@ -984,8 +1064,25 @@ enum ISHPluginHostCredentialFirewall {
 
     private static func containsCredentialPattern(_ text: String) -> Bool {
         let lowercased = text.lowercased()
-        if lowercased.range(of: "bearer ") != nil {
-            return true
+        var bearerSearchStart = lowercased.startIndex
+        while let bearer = lowercased.range(
+            of: "bearer ",
+            range: bearerSearchStart..<lowercased.endIndex
+        ) {
+            var index = bearer.upperBound
+            var count = 0
+            while index < lowercased.endIndex {
+                let character = lowercased[index]
+                guard character.isLetter || character.isNumber || character == "_" || character == "-" else {
+                    break
+                }
+                count += 1
+                index = lowercased.index(after: index)
+            }
+            if count >= 12 {
+                return true
+            }
+            bearerSearchStart = bearer.upperBound
         }
 
         var searchStart = text.startIndex
