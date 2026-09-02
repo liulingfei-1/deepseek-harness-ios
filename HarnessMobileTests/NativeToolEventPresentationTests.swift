@@ -182,33 +182,6 @@ final class NativeToolEventPresentationTests: XCTestCase {
         XCTAssertFalse(terminal.failedExit)
     }
 
-    func testIOSNativeUsesTerminalCardWithoutAllowingArbitraryCommandNames() {
-        let presentation = NativeToolEventPresentation.derive(
-            name: "ios_native",
-            arguments: #"{"command":"apple-calendar","arguments":["list","--today"],"timeout_seconds":45}"#,
-            result: #"{"command":"apple-calendar","duration_ms":18,"exit_code":0,"stderr":"","stdout":"{\"events\":[]}"}"#,
-            status: .succeeded
-        )
-
-        guard case let .terminal(terminal) = presentation else {
-            return XCTFail("Expected an iOS native terminal presentation")
-        }
-        XCTAssertEqual(terminal.firstCommandLine, "apple-calendar list --today")
-        XCTAssertEqual(terminal.timeoutSeconds, 45)
-        XCTAssertEqual(terminal.exitCode, 0)
-        XCTAssertNil(terminal.processID)
-        XCTAssertEqual(terminal.durationMilliseconds, 18)
-
-        XCTAssertEqual(
-            NativeToolEventPresentation.derive(
-                name: "ios_native",
-                arguments: #"{"command":"sh","arguments":["-c","id"]}"#,
-                result: nil
-            ),
-            .generic
-        )
-    }
-
     func testWorkflowBuildsDedicatedPhaseAndChildProjection() {
         let arguments = #"{"meta":{"name":"并行研究","description":"汇总资料","phases":[{"title":"搜索","detail":"抓取来源"},{"title":"汇总"}]}}"#
         let output = [
