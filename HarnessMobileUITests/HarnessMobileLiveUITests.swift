@@ -1213,6 +1213,29 @@ final class HarnessMobileChatChromeUITests: XCTestCase {
         dismiss.tap()
         XCTAssertTrue(banner.waitForNonExistence(timeout: 3))
     }
+
+    func testReasoningDisclosureKeepsModelContentReachable() {
+        let app = XCUIApplication()
+        addTeardownBlock { app.terminate() }
+        app.launchArguments = [
+            "-reset-persistent-state-for-ui-testing",
+            "-bootstrap-configuration-for-ui-testing",
+            "-disable-animations-for-ui-testing",
+            "-present-reasoning-for-ui-testing",
+        ]
+        app.launch()
+
+        openConversation(in: app)
+        let reasoning = app.buttons["思考过程"]
+        XCTAssertTrue(reasoning.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["思考"].exists)
+        reasoning.tap()
+        XCTAssertTrue(app.staticTexts["先核对入口，再检查状态与可见操作。"].waitForExistence(timeout: 5))
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "chat-reasoning-disclosure"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
 }
 
 @MainActor

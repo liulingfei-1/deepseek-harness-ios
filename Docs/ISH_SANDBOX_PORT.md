@@ -19,23 +19,23 @@ trees, applies the recorded patches, and builds `HarnessISH.xcframework`.
 The canonical upstream checkouts remain clean and are never compiled after a
 local in-place edit.
 
-The XCFramework contains the three iSH libraries plus a minimal OpenMinis
-compatibility bridge:
+The XCFramework contains the three iSH libraries plus a minimal runtime bridge
+for embedding iSH in Harness Mobile:
 
 - `libish`: kernel, processes, syscalls, sockets, PTY, mounts, and fakefs
 - `libish_emu`: ARM64 Asbestos interpreter and ARM64 Linux VDSO
 - `libfakefs`: SQLite-backed Linux filesystem metadata
 - `ISHKernel`: boot, crash containment, fakefs, PTY, DNS, exit notifications,
-  mounts, path routing hooks, and CPU throttle hooks
+  mounts, path routing hooks, and CPU throttle hooks, without generic iOS
+  capability/offload handlers
 - `ISHShellExecutor`: independent stdin/stdout/stderr pipes, PID reporting,
   timeout support, process-group termination, and streaming output
 - `CurrentRoot`: versioned `RootfsPatch.bundle` overlay application
 
-The bridge is extracted from the locked OpenMinis sources at build time. The
-local bridge patch removes unrelated native offload registrations, exposes the
-guest network policy, changes the DNS storage path, and bounds retained command
-output. The full upstream `ISHKernel.m` must not be copied into the app target
-unchanged because it imports product-specific offloads and app services.
+The bridge is extracted from the locked OpenMinis sources at build time. Local
+patches expose guest network policy, change DNS storage paths, and bound
+retained command output. The generic OpenMinis native offload set is excluded;
+iOS integrations belong to typed Swift providers in the app target.
 
 ## Executor semantics
 

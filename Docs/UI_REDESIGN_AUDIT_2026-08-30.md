@@ -280,6 +280,13 @@
 - 调整后截图：`/tmp/chat-running-final-attachments-0902/F32C5797-2E6F-4DE9-A332-FB33EE61F396.png`。
 - 专项测试：`HarnessMobileConcurrentRunsUITests/testCreatingAndSwitchingSessionsKeepsBothRootRunsVisible` 1/1 通过（`/tmp/hm-chat-running-final-0902.xcresult`），覆盖两条根运行、会话切换、中文运行状态和最终截图。真实流式输出、运行计时、极限 Dynamic Type、VoiceOver、横屏和真机切换仍为 `VERIFY`。
 
+### 推理折叠标题中文化（2026-09-02）
+
+- 调整前截图：`/tmp/reasoning-before-failure-attachments-0902/2F64C4A6-DF39-40E9-A381-117802372377.png`。助手框架、正文和无障碍标签均为中文，推理折叠标题仍单独显示 `Think`。
+- 调整：共享推理折叠标题改为“思考”；原始 reasoning 内容、摘要、展开/折叠、流式进度和 VoiceOver 语义不变。复用 `AgentMessage.reasoning` 增加最小 DEBUG 夹具，没有新增状态模型或组件。
+- 调整后截图：`/tmp/reasoning-final-attachments-0902/DF146F83-CDA9-4AC4-97FB-A06423FAE9AA.png`。
+- 专项测试：`HarnessMobileChatChromeUITests/testReasoningDisclosureKeepsModelContentReachable` 1/1 通过（`/tmp/hm-reasoning-final-0902.xcresult`），覆盖真实会话入口、中文标题、展开操作、原始推理正文和最终截图。首次基线用例错误假设折叠摘要不会出现在静态文本树，导致 `XCTAssertFalse failed`，测试结束还记录 `xcrun: error: unable to find utility "simctl"`；删除错误断言后最终用例通过。真实流式推理、长推理、极限 Dynamic Type、VoiceOver、横屏和真机仍为 `VERIFY`。
+
 ## 聊天添加内容菜单收口（2026-09-01）
 
 - 调整前截图：`/tmp/chat-add-before-attachments-0901-1/EC06299C-4C1C-4418-A02D-E3478B09C591.png`。“添加内容”菜单同时列出命令和三类附件，而输入栏已经有独立常驻命令按钮，形成重复入口并混淆菜单任务。

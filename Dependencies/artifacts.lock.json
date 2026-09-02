@@ -3,7 +3,7 @@
   "artifacts": [
     {
       "path": "Vendor/OpenMinisISH/Artifacts/HarnessISH.xcframework.zip",
-      "sha256": "23016bfc2930f63510c51d3b26edec484220f16b0e2648f1f927f6a85530962b",
+      "sha256": "09cb4586bd210fa3d8b6b9d48215dca69947c70691923a3560d585074e7c651f",
       "source": "openminis-ishArm64",
       "required": false
     },

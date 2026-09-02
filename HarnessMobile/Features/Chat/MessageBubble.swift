@@ -481,7 +481,7 @@ private struct ReasoningDisclosure: View {
                 HStack(spacing: 7) {
                     Image(systemName: "brain.head.profile")
                         .foregroundStyle(.secondary)
-                    Text("Think")
+                    Text("思考")
                         .fontWeight(.semibold)
                     Text(summary)
                         .foregroundStyle(.secondary)
