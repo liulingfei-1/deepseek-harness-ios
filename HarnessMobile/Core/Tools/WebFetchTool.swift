@@ -810,6 +810,71 @@ final class WebSearchHTTPClient: @unchecked Sendable {
     }
 }
 
+/// Transport for the upstream `web-search-deepseek` backend: an
+/// Anthropic-compatible Messages call carrying the native
+/// `web_search_20250305` server tool. Kept inside the audited web-fetch
+/// boundary because it owns the only URLSession usage for search.
+enum DeepSeekSearchTransport {
+    /// Official DeepSeek expects `x-api-key`; an Anthropic-compatible proxy may
+    /// expect `Authorization: Bearer` — send both so either resolves.
+    static func perform(
+        query: String,
+        apiKey: String,
+        baseURL: String,
+        model: String,
+        apiVersion: String,
+        maxTokens: Int,
+        maxUses: Int,
+        client: WebSearchHTTPClient
+    ) async throws -> JSONValue {
+        let endpoint = baseURL.hasSuffix("/") ? baseURL + "messages" : baseURL + "/messages"
+        guard let url = URL(string: endpoint) else {
+            throw DeepSeekSearchError.transport("invalid DeepSeek search endpoint: \(baseURL)")
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "authorization")
+        request.setValue(apiVersion, forHTTPHeaderField: "anthropic-version")
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        request.setValue("application/json", forHTTPHeaderField: "accept")
+        request.setValue("deepseek-harness-mobile/1.0", forHTTPHeaderField: "user-agent")
+        request.httpBody = try JSONEncoder().encode(
+            JSONValue.object([
+                "model": .string(model),
+                "max_tokens": .number(Double(maxTokens)),
+                "messages": .array([
+                    .object([
+                        "role": .string("user"),
+                        "content": .array([
+                            .object([
+                                "type": .string("text"),
+                                "text": .string("Perform a web search for the query: \(query)")
+                            ])
+                        ])
+                    ])
+                ]),
+                "tools": .array([
+                    .object([
+                        "type": .string("web_search_20250305"),
+                        "name": .string("web_search"),
+                        "max_uses": .number(Double(maxUses))
+                    ])
+                ])
+            ])
+        )
+        let (data, http) = try await client.data(for: request)
+        guard (200..<300).contains(http.statusCode) else {
+            let detail = String(decoding: data.prefix(400), as: UTF8.self)
+            throw DeepSeekSearchError.endpoint(
+                status: http.statusCode,
+                detail: "端点 \(endpoint) 返回 \(http.statusCode)：\(detail)"
+            )
+        }
+        return try JSONDecoder().decode(JSONValue.self, from: data)
+    }
+}
+
 // URLSession is documented as thread-safe and both stored properties are immutable after init.
 // Remove this escape hatch if Foundation gives URLSession/its delegate fully checked Sendable APIs.
 final class WebFetchHTTPClient: @unchecked Sendable {

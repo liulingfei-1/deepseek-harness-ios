@@ -81,7 +81,8 @@ enum ProductionToolCatalog {
         subagentPolicy: LocalSubagentPolicy = LocalSubagentPolicy(),
         workflowLifecycleSink: @escaping LocalWorkflowLifecycleSink = { _ in },
         terminalProvider: (any ISHTerminalProviding)? = nil,
-        trajectoryRepository: any SessionPersistence = SessionTrajectoryRepository()
+        trajectoryRepository: any SessionPersistence = SessionTrajectoryRepository(),
+        webSearchProvider: (any WebSearchProvider)? = nil
     ) -> [any LocalAgentTool] {
         let resolvedSkillRegistry = skillRegistry ?? MobileSkillRegistry(workspaceStore: workspaceStore)
         let resolvedFileSystemEnvironment = fileSystemEnvironment ?? .guarded(
@@ -119,7 +120,7 @@ enum ProductionToolCatalog {
                 PluginMarketplaceTool(executor: pluginMarketplaceExecutor),
                 SkillLoadTool(registry: resolvedSkillRegistry),
                 WebFetchTool(),
-                WebSearchTool(),
+                WebSearchTool(provider: webSearchProvider),
                 HarnessBrowserTool(sessionID: sessionID),
                 StrReplaceEditorTool(environment: resolvedFileSystemEnvironment),
                 WorkStateGetTool(coordinator: workStateCoordinator),

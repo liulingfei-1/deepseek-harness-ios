@@ -54,6 +54,19 @@ extension AppModel {
         }
     }
 
+    /// Upstream `web-search-deepseek`: a search backend that reuses the
+    /// DeepSeek credential against the Anthropic-compatible Messages endpoint
+    /// with the native `web_search_20250305` server tool. Only the official
+    /// DeepSeek route exposes that endpoint; custom OpenAI-compatible routes
+    /// keep the on-device DuckDuckGo backend.
+    func deepSeekSearchProviderIfConfigured() -> (any WebSearchProvider)? {
+        guard effectiveConfiguration.providerID == .deepSeekOfficial else { return nil }
+        return DeepSeekSearchProvider(resolveApiKey: { [weak self] in
+            guard let self else { return nil }
+            return (try? await self.apiKey(for: self.effectiveConfiguration)) ?? nil
+        })
+    }
+
     func nativeAgentBaseTools() -> [any LocalAgentTool] {
         ProductionToolCatalog.makeTools(
             workspaceStore: workspaceStore,
@@ -76,7 +89,8 @@ extension AppModel {
             jobRegistry: jobRegistry,
             scheduleStore: scheduleStore,
             terminalProvider: terminalProvider,
-            trajectoryRepository: trajectoryRepository
+            trajectoryRepository: trajectoryRepository,
+            webSearchProvider: deepSeekSearchProviderIfConfigured()
         ).filter { NativeAgentPluginPolicy.approvedBaseToolNames.contains($0.definition.name) }
     }
 
