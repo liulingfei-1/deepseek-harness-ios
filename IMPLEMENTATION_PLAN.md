@@ -13,7 +13,7 @@
 | 阶段 | 目标 | 状态 | 完成门 |
 | --- | --- | --- | --- |
 | P0 控制基线 | 12 份控制文档接入 `AGENTS.md` | DONE | 13 个入口文件、相对链接、优先级和 `git diff --check` 已验证 |
-| P1 UI 收口 | 逐页审计全部主要界面并最小改造 | IN PROGRESS | UI 审计表无未处理页面；专项截图/测试齐全 |
+| P1 UI 收口 | 逐页审计全部主要界面并最小改造 | DONE（模拟器范围） | 审计表 26 页 DONE、仅 VoiceOver/触控归 P4 真机矩阵；116 张证据覆盖深色/浅色/XXXL 三模式，11 类专项测试全绿 |
 | P2 Runtime/Parity | 完成活动 parity 项和上游契约核对 | IN PROGRESS | 修补日志活动项均有诚实状态和证据 |
 | P3 能力/安全 | 对齐生产目录、权限、entitlement、清单和边界 | IN PROGRESS | capability verifier、边界审计与安全测试通过 |
 | P4 真机验收 | 在 iPhone 16 Pro 覆盖真实路径 | VERIFY | API、图片、文件、iSH、插件、后台、长会话、诊断、UI 矩阵通过 |
