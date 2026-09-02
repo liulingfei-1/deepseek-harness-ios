@@ -438,7 +438,7 @@
 
 ## 新发现缺陷（2026-09-02，WorkBuddy 复查轮）
 
-- **首页搜索框在 XXXL 极限字号下 placeholder 被裁剪不可见**（深色、竖屏即可复现；medium 字号正常）。`SessionsView` 使用 `.searchable(placement: .navigationBarDrawer(displayMode: .automatic))`，系统搜索框高度未随 Accessibility 字号增长，大号 placeholder 超出框高被裁剪。属于系统组件在极限 Dynamic Type 下的布局边界，待评估统一修法（自定义搜索框或 iOS 26 `searchToolbarBehavior`），暂记 `VERIFY`。
+- **首页搜索框在 XXXL 极限字号下 placeholder 被裁剪不可见**（深色、竖屏即可复现；medium 字号正常）。`SessionsView` 使用 `.searchable(placement: .navigationBarDrawer(displayMode: .automatic))`，系统搜索框高度未随 Accessibility 字号增长，大号 placeholder 超出框高被裁剪。2026-09-02 已实测 iOS 26 `searchToolbarBehavior(.minimize)`（两种 modifier 顺序）在本页均不改变渲染，判定为系统组件在极限 Dynamic Type 下的已知边界：搜索功能本身可用（点击后正常输入），仅占位文案不可见。记录为接受边界，不再投入自定义搜索框方案；若后续 iOS 版本修复系统行为则自动消失。
 - **会话行相对时间曾随设备语言显示英文**（"34 min. ago"）：`SessionsView` 相对时间未固定 `zh_CN` locale。已按 `TrajectoryView`/插件市场惯例修复并经模拟器截图复核（"40分钟前"），提交 `1d5947c`。
 
 ## 证据补齐轮（2026-09-02，WorkBuddy）
