@@ -416,6 +416,15 @@ git diff --check
 - 将共享推理折叠标题 `Think` 改为“思考”；原始 reasoning、摘要、展开/折叠、流式进度和无障碍语义不变。
 - `HarnessMobileChatChromeUITests/testReasoningDisclosureKeepsModelContentReachable` 1/1 通过（`/tmp/hm-reasoning-final-0902.xcresult`）；前后截图与首次错误断言说明见 UI 审计。真实流式/长推理、无障碍矩阵和真机仍为 `VERIFY`。
 
+### UI-067 · 视觉打磨四轮与证据补齐（2026-09-02）
+
+- 会话行相对时间固定 `zh_CN` locale（提交 `1d5947c`）；Agent 预设 sheet 改 `.large` detent 修复下半列表被 medium detent 挡住（`ef80f71`）；空会话 slash 入口断言按常驻设计更新（`373fbe6`）。
+- 命令面板：内置命令描述中文化、行字体改系统 medium、`LazyVStack` 高度估错溢出 280pt frame 改 `VStack`（`763160a`）；header/描述的 SwiftUI `.secondary` vibrancy 文字在 `secondarySystemBackground` 容器上整体透明（iOS 26 合成缺陷），改 `Color(uiColor: .secondaryLabel)` 修复（`db844db`）。
+- 计划审阅：sheet 弹出动画中间帧被 `ConversationMeasuredBlock` 固化为 minHeight，产生 140-244pt 块间空隙；`NativeMarkdownText` 新增 `measuresBlocks` 开关，一次性 sheet 禁用高度缓存（`957c31d`）。
+- 聊天空态引导运行中隐藏、后台任务空态改 `ContentUnavailableView`（`957c31d`）；工具页 iSH 行 `.black` tint 深色隐形改 `.primary`、轨迹次统计横滚裁剪改 `ViewThatFits` 两行（`763160a`）。
+- 验证：SwiftPM 全量 823 tests 多轮通过；10 类 UI 专项全量回归 3 轮 `TEST SUCCEEDED`（`/tmp/hm-refresh-all.xcresult` 等）；40 张全量重截图逐一复核修复生效（`/tmp/hm-refresh-named/`）；测试侧新增 iOS 26 底部搜索玻璃滚动适配（`5e939a1`）。
+- 真机边界：命令面板 vibrancy 修复在 iPhone 16 Pro 的实际渲染、底部搜索玻璃滚动到底末行可见性、VoiceOver 顺序与触控矩阵仍为 `VERIFY`。
+
 ### DOC-001 · Harness 控制文档基线（2026-08-31）
 
 - 新增 `PRD.md`、`DESIGN_SYSTEM.md`、`APP_FLOW.md`、`FRONTEND_GUIDELINES.md`、`BACKEND_STRUCTRUE.md`、`SECURITY_GUIDELINES.md`、`CAPABILITY_CATALOG.md`、`TECH_STACK.md`、`QUALITY_GUIDELINES.md`、`PLATFORM_GUIDELINES.md`、`IMPLEMENTATION_PLAN.md` 和 `DECISIONS.md`。
