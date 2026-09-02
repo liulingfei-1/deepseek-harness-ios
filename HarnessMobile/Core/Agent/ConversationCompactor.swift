@@ -379,17 +379,12 @@ enum ConversationCompactor {
     }
 
     private static func boundedPrefix(_ value: String, maximumUTF8Bytes: Int) -> String {
-        guard value.utf8.count > maximumUTF8Bytes else { return value }
-        var result = ""
-        var used = 0
-        for scalar in value.unicodeScalars {
-            let fragment = String(scalar)
-            let bytes = fragment.utf8.count
-            guard used + bytes <= maximumUTF8Bytes - 3 else { break }
-            result.unicodeScalars.append(scalar)
-            used += bytes
-        }
-        return result + "..."
+        // Mirrors upstream `dsh-output-retention`'s byte-oriented head
+        // window: cut only on UTF-8 boundaries, reserving room for the
+        // ellipsis.
+        let budget = max(0, maximumUTF8Bytes - 3)
+        guard value.utf8.count > budget else { return value }
+        return OutputRetention.safeHead(value, maxBytes: budget) + "..."
     }
 
     private static func fittedProjection(
