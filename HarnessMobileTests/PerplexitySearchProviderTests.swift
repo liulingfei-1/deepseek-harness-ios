@@ -11,18 +11,13 @@ import XCTest
 /// `citations[]` URLs are the fallback when search results are absent.
 final class PerplexitySearchProviderTests: XCTestCase {
     func testSearchResultsCarryTitleAndSnippet() {
+        // Perplexity attaches these to the completion response's top level.
         let response: JSONValue = .object([
-            "choices": .array([
+            "search_results": .array([
                 .object([
-                    "message": .object([
-                        "search_results": .array([
-                            .object([
-                                "url": .string("https://example.com/a"),
-                                "title": .string("A"),
-                                "snippet": .string("snippet a")
-                            ])
-                        ])
-                    ])
+                    "url": .string("https://example.com/a"),
+                    "title": .string("A"),
+                    "snippet": .string("snippet a")
                 ])
             ])
         ])
