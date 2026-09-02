@@ -159,6 +159,9 @@
 | `skill-filesystem` | ✅（核对即对齐：`skillDocuments()` 扫描/frontmatter/发现，仅限私有工作区） | — |
 | `session-checkpoint-policy` | ✅（核对即对齐：`checkpointSession` + `shouldCheckpointBeforeRun` 请求前落盘） | — |
 | `web-search-exa` / `web-search-perplexity` | ✅ 能力就绪（凭据 thunk 挂起，配置 key 后启用） | `5e8e562` |
+| `util/output-retention` | ✅ 库对齐（字节导向 + UTF-8 边界安全 + 精确省略元数据） | `9bb5eff` |
+| `compaction-tool-result-pruner` | 🟡 库就绪（`ToolResultPruner.prune`，head+marker+tail），**Compactor 集成待单独设计**——移动端压缩是"整单元保留"哲学，需先定义剪枝与摘要流的交互 | `9bb5eff` |
+| goal-round UI（轮次/阻塞可见性） | ✅ 工作区 dock 显示 used/cap 徽标与阻塞警示 | `01c23de` |
 | `anonymous-user-id` | ✅ | `08696c2` |
 | `deepseek-llm-api-extensions` | ✅ 注册表 + prepare/accept 语义 | `1e7f50d` |
 | `hook-protocol`（类型/matcher/输出解析） | ✅ | `161bdf6` |
