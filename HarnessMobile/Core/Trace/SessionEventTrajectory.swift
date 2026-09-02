@@ -32,6 +32,10 @@ enum SessionEventVocabulary {
     /// Durable model route for one session, mirroring upstream v0.1.2
     /// `ModelSelection` (`provider`, `model`, optional `reasoningEffort`).
     static let modelSelection = "model/selection"
+    /// Mirrors upstream `permission-presets` so the latest user-chosen
+    /// permission preset for a session is durable; the payload is the
+    /// preset table key (or `custom` when the effective knobs match none).
+    static let permissionPreset = "permission/preset"
 
     static let upstreamKnown: Set<String> = [
         "agent-preset/selected",

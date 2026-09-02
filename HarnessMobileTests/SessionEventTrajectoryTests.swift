@@ -933,6 +933,9 @@ final class SessionEventTrajectoryTests: XCTestCase {
             mobileOwned.isSubset(of: SessionEventVocabulary.upstreamKnown),
             "mobile-only event names dropped: \(mobileOwned.subtracting(SessionEventVocabulary.upstreamKnown).sorted())"
         )
+        // permission/preset is mobile-mirrored from upstream; both sides
+        // must read the same constant string.
+        XCTAssertEqual(SessionEventVocabulary.permissionPreset, "permission/preset")
     }
 
     private func makeRoot() -> URL {

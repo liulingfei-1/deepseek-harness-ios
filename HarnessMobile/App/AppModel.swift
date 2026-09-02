@@ -2036,8 +2036,29 @@ final class AppModel {
     func setPermissionMode(_ mode: ToolPermissionMode) {
         guard !isRunning, controlState.permissionMode != mode else { return }
         controlState.permissionMode = mode
+        recordPermissionPreset(mode)
         Task {
             await persistSession()
+        }
+    }
+
+    /// Records the durable `permission/preset` event the upstream
+    /// `permission-presets` package appends whenever the user picks a named
+    /// permission preset or the derived `custom` state becomes current. Mobile
+    /// uses the same event name with `mode.rawValue` as the table key, so a
+    /// log written by either side stays readable.
+    private func recordPermissionPreset(_ mode: ToolPermissionMode) {
+        guard let sessionID = activeSessionID else { return }
+        let session = trajectoryRepository
+        let draft = SessionEventDraft(
+            type: SessionEventVocabulary.permissionPreset,
+            data: .object([
+                "preset": .string(mode.rawValue)
+            ])
+        )
+        Task {
+            _ = try? await session.append(draft, sessionID: sessionID)
+            await MainActor.run { scheduleTrajectoryRefresh(for: sessionID) }
         }
     }
 
