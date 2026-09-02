@@ -467,3 +467,10 @@
 - 新增 1 处测试适配（`46862cf` 前身提交）：插件编译追踪测试在 iOS 26 底部搜索玻璃下 `isHittable` 判定受遮挡，滚动策略补 `scrollUntilHittable`；同时实证了底部玻璃对命中测试的真实影响（系统样式，滚动即见）。
 - 命令面板在模拟器测试态仍呈压缩行距（字体/图标修复已生效，accessibility 树含完整描述节点）；判定为测试截图管线或测试态特有，待真机复核，不再消耗模拟器排查预算。
 - 复核结论：40 张截图无新问题，当前 UI 状态收敛。
+
+## 命令面板渲染谜团告破（2026-09-02 傍晚，第四轮）
+
+- **根因**：SwiftUI `.secondary`（vibrancy 材质）文字在面板的 `secondarySystemBackground` 容器上**完全不渲染**（透明）——iOS 26 模拟器 vibrancy 合成缺陷。此前的"树与截图矛盾"是真相的两面：布局树正确（文字节点都在），渲染层 vibrancy dropout。
+- **破解路径**：XCUI 树坐标证明 51pt 行距/header/描述全部正常 → 推翻"行距压缩"误判（此前被缩略图测量误导）→ 对比 `app.screenshot()` 与 `XCUIScreen.main.screenshot()` 双管线均缺失描述 → 排除截图管线 → 按"secondary 文字不渲染、primary/accentColor 正常"锁定 vibrancy 组合。
+- **修复**：面板 header 与描述改用 `Color(uiColor: .secondaryLabel)`（UIKit 语义色，非 vibrancy），截图复核"命令"标题与全部中文描述清晰渲染（提交 `db844db`）。同容器的其他位置（排队输入卡、重命名 footer、Markdown 表格）经截图实测不受影响，无需全局替换。
+- **教训**：缩略图测量会撒谎——行距"24pt 压缩"实为 51pt 正常行距的误量；暗灰 vibrancy 文字在缩略渲染下不可见被误读为缺失。
