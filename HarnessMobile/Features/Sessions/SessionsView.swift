@@ -839,6 +839,7 @@ private struct SessionRow: View {
                     Text(
                         session.updatedAt.formatted(
                             .relative(presentation: .named, unitsStyle: .abbreviated)
+                                .locale(Locale(identifier: "zh_CN"))
                         )
                     )
                         .font(.caption2)
