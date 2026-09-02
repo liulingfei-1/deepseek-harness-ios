@@ -18,6 +18,7 @@ $(SRCROOT)/HarnessMobile/Core/Agent/ConversationCompactor.swift
 $(SRCROOT)/HarnessMobile/Core/Agent/ConversationMessageWindow.swift
 $(SRCROOT)/HarnessMobile/Core/Agent/ConversationControls.swift
 $(SRCROOT)/HarnessMobile/Core/Agent/HarnessReferenceSyntax.swift
+$(SRCROOT)/HarnessMobile/Core/Hooks/HookProtocol.swift
 $(SRCROOT)/HarnessMobile/Core/Agent/ModelRequestPrefixStability.swift
 $(SRCROOT)/HarnessMobile/Core/Agent/MobileHarnessPrompt.swift
 $(SRCROOT)/HarnessMobile/Core/Agent/NativeToolEventPresentation.swift
@@ -205,6 +206,7 @@ $(SRCROOT)/HarnessMobileTests/AgentPresetTests.swift
 $(SRCROOT)/HarnessMobileTests/AgentProviderBundleTests.swift
 $(SRCROOT)/HarnessMobileTests/AgentRuntimeTests.swift
 $(SRCROOT)/HarnessMobileTests/HarnessReferenceSyntaxTests.swift
+$(SRCROOT)/HarnessMobileTests/HookProtocolTests.swift
 $(SRCROOT)/HarnessMobileTests/AnthropicMessagesWireTests.swift
 $(SRCROOT)/HarnessMobileTests/AppModelModelDiscoveryTests.swift
 $(SRCROOT)/HarnessMobileTests/AppModelProviderProfileTests.swift

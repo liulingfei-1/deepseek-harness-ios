@@ -20,6 +20,7 @@
 		03CB932B6052AE2220101EF2 /* ConversationCompactorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39C71F62B80739FB3BF1D1A7 /* ConversationCompactorTests.swift */; };
 		048774F8F4962588BDDDCC31 /* AppModel+WidgetProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCD05CD785CD70AFB6FA9848 /* AppModel+WidgetProjection.swift */; };
 		04AEA71E2E786507006F63E9 /* HarnessLiveActivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CC69C94811BEAF0C443C0FB /* HarnessLiveActivityManager.swift */; };
+		0594F3973709D3513078A086 /* HookProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DF6AA1CF4B9F12CA63128EA /* HookProtocol.swift */; };
 		05CB04EDC20E16234973F029 /* CordisHarnessTraceProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EB8F52C3AD0DB48E7FEF77D /* CordisHarnessTraceProjection.swift */; };
 		05FBA3DCA103C1822881661C /* ContinuedProcessingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7091B46572835DB7B00BEB8B /* ContinuedProcessingController.swift */; };
 		062973F7B7BE9117E72ED43D /* RuntimeResourceGovernorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7ED0858F2380200499D3E97 /* RuntimeResourceGovernorTests.swift */; };
@@ -122,6 +123,7 @@
 		57D007281E25162C6CE023E8 /* AppModel+NativePluginLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBD3226939F6F23FA9043990 /* AppModel+NativePluginLifecycle.swift */; };
 		5912B56FD0DCE686B1082861 /* BackgroundRunJournalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D3F4BCF4E8BBFDB011C9D36 /* BackgroundRunJournalTests.swift */; };
 		5A8C0053B02275704B7D21DE /* NativeAgentPluginCompiler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C74C048DB4100F6BF540212 /* NativeAgentPluginCompiler.swift */; };
+		5B6B190136A46DC673F9BCD9 /* HookProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 428BB77339583C1EC0640B5F /* HookProtocolTests.swift */; };
 		5BE92B48233AAD2BD17F7998 /* ProductionToolCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE48A6BD716FC78E9C655C40 /* ProductionToolCatalog.swift */; };
 		5BF24898D859957D69440985 /* BackgroundAutoResumeGateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39DD63C27D550CFD460AA4E1 /* BackgroundAutoResumeGateTests.swift */; };
 		5C403346A56FDA89BA296665 /* ISHShellTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC821DC3799345738A40500B /* ISHShellTool.swift */; };
@@ -464,6 +466,7 @@
 		40233FD798ED2697F7F9B514 /* DeepSeekLlmAPIExtensionRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepSeekLlmAPIExtensionRegistry.swift; sourceTree = "<group>"; };
 		422D08BFA021BFA53B1D6120 /* NativeToolEventPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeToolEventPresentationTests.swift; sourceTree = "<group>"; };
 		4230108BCA6DCB92F8962966 /* ConsoleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConsoleView.swift; sourceTree = "<group>"; };
+		428BB77339583C1EC0640B5F /* HookProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HookProtocolTests.swift; sourceTree = "<group>"; };
 		42F0E39F930585FC6490C2D5 /* SessionQueryReadModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionQueryReadModelTests.swift; sourceTree = "<group>"; };
 		436CB30518843E0B942BDA3C /* SessionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionsView.swift; sourceTree = "<group>"; };
 		439E262F2CD6DC85DD0D8C18 /* HarnessAudioSessionCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HarnessAudioSessionCoordinatorTests.swift; sourceTree = "<group>"; };
@@ -558,6 +561,7 @@
 		8BA4AA8EFF29429CA77721C5 /* ModelRetryPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelRetryPolicyTests.swift; sourceTree = "<group>"; };
 		8C7F16F1A4D2D81BFC3A1A04 /* TerminalEmulator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalEmulator.swift; sourceTree = "<group>"; };
 		8DA8F6DE14C052C29889F884 /* HarnessSessionWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HarnessSessionWidget.swift; sourceTree = "<group>"; };
+		8DF6AA1CF4B9F12CA63128EA /* HookProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HookProtocol.swift; sourceTree = "<group>"; };
 		8ECDB8628CDDD7DD627FF07D /* NativeSearchWebJobPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSearchWebJobPresentation.swift; sourceTree = "<group>"; };
 		8F53F682C95A785F08C809D8 /* ISHTerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ISHTerminalView.swift; sourceTree = "<group>"; };
 		904A0D6718236ED95FD3F9FF /* CordisPluginRuntimeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CordisPluginRuntimeTests.swift; sourceTree = "<group>"; };
@@ -1089,6 +1093,14 @@
 			name = Frameworks;
 			sourceTree = "<group>";
 		};
+		82627322A787EE4EAB6BF2FC /* Hooks */ = {
+			isa = PBXGroup;
+			children = (
+				8DF6AA1CF4B9F12CA63128EA /* HookProtocol.swift */,
+			);
+			path = Hooks;
+			sourceTree = "<group>";
+		};
 		857B04E594D188682697A7AE /* HarnessMobileTests */ = {
 			isa = PBXGroup;
 			children = (
@@ -1132,6 +1144,7 @@
 				E5770D4A8BE07CC2C8B06396 /* HarnessScheduleTests.swift */,
 				BB59DE4DFAD47EA438D634BB /* HarnessSyncEnvelopeTests.swift */,
 				9EB63A021AD51E46FCD76CBB /* HarnessTraceStoreTests.swift */,
+				428BB77339583C1EC0640B5F /* HookProtocolTests.swift */,
 				27B7F084316F1148B139806E /* ISHNativeClientTests.swift */,
 				C4AF3C73E99B7AA02A7ED1E6 /* ISHPluginHostDynamicLifecycleCoordinatorTests.swift */,
 				3BC09C726CF15A704C37C75F /* ISHPluginHostNodeSmoke.mjs */,
@@ -1213,6 +1226,7 @@
 				FC401661E862AF33F6D2D147 /* Commands */,
 				199A8E6CFD9B26A20479B272 /* Configuration */,
 				1F3D6172414152F2F947F6FF /* Export */,
+				82627322A787EE4EAB6BF2FC /* Hooks */,
 				C3833BBDC497286C98ED9E03 /* Jobs */,
 				3CE4FE075A2B297B459B7B7D /* Network */,
 				4B235159345B4912238FA866 /* Performance */,
@@ -1751,6 +1765,7 @@
 				4ACB8802B7E55BC936E525C2 /* HarnessScheduleTests.swift in Sources */,
 				01E014BDA7AD38613B096D4E /* HarnessSyncEnvelopeTests.swift in Sources */,
 				1B1A37C8401727D0525A800F /* HarnessTraceStoreTests.swift in Sources */,
+				5B6B190136A46DC673F9BCD9 /* HookProtocolTests.swift in Sources */,
 				17F4F33DCF1EFFABB6108D51 /* ISHNativeClientTests.swift in Sources */,
 				161A864B9345DA3C266845FF /* ISHPluginHostDynamicLifecycleCoordinatorTests.swift in Sources */,
 				EFA3B2B129A0A9E1C21D2E51 /* ISHPluginHostTests.swift in Sources */,
@@ -1894,6 +1909,7 @@
 				295A01997CFB4411C55B5289 /* HarnessTrace.swift in Sources */,
 				2103701734C1D4EC49FAF419 /* HarnessTraceRedaction.swift in Sources */,
 				46F64A1C4CFEFF3F02A75623 /* HarnessWidgetProjection.swift in Sources */,
+				0594F3973709D3513078A086 /* HookProtocol.swift in Sources */,
 				9FA77274AFE693ECAC28ADE6 /* IOSCapabilityTools.swift in Sources */,
 				1EC97185D03B6784B7A408A1 /* ISHGuestNetworkMonitor.swift in Sources */,
 				BF18EDA96EB1EF10CE73418D /* ISHInteractiveTerminalView.swift in Sources */,
