@@ -16,7 +16,7 @@ enum HookPoint: String, Codable, Sendable, CaseIterable {
     case userPromptSubmit = "UserPromptSubmit"
     case preToolUse = "PreToolUse"
     case postToolUse = "PostToolUse"
-    case stop
+    case stop = "Stop"
     case subagentStart = "SubagentStart"
     case subagentStop = "SubagentStop"
 }
