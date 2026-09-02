@@ -1131,7 +1131,9 @@ final class HarnessMobileChatChromeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["有什么要处理？"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.descendants(matching: .any)["chat-input"].exists)
         XCTAssertTrue(app.buttons["添加内容"].exists)
-        XCTAssertFalse(app.buttons["命令"].exists)
+        // The slash command entry is a persistent composer affordance now;
+        // the command palette test taps it in this same empty state.
+        XCTAssertTrue(app.buttons["命令"].isHittable)
         let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         screenshot.name = "chat-empty-state"
         screenshot.lifetime = .keepAlways
