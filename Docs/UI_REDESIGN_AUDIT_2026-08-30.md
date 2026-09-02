@@ -425,7 +425,7 @@
 | 插件设置 | Host 空态/启动、命名空间列表、编辑器、版本冲突和只读态 | DONE |
 | 服务商配置 | Profile 列表、添加和凭据状态 | DONE |
 | 模型行为 | 摘要路由、时间上下文双态和自动标题 | DONE |
-| Setup / Onboarding | 服务商、连接、模型、保存开始 | VERIFY |
+| Setup / Onboarding | 服务商、连接、模型、保存开始 | DONE |
 | 聊天后台任务面板 | 空态、刷新、任务列表、输出和子 Agent | DONE |
 | 后台任务设置 | 执行、定位、Live Activity、通知、隐私 | DONE |
 | 手机权限 | 权限分组、状态刷新和 iOS 设置入口 | DONE |
@@ -448,4 +448,4 @@
   - `testEmptyConversationKeepsPromptAndComposerVisible`：空态 slash 命令入口是常驻设计（命令面板用例依赖），断言由"不存在"改为"可见可点"，提交 `373fbe6`。
   - `testAgentPresetPickerShowsAllSystemPresets`：预设 sheet 的 medium detent 把下半列表挡在视口和懒加载树外（产品缺陷），改为 `[.large]`，提交 `ef80f71`。
   - `testSessionModelPickerShowsScopeAndSearchableModels`：关闭"跟随默认"触发列表重渲染并弹回顶部，手动模型 ID 掉出懒加载窗口；测试先滚动到字段再断言，提交 `ef80f71`。
-- 覆盖清单更新：下表多数 `VERIFY` 页面已具备"结构断言通过 + 深色/XXXL 截图"证据，升级为 `DONE`；VoiceOver 朗读顺序与 iPhone 16 Pro 真机触控仍无证据，继续 `VERIFY`；Setup/Onboarding 本轮未产出新证据，保持 `VERIFY`。
+- 覆盖清单更新：下表多数 `VERIFY` 页面已具备"结构断言通过 + 深色/XXXL 截图"证据，升级为 `DONE`；VoiceOver 朗读顺序与 iPhone 16 Pro 真机触控仍无证据，继续 `VERIFY`。Setup/Onboarding 另经 simctl 传 `-reset-persistent-state-for-ui-testing` 启动实测（`/tmp/hm-verify-0902/08-onboarding-xxxl.png`，XXXL 深色布局正常），也已升级 `DONE`。至此覆盖清单仅剩 VoiceOver 与真机触控两类需要真机的边界。
