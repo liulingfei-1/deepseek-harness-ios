@@ -318,13 +318,21 @@ enum TrajectoryLedgerMode: String, CaseIterable, Identifiable {
     }
 }
 
+/// Mirrors upstream `session-stats`: whole-log counts plus model, tool,
+/// first-token and decode wall times. Every figure folds from the complete
+/// durable log, not from the paged-in window.
+///
 private struct TrajectoryMetricSummary {
     let durationMilliseconds: Double
     let turns: Int
+    let steps: Int
     let calls: Int
     let modelMilliseconds: Double
     let toolMilliseconds: Double
     let averageTTFTMilliseconds: Double?
+    let ttftSamples: Int
+    let decodeMilliseconds: Double
+    let decodeTokens: Int
     let outputTokens: Int
     let cacheHitRate: Double?
 
@@ -332,10 +340,14 @@ private struct TrajectoryMetricSummary {
         if let metrics {
             durationMilliseconds = metrics.durationMilliseconds
             turns = metrics.turns
+            steps = metrics.steps
             calls = metrics.calls
             modelMilliseconds = metrics.modelDurationMilliseconds
             toolMilliseconds = metrics.toolDurationMilliseconds
             averageTTFTMilliseconds = metrics.averageTTFTMilliseconds
+            ttftSamples = metrics.ttftSamples
+            decodeMilliseconds = metrics.decodeDurationMilliseconds
+            decodeTokens = metrics.decodeTokens
             outputTokens = metrics.outputTokens
             cacheHitRate = metrics.cacheHitRate
             return
@@ -349,12 +361,23 @@ private struct TrajectoryMetricSummary {
             0
         }
         turns = Set(events.compactMap(\.trajectoryTurn)).count
+        steps = events.count { $0.type == SessionEventVocabulary.stepEnd }
         calls = events.count { $0.type == SessionEventVocabulary.toolCall }
         modelMilliseconds = 0
         toolMilliseconds = 0
         averageTTFTMilliseconds = nil
+        ttftSamples = 0
+        decodeMilliseconds = 0
+        decodeTokens = 0
         outputTokens = 0
         cacheHitRate = nil
+    }
+
+    /// Decode throughput over the steps that reported both a decode span and
+    /// output tokens. Nil until at least one such step lands.
+    var tokensPerSecond: Double? {
+        guard decodeMilliseconds > 0, decodeTokens > 0 else { return nil }
+        return Double(decodeTokens) / (decodeMilliseconds / 1_000)
     }
 }
 
@@ -471,8 +494,17 @@ private struct TrajectoryMetricsHeader: View {
                             title: "首字延迟",
                             value: summary.averageTTFTMilliseconds.map(TrajectoryFormat.duration) ?? "—"
                         )
+                        TrajectorySecondaryMetric(
+                            title: "解码",
+                            value: TrajectoryFormat.duration(summary.decodeMilliseconds)
+                                + " · " + TrajectoryFormat.count(summary.decodeTokens) + " tok"
+                        )
                     }
                     HStack(spacing: 14) {
+                        TrajectorySecondaryMetric(
+                            title: "吞吐",
+                            value: summary.tokensPerSecond.map { String(format: "%.1f tok/s", $0) } ?? "—"
+                        )
                         TrajectorySecondaryMetric(
                             title: "输出",
                             value: TrajectoryFormat.count(summary.outputTokens) + " tok"
@@ -504,6 +536,17 @@ private struct TrajectoryMetricsHeader: View {
         TrajectorySecondaryMetric(
             title: "首字延迟",
             value: summary.averageTTFTMilliseconds.map(TrajectoryFormat.duration) ?? "—"
+        )
+        // Upstream session-stats also folds decode wall time and the tokens
+        // that arrived during it, which is what makes throughput derivable.
+        TrajectorySecondaryMetric(
+            title: "解码",
+            value: TrajectoryFormat.duration(summary.decodeMilliseconds)
+                + " · " + TrajectoryFormat.count(summary.decodeTokens) + " tok"
+        )
+        TrajectorySecondaryMetric(
+            title: "吞吐",
+            value: summary.tokensPerSecond.map { String(format: "%.1f tok/s", $0) } ?? "—"
         )
         TrajectorySecondaryMetric(
             title: "输出",
