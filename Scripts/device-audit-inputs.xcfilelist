@@ -159,6 +159,7 @@ $(SRCROOT)/HarnessMobile/Core/Tools/UserInteractionTools.swift
 $(SRCROOT)/HarnessMobile/Core/Tools/WebFetchTool.swift
 $(SRCROOT)/HarnessMobile/Core/Tools/HarnessBrowserTool.swift
 $(SRCROOT)/HarnessMobile/Core/Tools/WorkStateTools.swift
+$(SRCROOT)/HarnessMobile/Core/Tools/OutputRetention.swift
 $(SRCROOT)/HarnessMobile/Core/Tools/WorkflowTool.swift
 $(SRCROOT)/HarnessMobile/Core/Tools/WorkspaceTools.swift
 $(SRCROOT)/HarnessMobile/Core/Tools/PerplexitySearchProvider.swift
@@ -287,6 +288,7 @@ $(SRCROOT)/HarnessMobileTests/DeepSeekLlmAPIExtensionRegistryTests.swift
 $(SRCROOT)/HarnessMobileTests/ExaSearchProviderTests.swift
 $(SRCROOT)/HarnessMobileTests/AnonymousUserIDTests.swift
 $(SRCROOT)/HarnessMobileTests/PerplexitySearchProviderTests.swift
+$(SRCROOT)/HarnessMobileTests/OutputRetentionTests.swift
 $(SRCROOT)/HarnessMobileTests/SessionQueryReadModelTests.swift
 $(SRCROOT)/HarnessMobileTests/SessionTrajectoryRepositoryTests.swift
 $(SRCROOT)/HarnessMobileTests/SessionTrajectoryToolsTests.swift
