@@ -4532,7 +4532,7 @@ private enum AsyncTestWaitError: Error {
 /// passed when run alone and timed out during a full run. Budget on time,
 /// matching the helper in `MCPClientTests`.
 private func eventually(
-    timeout: Duration = .seconds(5),
+    timeout: Duration = .seconds(10),
     condition: @Sendable @escaping () async -> Bool
 ) async throws {
     let deadline = ContinuousClock.now + timeout
