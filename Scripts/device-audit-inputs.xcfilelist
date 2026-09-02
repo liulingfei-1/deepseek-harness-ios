@@ -51,6 +51,7 @@ $(SRCROOT)/HarnessMobile/Core/Configuration/ProviderProfile.swift
 $(SRCROOT)/HarnessMobile/Core/Configuration/AgentProviderBundle.swift
 $(SRCROOT)/HarnessMobile/Core/Configuration/AgentProviderBundleInstaller.swift
 $(SRCROOT)/HarnessMobile/Core/Configuration/SettingsStore.swift
+$(SRCROOT)/HarnessMobile/Core/Configuration/AnonymousUserID.swift
 $(SRCROOT)/HarnessMobile/Core/Configuration/TimeContextSettings.swift
 $(SRCROOT)/HarnessMobile/Core/Export/ConversationExportBuilder.swift
 $(SRCROOT)/HarnessMobile/Core/Network/AnthropicMessagesWire.swift
@@ -273,6 +274,7 @@ $(SRCROOT)/HarnessMobileTests/SessionTitleSettingsTests.swift
 $(SRCROOT)/HarnessMobileTests/SessionEventTrajectoryTests.swift
 $(SRCROOT)/HarnessMobileTests/SessionTurnOutlineTests.swift
 $(SRCROOT)/HarnessMobileTests/DeepSeekSearchProviderTests.swift
+$(SRCROOT)/HarnessMobileTests/AnonymousUserIDTests.swift
 $(SRCROOT)/HarnessMobileTests/SessionQueryReadModelTests.swift
 $(SRCROOT)/HarnessMobileTests/SessionTrajectoryRepositoryTests.swift
 $(SRCROOT)/HarnessMobileTests/SessionTrajectoryToolsTests.swift
