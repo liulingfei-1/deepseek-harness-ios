@@ -134,6 +134,15 @@
   - 新增测试 `testWorkStateGetReturnsCurrentGoalPlanAndTodos`（解码验证空态无 goal、设置后可读回）
 - 顺带修复（同提交）：`AgentRuntimeTests` 的 `eventually` 从次数预算改为**墙钟预算**；调度器测试去掉并行启动顺序的硬断言（保留 2 槽上限与提交顺序契约）——项目已知 flaky（1/3）降至约 1/10，未 100% 根除
 
+### U-026 `goal-round-driver`（目标驱动自动续行）—— 已完成
+- 上游契约：`dsh-goal-round-driver`——agent 空闲 + active goal 启用续行 + 有剩余容量 → 自动启动下一个 Goal Round；上限耗尽记录 blocker
+- 状态：✅ 已完成（提交 `535ddb6`）
+  - `ConversationGoal` 新增 `isContinuationEnabled`/`maximumRounds`/`usedRounds`/`blocker`，Codable 缺省解码为固定路由（旧目标不自动续行）
+  - `WorkStateCoordinator.startGoalRound()`/`setGoalContinuation(_:maximumRounds:)`；编辑目标保留记账，完成后替换才重开序列
+  - `AppModel.driveNextGoalRound(sessionID:)` 挂在 `performTerminalCleanup` 成功分支；提示词镜像上游 `prompt.ts`（`WorkStateToolSupport.goalRoundPrompt`）
+  - 默认上限 8 轮、opt-in 默认关闭 → 不会无界循环；新增 2 个测试（轮次记账/阻塞 + 提示词内容）
+- `persona` 与 `token-meter` 经核对**已对齐**（`AgentPresetPromptComposition` 与 `ConversationTokenMeter` 语义/常量一致），无需改动
+
 ---
 
 ## P3 · Cordis 架构跟进（最大、最慢，最后做）
