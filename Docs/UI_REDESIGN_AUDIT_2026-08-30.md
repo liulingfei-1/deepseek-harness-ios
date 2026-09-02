@@ -474,3 +474,19 @@
 - **破解路径**：XCUI 树坐标证明 51pt 行距/header/描述全部正常 → 推翻"行距压缩"误判（此前被缩略图测量误导）→ 对比 `app.screenshot()` 与 `XCUIScreen.main.screenshot()` 双管线均缺失描述 → 排除截图管线 → 按"secondary 文字不渲染、primary/accentColor 正常"锁定 vibrancy 组合。
 - **修复**：面板 header 与描述改用 `Color(uiColor: .secondaryLabel)`（UIKit 语义色，非 vibrancy），截图复核"命令"标题与全部中文描述清晰渲染（提交 `db844db`）。同容器的其他位置（排队输入卡、重命名 footer、Markdown 表格）经截图实测不受影响，无需全局替换。
 - **教训**：缩略图测量会撒谎——行距"24pt 压缩"实为 51pt 正常行距的误量；暗灰 vibrancy 文字在缩略渲染下不可见被误读为缺失。
+
+## 全量重截四循环收官（2026-09-02 晚，17:35-18:30）
+
+按"全部重新截图再过一遍 UI"要求执行四轮截图-审查循环，全部 `TEST SUCCEEDED`：
+
+| 循环 | 覆盖 | 截图 | 结论 |
+| --- | --- | --- | --- |
+| 一 | 深色标准字号 10 类 | 40 张 | vibrancy 修复生效（面板标题+中文描述清晰渲染）；计划/空态/detent/图标/统计全部保持；无新问题 |
+| 二+三 | 浅色 6+4 类 | 40 张 | 语义色完整适配浅色；自动亮度对比 40 页零硬编码深色泄漏；命令面板浅色描述清晰 |
+| 四 | XXXL 深色 6 类 | 30 张 | 轨迹统计自动换两行（ViewThatFits 回退正确）、预设 4 项 XXXL 全可见、计划紧凑保持；无截断 |
+
+- 116 张证据固化至 `Docs/ui-evidence-2026-09-02/`（dark-standard / light / xxxl-dark）。
+- 自动化手段新增：深浅色亮度对比脚本（ffmpeg 灰度均值，检测硬编码背景泄漏）。
+- 同步补记 `Docs/DESKTOP_PARITY_REMEDIATION.md` UI-067 段落（今日 4 轮 UI 修复汇总）。
+- 轨迹检查器显示"1970 年"为 fixture 相对时间戳的显示假象，生产数据为绝对时间，不改。
+- 仍需真机：命令面板 vibrancy 修复真机渲染、底部搜索玻璃滚到底末行可见性、VoiceOver 顺序、触控矩阵。
