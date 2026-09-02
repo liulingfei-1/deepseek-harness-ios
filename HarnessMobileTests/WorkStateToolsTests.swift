@@ -35,6 +35,34 @@ final class WorkStateToolsTests: XCTestCase {
         XCTAssertEqual(state.todos.map(\.title), ["核对来源"])
     }
 
+    /// Upstream exposes `get_goal` for the same reason: a model resuming a
+    /// long task reads durable work state instead of guessing from history.
+    func testWorkStateGetReturnsCurrentGoalPlanAndTodos() async throws {
+        let coordinator = WorkStateCoordinator()
+        let get = WorkStateGetTool(coordinator: coordinator)
+        let setGoal = WorkStateSetGoalTool(coordinator: coordinator)
+
+        // `goal` is optional, so an empty state encodes without the key.
+        let empty = try JSONDecoder().decode(
+            ConversationWorkState.self,
+            from: Data(try await get.execute(arguments: [:]).utf8)
+        )
+        XCTAssertNil(empty.goal)
+
+        _ = try await setGoal.execute(arguments: [
+            "title": .string("整理资料"),
+            "status": .string("active")
+        ])
+        let populated = try JSONDecoder().decode(
+            ConversationWorkState.self,
+            from: Data(try await get.execute(arguments: [:]).utf8)
+        )
+        XCTAssertEqual(populated.goal?.title, "整理资料")
+        XCTAssertEqual(populated.goal?.status, .active)
+        XCTAssertEqual(get.definition.name, "work_state_get")
+        XCTAssertFalse(get.risk.requiresApproval)
+    }
+
     func testWorkStateToolsRejectUnknownKeysAndInvalidStatus() async {
         let coordinator = WorkStateCoordinator()
         let goal = WorkStateSetGoalTool(coordinator: coordinator)

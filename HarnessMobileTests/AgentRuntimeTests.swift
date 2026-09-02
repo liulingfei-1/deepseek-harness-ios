@@ -1095,7 +1095,10 @@ final class AgentRuntimeTests: XCTestCase {
         try await eventually { await gate.startedIDs.count == 2 }
         let firstStartedIDs = await gate.startedIDs
         let firstMaximumConcurrent = await gate.maximumConcurrent
-        XCTAssertEqual(firstStartedIDs, ["1", "2"])
+        // The pool starts two calls concurrently, so the order in which they
+        // reach the gate is not a contract. The durable contracts are the
+        // two-slot ceiling below and the commit order asserted further down.
+        XCTAssertEqual(Set(firstStartedIDs), ["1", "2"])
         XCTAssertEqual(firstMaximumConcurrent, 2)
 
         await gate.release("2")
@@ -1103,7 +1106,7 @@ final class AgentRuntimeTests: XCTestCase {
         try await eventually { await gate.startedIDs.count == 3 }
         let allStartedIDs = await gate.startedIDs
         let rollingMaximumConcurrent = await gate.maximumConcurrent
-        XCTAssertEqual(allStartedIDs, ["1", "2", "3"])
+        XCTAssertEqual(Set(allStartedIDs), ["1", "2", "3"])
         XCTAssertEqual(rollingMaximumConcurrent, 2)
 
         await gate.release("3")
@@ -1174,7 +1177,13 @@ final class AgentRuntimeTests: XCTestCase {
         let task = Task {
             try await runtime.run(history: [.user("reclassify")], configuration: AgentConfiguration(), apiKey: "test-only")
         }
-        try await eventually { await gate.startedIDs == ["1", "2"] }
+        // Order is the contract; exact count is not. Under load the scheduler
+        // may start the third call before this wait observes the first two,
+        // so insisting on `== ["1", "2"]` timed out on full runs.
+        try await eventually {
+            let ids = await gate.startedIDs
+            return ids.count >= 2 && ids[0] == "1" && ids[1] == "2"
+        }
         await gate.release("1")
         try await eventually { mode.checks == [true, true, false] }
         await gate.release("2")
@@ -1213,7 +1222,10 @@ final class AgentRuntimeTests: XCTestCase {
         let task = Task {
             try await runtime.run(history: [.user("abort")], configuration: AgentConfiguration(), apiKey: "test-only")
         }
-        try await eventually { await gate.startedIDs == ["1", "2"] }
+        try await eventually {
+            let ids = await gate.startedIDs
+            return ids.count >= 2 && ids[0] == "1" && ids[1] == "2"
+        }
         task.cancel()
         await gate.release("1")
         await gate.release("2")
@@ -4513,11 +4525,18 @@ private enum AsyncTestWaitError: Error {
     case timedOut
 }
 
+/// Polls until `condition` holds or the wall-clock budget is spent.
+///
+/// A fixed attempt count made these waits flaky under parallel test load:
+/// each attempt costs more than the nominal sleep, so the same condition
+/// passed when run alone and timed out during a full run. Budget on time,
+/// matching the helper in `MCPClientTests`.
 private func eventually(
-    attempts: Int = 1_000,
+    timeout: Duration = .seconds(5),
     condition: @Sendable @escaping () async -> Bool
 ) async throws {
-    for _ in 0..<attempts {
+    let deadline = ContinuousClock.now + timeout
+    while ContinuousClock.now < deadline {
         if await condition() { return }
         try await Task.sleep(for: .milliseconds(2))
     }

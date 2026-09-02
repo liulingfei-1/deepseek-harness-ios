@@ -264,6 +264,36 @@ struct WorkStateSetGoalTool: LocalAgentTool {
     }
 }
 
+/// Read-only counterpart of the state writers. Upstream exposes `get_goal`
+/// for the same reason: a model resuming a long task needs to see the durable
+/// goal/plan/todo state instead of guessing from earlier turns.
+struct WorkStateGetTool: LocalAgentTool {
+    let coordinator: WorkStateCoordinator
+    let definition = ModelToolDefinition(
+        name: "work_state_get",
+        description: "Read the current local goal, plan steps and todos for this conversation. Use it before changing work state, or when resuming after a long break. This only reads on-device Agent state.",
+        parameters: .object([
+            "type": .string("object"),
+            "properties": .object([:]),
+            "additionalProperties": .bool(false)
+        ])
+    )
+    let risk: ToolRisk = .pure
+
+    func validate(arguments: [String: JSONValue]) throws {
+        try arguments.requireOnlyKeys([])
+    }
+
+    func summary(arguments: [String: JSONValue]) -> String {
+        "读取本机会话目标与待办"
+    }
+
+    func execute(arguments: [String: JSONValue]) async throws -> String {
+        try validate(arguments: arguments)
+        return try WorkStateToolSupport.encode(await coordinator.snapshot())
+    }
+}
+
 struct WorkStateReplacePlanTool: LocalAgentTool {
     let coordinator: WorkStateCoordinator
     let definition = ModelToolDefinition(
