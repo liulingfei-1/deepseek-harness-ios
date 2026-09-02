@@ -143,6 +143,34 @@
   - 默认上限 8 轮、opt-in 默认关闭 → 不会无界循环；新增 2 个测试（轮次记账/阻塞 + 提示词内容）
 - `persona` 与 `token-meter` 经核对**已对齐**（`AgentPresetPromptComposition` 与 `ConversationTokenMeter` 语义/常量一致），无需改动
 
+### U-027 全量差距清单落地进展（对照 `UPSTREAM_GAP_FULL_2026-09-02.md`）
+
+| 差距项 | 状态 | 提交 |
+| --- | --- | --- |
+| `session-stats` 全字段（decode/steps/吞吐） | ✅ | `62a796c` |
+| `permission-presets` 事件持久化 | ✅ | `0c47d7a` |
+| `skill-badge` 内置徽章技能（opt-in） | ✅ | `ff86589` |
+| `goal-round-driver` | ✅ | `535ddb6` |
+| `session-turn-outline` 投影 | ✅ | `bc24427` |
+| `web-search-deepseek` 后端 | ✅ | `f7798d6` |
+| `persona` / `token-meter` | ✅（核对即对齐，无需改动） | — |
+| `fs-observation-policy` / `spill-policy` | ✅（核对即对齐：`HarnessFsObservation` 与 `ToolResultOutputPolicy` 已实现等价策略） | — |
+| `session-title`（first-prompt/all-prompts/llm） | ✅（核对即对齐：`SessionTitleAutomaticMode` 三档 + 预算/超时/校验） | — |
+| `skill-filesystem` | ✅（核对即对齐：`skillDocuments()` 扫描/frontmatter/发现，仅限私有工作区） | — |
+| 子 agent 多后端（ACP/Claude/Codex/SDK） | ⏸ 需产品决策 | — |
+| `hooks`（Claude Code/Codex 钩子执行） | ⏸ 中型工程 | — |
+| `llm-api-extensions` 请求扩展 | ⏸ 依赖 Cordis 注册点 | — |
+| CordisRuntime 换代 / api 控制器拆分 | ⏸ 大型架构工程 | — |
+| `session-telemetry-otel` / sqlite 后端 / Exa / Perplexity / 匿名 ID | ⏸ 依赖或价值待定 | — |
+| e2b / webhook / sdk-server / webworker / cli / win32 / pwsh / tmux / 桌面 client 49 包 | ❌ 边界外或平台不适用（AGENTS.md 边界），维持 `OUT-OF-SCOPE` | — 
+- 上游契约：`dsh-goal-round-driver`——agent 空闲 + active goal 启用续行 + 有剩余容量 → 自动启动下一个 Goal Round；上限耗尽记录 blocker
+- 状态：✅ 已完成（提交 `535ddb6`）
+  - `ConversationGoal` 新增 `isContinuationEnabled`/`maximumRounds`/`usedRounds`/`blocker`，Codable 缺省解码为固定路由（旧目标不自动续行）
+  - `WorkStateCoordinator.startGoalRound()`/`setGoalContinuation(_:maximumRounds:)`；编辑目标保留记账，完成后替换才重开序列
+  - `AppModel.driveNextGoalRound(sessionID:)` 挂在 `performTerminalCleanup` 成功分支；提示词镜像上游 `prompt.ts`（`WorkStateToolSupport.goalRoundPrompt`）
+  - 默认上限 8 轮、opt-in 默认关闭 → 不会无界循环；新增 2 个测试（轮次记账/阻塞 + 提示词内容）
+- `persona` 与 `token-meter` 经核对**已对齐**（`AgentPresetPromptComposition` 与 `ConversationTokenMeter` 语义/常量一致），无需改动
+
 ---
 
 ## P3 · Cordis 架构跟进（最大、最慢，最后做）
