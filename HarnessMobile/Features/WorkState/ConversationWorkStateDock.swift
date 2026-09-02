@@ -98,6 +98,24 @@ private struct ConversationGoalBar: View {
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
+            // Goal-round accounting (upstream dsh-goal-round-driver): show
+            // the round budget when continuation is on, and surface the
+            // blocker instead of hiding it.
+            if goal.isContinuationEnabled {
+                if let blocker = goal.blocker {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .accessibilityLabel(blocker)
+                } else {
+                    Text("\(goal.usedRounds)/\(goal.effectiveMaximumRounds) 轮")
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .fixedSize()
+                        .accessibilityLabel("目标轮次 \(goal.usedRounds)，共 \(goal.effectiveMaximumRounds) 轮")
+                }
+            }
+
             if isPending {
                 ProgressView()
                     .controlSize(.small)
