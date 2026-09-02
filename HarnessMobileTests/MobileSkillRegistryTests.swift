@@ -41,6 +41,43 @@ final class MobileSkillRegistryTests: XCTestCase {
         XCTAssertEqual(definition.summary.resourceBase, ".dsh/skills/release-notes")
     }
 
+    /// Mirrors upstream `dsh-skill-badge`: the bundled badge skill is present
+    /// for a user gesture but stays out of the model catalog until enabled,
+    /// and a workspace copy of the same name keeps winning.
+    func testBundledBadgeSkillIsUserInvocableAndOverridable() async throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let registry = MobileSkillRegistry(workspaceStore: WorkspaceStore(root: root))
+        // Upstream ships bundled skills disabled: not visible until enabled.
+        let beforeEnabling = try await registry.catalog()
+        XCTAssertFalse(beforeEnabling.contains { $0.name == "dsh-badge" })
+
+        await registry.setIncludesBundledSkills(true)
+        let catalog = try await registry.catalog()
+        let badge = try XCTUnwrap(catalog.first { $0.name == "dsh-badge" })
+        XCTAssertEqual(badge.source, .bundled)
+        XCTAssertFalse(badge.invocation.modelInvocable)
+        XCTAssertTrue(badge.invocation.userInvocable)
+
+        let modelPrompt = await registry.modelCatalogPrompt()
+        XCTAssertFalse(modelPrompt.contains("dsh-badge"))
+
+        let definition = try await registry.definition(named: "dsh-badge")
+        XCTAssertTrue(definition.content.contains("powered_by-dsh"))
+        XCTAssertTrue(definition.content.contains("121×20"))
+
+        try writeSkill(
+            root,
+            path: ".dsh/skills/dsh-badge/SKILL.md",
+            description: "local override",
+            body: "local body"
+        )
+        let overridden = try await registry.definition(named: "dsh-badge")
+        XCTAssertEqual(overridden.content, "local body")
+        XCTAssertEqual(overridden.summary.source, .projectDSH)
+    }
+
     func testInvocationPolicyFailsClosedAndUserOnlySkillLoadsOnlyForUser() async throws {
         let root = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }

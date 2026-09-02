@@ -4,12 +4,18 @@ import Foundation
 /// The mobile implementation deliberately keeps discovery inside the app's
 /// private workspace instead of watching arbitrary host directories.
 enum MobileSkillSource: String, Codable, Sendable, Equatable, CaseIterable {
+    /// Skills shipped inside the app, mirroring upstream `dsh-skill-badge`
+    /// and any other bundled provider. Workspace skills keep winning on a
+    /// name collision so a local copy can always override a bundle.
+    case bundled
     case projectDSH = "project-dsh"
     case projectAgents = "project-agents"
     case custom
 
     var rank: Int {
         switch self {
+        case .bundled:
+            0
         case .projectDSH:
             100
         case .projectAgents:
@@ -64,13 +70,83 @@ enum MobileSkillError: LocalizedError, Sendable, Equatable {
     }
 }
 
+/// Mirrors upstream `dsh-skill-badge`: a bundled skill that tells the model
+/// how to attach the official "powered by dsh" badge instead of restyling one.
+/// Upstream ships it disabled so each deployment opts in, and mobile keeps
+/// that default — `modelInvocable` stays false until an explicit switch.
+enum MobileBundledSkills {
+    static let badge: MobileSkillDefinition = {
+        let summary = MobileSkillSummary(
+            name: "dsh-badge",
+            description: """
+            Add the official “powered by dsh” badge to documents, pull requests, \
+            merge requests, and other content produced with DeepSeek Harness. Use \
+            whenever creating a pull request or merge request. Also use when the user \
+            asks for a dsh badge, powered-by-dsh attribution, or a reusable dsh badge \
+            asset or snippet.
+            """,
+            whenToUse: "Creating a PR/MR, or when the user asks for a dsh badge or powered-by-dsh attribution.",
+            invocation: MobileSkillInvocationPolicy(
+                modelInvocable: false,
+                userInvocable: true
+            ),
+            source: .bundled,
+            path: "bundled/dsh-badge/SKILL.md",
+            resourceBase: "bundled/dsh-badge"
+        )
+        return MobileSkillDefinition(summary: summary, content: badgeBody)
+    }()
+
+    static let all: [MobileSkillDefinition] = [badge]
+
+    private static let badgeBody = """
+    # dsh Badge
+
+    Add the official “powered by dsh” badge without recreating or restyling it.
+
+    ## Assets
+
+    - Shields.io image URL: `https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white`
+    - Project URL: `https://github.com/deepseek-ai/deepseek-harness`
+
+    ## Markdown
+
+    Use this linked badge in Markdown:
+
+    ```markdown
+    [![](https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://github.com/deepseek-ai/deepseek-harness)
+    ```
+
+    If attribution should not be linked, use:
+
+    ```markdown
+    ![](https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)
+    ```
+
+    ## Usage rules
+
+    - For GitHub or GitLab Markdown, use the Shields.io URL and link it to the project URL unless the user asks for an unlinked image.
+    - Preserve the badge's 121×20 dimensions and aspect ratio.
+    - Place the badge at the end of the attributed document or section unless the user specifies another position.
+    - Do not substitute another color, logo, label, or project URL.
+    """
+}
+
 actor MobileSkillRegistry {
     static let maximumCatalogDescriptionCharacters = 500
 
     private let workspaceStore: WorkspaceStore
 
+    /// Upstream ships bundled skills disabled so each deployment opts in; the
+    /// badge stays out of the catalog until this is flipped on.
+    private var includesBundledSkills = false
+
     init(workspaceStore: WorkspaceStore) {
         self.workspaceStore = workspaceStore
+    }
+
+    func setIncludesBundledSkills(_ includes: Bool) {
+        includesBundledSkills = includes
     }
 
     func catalog() async throws -> [MobileSkillSummary] {
@@ -80,6 +156,12 @@ actor MobileSkillRegistry {
     func definitions() async throws -> [MobileSkillDefinition] {
         let candidates = try await workspaceStore.skillDocuments()
         var winners: [String: MobileSkillDefinition] = [:]
+
+        if includesBundledSkills {
+            for bundled in MobileBundledSkills.all {
+                winners[bundled.summary.name] = bundled
+            }
+        }
 
         for candidate in candidates {
             guard let definition = Self.parse(candidate) else { continue }
@@ -98,6 +180,15 @@ actor MobileSkillRegistry {
     func definition(named rawName: String) async throws -> MobileSkillDefinition {
         guard Self.isValidName(rawName) else {
             throw MobileSkillError.invalidName(rawName)
+        }
+        if includesBundledSkills,
+           let bundled = MobileBundledSkills.all.first(where: { $0.summary.name == rawName }) {
+            // A workspace copy still wins, matching `definitions()`.
+            let candidates = try await workspaceStore.skillDocuments()
+            if let local = candidates.compactMap(Self.parse).first(where: { $0.summary.name == rawName }) {
+                return local
+            }
+            return bundled
         }
         let candidates = try await workspaceStore.skillDocuments()
         var winner: MobileSkillDefinition?
