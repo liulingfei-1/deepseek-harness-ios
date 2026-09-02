@@ -57,6 +57,7 @@ $(SRCROOT)/HarnessMobile/Core/Export/ConversationExportBuilder.swift
 $(SRCROOT)/HarnessMobile/Core/Network/AnthropicMessagesWire.swift
 $(SRCROOT)/HarnessMobile/Core/Network/ChatAPIModels.swift
 $(SRCROOT)/HarnessMobile/Core/Network/DeepSeekFilesClient.swift
+$(SRCROOT)/HarnessMobile/Core/Network/DeepSeekLlmAPIExtensionRegistry.swift
 $(SRCROOT)/HarnessMobile/Core/Tools/DeepSeekSearchProvider.swift
 $(SRCROOT)/HarnessMobile/Core/Tools/ExaSearchProvider.swift
 $(SRCROOT)/HarnessMobile/Core/Network/JSONValue.swift
@@ -276,6 +277,7 @@ $(SRCROOT)/HarnessMobileTests/SessionTitleSettingsTests.swift
 $(SRCROOT)/HarnessMobileTests/SessionEventTrajectoryTests.swift
 $(SRCROOT)/HarnessMobileTests/SessionTurnOutlineTests.swift
 $(SRCROOT)/HarnessMobileTests/DeepSeekSearchProviderTests.swift
+$(SRCROOT)/HarnessMobileTests/DeepSeekLlmAPIExtensionRegistryTests.swift
 $(SRCROOT)/HarnessMobileTests/ExaSearchProviderTests.swift
 $(SRCROOT)/HarnessMobileTests/AnonymousUserIDTests.swift
 $(SRCROOT)/HarnessMobileTests/PerplexitySearchProviderTests.swift
