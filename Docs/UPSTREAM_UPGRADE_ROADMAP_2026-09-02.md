@@ -155,6 +155,21 @@
 | `web-search-deepseek` 后端 | ✅ | `f7798d6` |
 | `persona` / `token-meter` | ✅（核对即对齐，无需改动） | — |
 | `fs-observation-policy` / `spill-policy` | ✅（核对即对齐：`HarnessFsObservation` 与 `ToolResultOutputPolicy` 已实现等价策略） | — |
+| `session-title`（first-prompt/all-prompts/llm 三包） | ✅（核对即对齐：`SessionTitleAutomaticMode` 三档 + 预算/超时/校验与 `session-title-llm` 共享策略一致） | — |
+| `skill-filesystem` | ✅（核对即对齐：`skillDocuments()` 扫描/frontmatter/发现，仅限私有工作区） | — |
+| `session-checkpoint-policy` | ✅（核对即对齐：`checkpointSession` + `shouldCheckpointBeforeRun` 请求前落盘） | — |
+| `web-search-exa` / `web-search-perplexity` | ✅ 能力就绪（凭据 thunk 挂起，配置 key 后启用） | `5e8e562` |
+| `anonymous-user-id` | ✅ | `08696c2` |
+| `deepseek-llm-api-extensions` | ✅ 注册表 + prepare/accept 语义 | `1e7f50d` |
+| `hook-protocol`（类型/matcher/输出解析） | ✅ | `161bdf6` |
+| `hooks-claude-code` 配置解析 | ✅（settings/裸 map 双形态、畸形容忍、非 command 跳过、matcher 纪律） | `347d485` |
+| hooks **command 执行器** | ⛔ **BLOCKED-PLATFORM**：iOS 无 child_process 等价通道；iSH 是流式终端会话，无法可靠等待退出码。协议层已就绪，待可靠执行通道后接桥 | — |
+| 子 agent 多后端（ACP/Claude Code/Codex/DSH SDK） | ⛔ **N/A**：各后端需要设备上存在对应 CLI/运行时（`claude`/`codex` 二进制等），移动端不具备；DSH-SDK 形态属服务端 | — |
+| `session-projection-cache` | ✅（IOS-REPLACEMENT：移动端投影直接 fold 事件流，无独立缓存层需求） | — |
+| `session-log-export`（ZIP 会话树） | 🟡 形态差异：移动端用系统分享导出（`ConversationExportBuilder` + ShareHandoff），无 ZIP 下载路由 | — |
+| `test-support/session-snapshot`（快照回放基建） | 🟡 IOS-REPLACEMENT：移动端以 `CompatibilityFixtures/*.json` + 专项 fixture 测试承载同等"证据式"契约测试 | — |
+| `core/scope`、`boot/cmdline`、`subprocess`、`sandbox-windows-acl`、`shell pwsh*`、`context/tmux-context` | ❌ 平台不适用 | — |
+| CordisRuntime 换代 / `api` 控制器拆分 / `client` 49 包 / `host` 宿主 / `sdk` / `e2b` / `webhook` / `webworker` / `experimental` | ❌ 维持边界判定（AGENTS.md + 平台形态），见 `UPSTREAM_GAP_FULL_2026-09-02.md` 第 3 节 | — |
 | `session-title`（first-prompt/all-prompts/llm） | ✅（核对即对齐：`SessionTitleAutomaticMode` 三档 + 预算/超时/校验） | — |
 | `skill-filesystem` | ✅（核对即对齐：`skillDocuments()` 扫描/frontmatter/发现，仅限私有工作区） | — |
 | 子 agent 多后端（ACP/Claude/Codex/SDK） | ⏸ 需产品决策 | — |
