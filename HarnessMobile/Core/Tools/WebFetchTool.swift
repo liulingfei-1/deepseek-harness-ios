@@ -1270,3 +1270,95 @@ private final class WebFetchRejectRedirectDelegate: NSObject, URLSessionTaskDele
         completionHandler(nil)
     }
 }
+
+/// Transport for the upstream `web-search-exa` backend: `POST /search` with
+/// highlight extraction, inside the audited web-fetch boundary.
+enum ExaSearchTransport {
+    static func perform(
+        query: String,
+        apiKey: String,
+        baseURL: String,
+        searchType: String,
+        highlightsPerResult: Int,
+        numResults: Int,
+        client: WebSearchHTTPClient
+    ) async throws -> JSONValue {
+        guard let url = URL(string: baseURL.hasSuffix("/") ? baseURL + "search" : baseURL + "/search") else {
+            throw ExaSearchError.transport("invalid Exa search endpoint: \(baseURL)")
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        request.setValue("application/json", forHTTPHeaderField: "accept")
+        request.setValue("deepseek-harness-mobile/1.0", forHTTPHeaderField: "user-agent")
+        request.httpBody = try JSONEncoder().encode(
+            JSONValue.object([
+                "query": .string(query),
+                "type": .string(searchType),
+                "numResults": .number(Double(numResults)),
+                "contents": .object([
+                    "highlights": .object([
+                        "highlightsPerUrl": .number(Double(highlightsPerResult))
+                    ])
+                ])
+            ])
+        )
+        let (data, http) = try await client.data(for: request)
+        guard (200..<300).contains(http.statusCode) else {
+            let detail = String(decoding: data.prefix(400), as: UTF8.self)
+            throw ExaSearchError.endpoint(
+                status: http.statusCode,
+                detail: "端点 \(baseURL) 返回 \(http.statusCode)：\(detail)"
+            )
+        }
+        return try JSONDecoder().decode(JSONValue.self, from: data)
+    }
+}
+
+/// Transport for the upstream `web-search-perplexity` backend: an
+/// OpenAI-compatible chat completion on the `sonar` model, inside the
+/// audited web-fetch boundary.
+enum PerplexitySearchTransport {
+    static func perform(
+        query: String,
+        apiKey: String,
+        baseURL: String,
+        model: String,
+        maxTokens: Int,
+        client: WebSearchHTTPClient
+    ) async throws -> JSONValue {
+        guard let url = URL(string: baseURL.hasSuffix("/")
+            ? baseURL + "chat/completions"
+            : baseURL + "/chat/completions") else {
+            throw PerplexitySearchError.transport("invalid Perplexity search endpoint: \(baseURL)")
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "authorization")
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        request.setValue("application/json", forHTTPHeaderField: "accept")
+        request.setValue("deepseek-harness-mobile/1.0", forHTTPHeaderField: "user-agent")
+        request.httpBody = try JSONEncoder().encode(
+            JSONValue.object([
+                "model": .string(model),
+                "max_tokens": .number(Double(maxTokens)),
+                "messages": .array([
+                    .object([
+                        "role": .string("user"),
+                        "content": .string("Perform a web search for the query: \(query)")
+                    ])
+                ])
+            ])
+        )
+        let (data, http) = try await client.data(for: request)
+        guard (200..<300).contains(http.statusCode) else {
+            let detail = String(decoding: data.prefix(400), as: UTF8.self)
+            throw PerplexitySearchError.endpoint(
+                status: http.statusCode,
+                detail: "端点 \(baseURL) 返回 \(http.statusCode)：\(detail)"
+            )
+        }
+        return try JSONDecoder().decode(JSONValue.self, from: data)
+    }
+}
