@@ -2033,6 +2033,25 @@ final class AppModel {
         }
     }
 
+    /// Upstream `dsh-goal-round-driver`: when the agent goes idle and an
+    /// active, continuation-enabled goal still has round budget, start the next
+    /// goal round instead of waiting for another user message. Continuation is
+    /// opt-in (`isContinuationEnabled`) and capped, so this can never loop
+    /// without bound.
+    func driveNextGoalRound(sessionID: UUID) async {
+        guard activeSessionID == sessionID else { return }
+        let started = await workStateCoordinator.startGoalRound()
+        guard started else { return }
+        guard let goal = await workStateCoordinator.snapshot().goal else { return }
+        await send(
+            WorkStateToolSupport.goalRoundPrompt(
+                objective: goal.title,
+                round: goal.usedRounds,
+                maximum: goal.effectiveMaximumRounds
+            )
+        )
+    }
+
     func setPermissionMode(_ mode: ToolPermissionMode) {
         guard !isRunning, controlState.permissionMode != mode else { return }
         controlState.permissionMode = mode
@@ -7626,6 +7645,9 @@ final class AppModel {
             success: outcome == .succeeded
         )
         continuedProcessingController.releaseCompletion(runID: identity.runID, identity: identity)
+        if outcome == .succeeded {
+            await driveNextGoalRound(sessionID: identity.sessionID)
+        }
         do {
             let phase: BackgroundRunJournalPhase = switch outcome {
             case .succeeded: .succeeded

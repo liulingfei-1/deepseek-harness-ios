@@ -35,6 +35,35 @@ final class WorkStateToolsTests: XCTestCase {
         XCTAssertEqual(state.todos.map(\.title), ["核对来源"])
     }
 
+    /// Mirrors upstream `dsh-goal-round-driver`: goal rounds are opt-in, count
+    /// against a cap, and a spent cap records a blocker instead of stopping
+    /// silently. Editing a goal must not reset that accounting.
+    func testGoalRoundsCountAgainstCapAndBlockWhenSpent() async throws {
+        let coordinator = WorkStateCoordinator()
+        _ = try await coordinator.applyGoalAction(.create(title: "整理资料"))
+        // Continuation is off by default: no auto round.
+        let beforeEnabling = await coordinator.startGoalRound()
+        XCTAssertFalse(beforeEnabling)
+
+        _ = try await coordinator.setGoalContinuation(enabled: true, maximumRounds: 2)
+        let first = await coordinator.startGoalRound()
+        let second = await coordinator.startGoalRound()
+        let third = await coordinator.startGoalRound()
+        XCTAssertTrue(first)
+        XCTAssertTrue(second)
+        // Cap spent.
+        XCTAssertFalse(third)
+        let spent = await coordinator.snapshot().goal
+        XCTAssertEqual(spent?.usedRounds, 2)
+        XCTAssertNotNil(spent?.blocker)
+
+        // Editing the goal keeps the accounting.
+        _ = try await coordinator.applyGoalAction(.edit(title: "整理资料（修订）"))
+        let edited = await coordinator.snapshot().goal
+        XCTAssertEqual(edited?.usedRounds, 2)
+        XCTAssertTrue(edited?.isContinuationEnabled == true)
+    }
+
     /// Upstream exposes `get_goal` for the same reason: a model resuming a
     /// long task reads durable work state instead of guessing from history.
     func testWorkStateGetReturnsCurrentGoalPlanAndTodos() async throws {
@@ -187,5 +216,19 @@ final class WorkStateToolsTests: XCTestCase {
         ])
         let replacement = (await coordinator.snapshot()).goal
         XCTAssertNotEqual(replacement?.id, first?.id)
+    }
+
+    /// The goal-round continuation prompt mirrors upstream
+    /// `goal-round-driver/src/prompt.ts` so a transcript explains the turn.
+    func testGoalRoundPromptCarriesObjectiveAndRoundBudget() {
+        let prompt = WorkStateToolSupport.goalRoundPrompt(
+            objective: "整理资料",
+            round: 2,
+            maximum: 8
+        )
+        XCTAssertTrue(prompt.contains("<goal_round>"))
+        XCTAssertTrue(prompt.contains("Objective: 整理资料"))
+        XCTAssertTrue(prompt.contains("Round: 2/8"))
+        XCTAssertTrue(prompt.contains("</goal_round>"))
     }
 }

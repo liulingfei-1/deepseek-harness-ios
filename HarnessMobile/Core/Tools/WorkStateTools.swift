@@ -69,12 +69,51 @@ actor WorkStateCoordinator {
     }
 
     func setGoal(title: String, status: ConversationItemStatus) -> ConversationWorkState {
+        let replacingCompletedGoal = state.goal?.status == .completed && status != .completed
         if let current = state.goal,
            current.status != .completed || status == .completed {
-            state.goal = ConversationGoal(id: current.id, title: title, status: status)
+            // Editing keeps the round accounting; only a fresh goal after a
+            // completed one starts a new sequence.
+            state.goal = ConversationGoal(
+                id: replacingCompletedGoal ? UUID() : current.id,
+                title: title,
+                status: status,
+                isContinuationEnabled: replacingCompletedGoal ? false : current.isContinuationEnabled,
+                maximumRounds: replacingCompletedGoal ? nil : current.maximumRounds,
+                usedRounds: replacingCompletedGoal ? 0 : current.usedRounds,
+                blocker: replacingCompletedGoal ? nil : current.blocker
+            )
         } else {
             state.goal = ConversationGoal(title: title, status: status)
         }
+        return state
+    }
+
+    /// Upstream `dsh-goal-round-driver`: start one goal-sourced round when the
+    /// goal is active, continuation is on, and the cap still has room. Spending
+    /// the cap records a blocker so the stop is visible, not silent.
+    func startGoalRound() -> Bool {
+        guard var goal = state.goal, goal.canStartRound else { return false }
+        goal.usedRounds += 1
+        if goal.usedRounds >= goal.effectiveMaximumRounds {
+            goal.blocker = "已达目标轮次上限（\(goal.effectiveMaximumRounds) 轮）。"
+        }
+        state.goal = goal
+        return true
+    }
+
+    func setGoalContinuation(enabled: Bool, maximumRounds: Int? = nil) throws -> ConversationWorkState {
+        var goal = try currentGoal()
+        goal.isContinuationEnabled = enabled
+        if let maximumRounds {
+            goal.maximumRounds = max(1, maximumRounds)
+        }
+        if enabled {
+            // Re-enabling after a cap-spent block clears the blocker so the
+            // driver can run again.
+            goal.blocker = nil
+        }
+        state.goal = goal
         return state
     }
 
@@ -170,7 +209,7 @@ actor WorkStateCoordinator {
     }
 }
 
-private enum WorkStateToolSupport {
+enum WorkStateToolSupport {
     static let itemSchema = JSONValue.object([
         "type": .string("object"),
         "properties": .object([
@@ -218,6 +257,20 @@ private enum WorkStateToolSupport {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         return String(decoding: try encoder.encode(state), as: UTF8.self)
+    }
+
+    /// Model-visible continuation prompt, mirroring upstream
+    /// `goal-round-driver/src/prompt.ts`. It is retained in session history so
+    /// the transcript explains why the next turn started.
+    static func goalRoundPrompt(objective: String, round: Int, maximum: Int) -> String {
+        """
+        <goal_round>
+        Objective: \(objective)
+        Round: \(round)/\(maximum)
+
+        继续在同一会话中朝该目标推进。以当前工作区、工具结果与持久会话状态为准，先检查再判断，不要假定先前的叙述仍然有效。取得具体进展并验证结果。在宣告完成前，收集整个目标已达成的证据、读取当前目标并标记完成。若仍有剩余工作，保持目标 active 以进入下一轮。
+        </goal_round>
+        """
     }
 }
 

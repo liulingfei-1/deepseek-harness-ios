@@ -8,19 +8,74 @@ enum ConversationItemStatus: String, Codable, Sendable, Equatable, CaseIterable 
     case blocked
 }
 
+/// Mirrors upstream `dsh-goal` plus the round accounting `dsh-goal-round-driver`
+/// folds: an active goal with continuation enabled keeps starting goal rounds
+/// until the cap is spent, and a spent cap records a blocker instead of
+/// silently stopping.
 struct ConversationGoal: Codable, Sendable, Equatable, Identifiable {
+    /// Default cap for a goal-driven round sequence. Upstream keeps the cap on
+    /// the goal definition; mobile exposes the same default and lets the goal
+    /// carry an explicit value.
+    static let defaultMaximumRounds = 8
+
     let id: UUID
     var title: String
     var status: ConversationItemStatus
+    /// Opt-in: goal rounds only start when the user enabled continuation.
+    var isContinuationEnabled: Bool
+    /// Rounds started for this goal; `nil` means "use the default cap".
+    var maximumRounds: Int?
+    /// Rounds consumed so far, counting only goal-sourced rounds.
+    var usedRounds: Int
+    /// Why the driver stopped, e.g. the round cap was spent.
+    var blocker: String?
 
     init(
         id: UUID = UUID(),
         title: String,
-        status: ConversationItemStatus = .pending
+        status: ConversationItemStatus = .pending,
+        isContinuationEnabled: Bool = false,
+        maximumRounds: Int? = nil,
+        usedRounds: Int = 0,
+        blocker: String? = nil
     ) {
         self.id = id
         self.title = title
         self.status = status
+        self.isContinuationEnabled = isContinuationEnabled
+        self.maximumRounds = maximumRounds
+        self.usedRounds = usedRounds
+        self.blocker = blocker
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, status, isContinuationEnabled, maximumRounds, usedRounds, blocker
+    }
+
+    /// Goals persisted before round accounting existed decode with continuation
+    /// off, so enabling this is always a deliberate, user-visible step.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        status = try container.decode(ConversationItemStatus.self, forKey: .status)
+        isContinuationEnabled = try container.decodeIfPresent(Bool.self, forKey: .isContinuationEnabled) ?? false
+        maximumRounds = try container.decodeIfPresent(Int.self, forKey: .maximumRounds)
+        usedRounds = try container.decodeIfPresent(Int.self, forKey: .usedRounds) ?? 0
+        blocker = try container.decodeIfPresent(String.self, forKey: .blocker)
+    }
+
+    var effectiveMaximumRounds: Int {
+        max(1, maximumRounds ?? Self.defaultMaximumRounds)
+    }
+
+    /// A goal only drives another round while active, continuation-enabled,
+    /// unblocked, and under its cap.
+    var canStartRound: Bool {
+        status == .active
+            && isContinuationEnabled
+            && blocker == nil
+            && usedRounds < effectiveMaximumRounds
     }
 }
 
