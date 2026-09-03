@@ -32,7 +32,7 @@
 | 010 | VERIFY | loopback `/health`、`/status`、`/sessions` 已启动并动态投影；`LocalStateHTTPClient` 已用真实 `URLSession` 验证 `/status` 与 `/sessions` GET | 端口冲突、生命周期、真机 |
 | 011 | TODO | 静态 provider catalog；缺动态 catalog/OAuth/reload | 先建立 capability cache，再逐 provider 接入 |
 | 012 | TODO | 无 e2b/fs/subprocess provider | 先写上游 REST compatibility fixture，再决定本机替代或显式远程适配 |
-| 013 | VERIFY | GitHub envelope、loopback POST、持久去重、可选 HMAC 已实现 | Agent/Job 触发、重试、配置 UI、后台/公网边界 |
+| 013 | VERIFY | GitHub envelope、loopback POST、持久去重、可选 HMAC 和 AppModel→本机 Job 投影已实现；修复 sink 初始化提前 claim 的问题 | rule/重试、可选 Agent 唤醒、配置 UI、后台/公网边界 |
 | 014 | TODO | 无桌面浏览器/Windows 发行形态 | 形成 capability matrix，平台不适用项明确收口 |
 
 ## 3. 每个 ID 的执行模板

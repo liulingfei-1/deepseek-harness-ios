@@ -125,7 +125,7 @@
 ### PARITY-013 · webhook 投影为本机 Job（2026-09-04）
 
 - **状态**：VERIFY
-- **移动端变更**：`LocalStateServer` 支持初始化完成后的 webhook sink 注入；`AppModel` 先以 delivery ID 做持久去重，再把 GitHub event 投影为可通过 `job_list`/`job_output` 读取的已完成本机 `webhook` Job，保留事件名和 JSON payload。重复 delivery 不会重复建 Job。
+- **移动端变更**：`LocalStateServer` 支持初始化完成后的 webhook sink 注入；`AppModel` 先以 delivery ID 做持久去重，再把 GitHub event 投影为可通过 `job_list`/`job_output` 读取的已完成本机 `webhook` Job，保留事件名和 JSON payload。修复初始化阶段提前 claim delivery、导致正式 sink 永远跳过 Job 的生命周期 bug；重复 delivery 不会重复建 Job。
 - **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-webhook-trigger --filter LocalStateServerTests` → 9 tests passed；`xcodebuild ... -derivedDataPath /tmp/hm-xcode-webhook-trigger build` → `BUILD SUCCEEDED`；无远程执行审计、上游一致性和 `git diff --check` 通过。
 - **剩余动作**：将 webhook rule 配置、失败重试和可选 Agent 唤醒接入设置；公网 ingress、隧道和后台持续监听仍需平台/真机证据。
 

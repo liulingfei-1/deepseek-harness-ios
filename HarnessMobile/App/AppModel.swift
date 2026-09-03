@@ -715,9 +715,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         localStateServer = LocalStateServer(endpoints: [
             .init(path: "/status", handler: { [localStateSnapshotStore] in localStateSnapshotStore.status() }),
             .init(path: "/sessions", handler: { [localStateSnapshotStore] in localStateSnapshotStore.sessions() })
-        ], webhookHandler: { [localWebhookDeduplicator] event in
-            Task { _ = await localWebhookDeduplicator.accept(event.deliveryID) }
-        })
+        ])
         localStateServer?.start()
         localStateServer?.setWebhookHandler { [weak self] event in
             Task { @MainActor [weak self] in
