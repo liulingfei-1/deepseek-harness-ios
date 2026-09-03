@@ -27,12 +27,14 @@ git diff --check
 | PARITY-002 | `session-log-deepseek` delivery-accepted + suffix/watermark | `SessionLogDeepSeekExtensionProvider` → canonical trajectory → DeepSeek request registry | VERIFY | 已接入可选 `dsh_session_log` provider、suffix/watermark、2xx acceptance 事件和 malformed watermark 拒绝；仍缺真实 endpoint、断网重启和真机证据 |
 | PARITY-003 | telemetry ledger + OTLP sink | `SessionTelemetry`/`SessionTelemetryOtelSink` | VERIFY | 真实 feedback sink 与设置 UI；默认关闭保持可见 |
 | PARITY-004 | turn outline/trajectory rail | `SessionTurnOutline` + Chat rail | VERIFY | 长会话、分页、VoiceOver、真机 |
-| PARITY-005 | ACP `initialize → session/new → session/prompt → session/update` | `ACPSubagentClient`、iSH transport、provider catalog | VERIFY | 已补 `runAndWait` 取消传播到活动 session；仍缺真实 ACP entrypoint、exit/reconnect、持久 provider 选择和真机证据 |
+| PARITY-005 | ACP `initialize → session/new → session/prompt → session/update` | `ACPSubagentClient`、iSH transport、provider catalog | VERIFY | 已补取消传播与 transport EOF/退出即时结算；仍缺真实 ACP entrypoint、重连、持久 provider 选择和真机证据 |
 
 ### PARITY-005 本批次逐步修改清单
 
 - [x] `ACPSubagentClient.runAndWait` 在任务取消或 `Task.sleep` 抛出取消时发送 `session/cancel`，再返回明确的 `ACPSubagentError.cancelled`。
 - [x] 回归测试验证 initialize/session/new/prompt 后取消确实携带活动 `sessionId`，并覆盖成功流不回归。
+- [x] `ACPLineTransport` 增加终止通知；iSH transport EOF/进程退出会立即将等待中的 run 结算为 `ACPSubagentError.failed(.error)`，不再等到超时。
+- [x] 回归测试覆盖 transport termination 的即时失败结算。
 - [ ] 真实 iSH ACP 子进程、EOF/非零退出、重连、后台恢复和 iPhone 16 Pro 证据；未取得前保持 `VERIFY`。
 | PARITY-006 | provider/model/reasoning capability 由 runtime 查询 | `ModelProviderCatalog`、`ModelDiscoveryCache` | VERIFY | 真实多 provider capability cache 与 reload |
 | PARITY-007 | Claude `SubagentStart/Stop` 与 Codex hook 生命周期 | `HookProtocol` + AppModel child activation | VERIFY | iSH/ACP 真机超时与取消轨迹 |

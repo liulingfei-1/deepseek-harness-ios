@@ -288,6 +288,9 @@ final class ACPSubagentClient: @unchecked Sendable {
         transport.onLine = { [weak self] line in
             self?.handle(line: line)
         }
+        transport.setTerminationHandler { [weak self] in
+            self?.transportDidTerminate()
+        }
     }
 
     /// Starts the session and sends the prompt; the transport delivers the
@@ -400,12 +403,26 @@ final class ACPSubagentClient: @unchecked Sendable {
     private func send(_ line: String) {
         transport.send(line)
     }
+
+    private func transportDidTerminate() {
+        guard !finished, outcome == nil else { return }
+        outcome = .error
+        finished = true
+        pendingStage = .idle
+    }
 }
 
 /// Line-framed transport seam: one JSON-RPC message per line.
 protocol ACPLineTransport: AnyObject, Sendable {
     var onLine: @Sendable (String) -> Void { get set }
     func send(_ line: String)
+    func setTerminationHandler(_ handler: @escaping @Sendable () -> Void)
+}
+
+extension ACPLineTransport {
+    func setTerminationHandler(_ handler: @escaping @Sendable () -> Void) {
+        _ = handler
+    }
 }
 
 /// Production iSH stdio bridge for ACP agents. The existing plugin-host
@@ -418,6 +435,7 @@ final class ISHACPLineTransport: ACPLineTransport, @unchecked Sendable {
     private var pending: [String] = []
     private var buffer = Data()
     private var lineHandler: @Sendable (String) -> Void = { _ in }
+    private var terminationHandler: @Sendable () -> Void = {}
 
     var onLine: @Sendable (String) -> Void {
         get {
@@ -455,6 +473,12 @@ final class ISHACPLineTransport: ACPLineTransport, @unchecked Sendable {
             pending.append(line)
             lock.unlock()
         }
+    }
+
+    func setTerminationHandler(_ handler: @escaping @Sendable () -> Void) {
+        lock.lock()
+        terminationHandler = handler
+        lock.unlock()
     }
 
     private func start() async {
@@ -495,7 +519,9 @@ final class ISHACPLineTransport: ACPLineTransport, @unchecked Sendable {
         lock.lock()
         started = false
         pending.removeAll(keepingCapacity: false)
+        let terminationHandler = self.terminationHandler
         lock.unlock()
+        terminationHandler()
     }
 
     private func markStartedAndDrain() -> [String] {

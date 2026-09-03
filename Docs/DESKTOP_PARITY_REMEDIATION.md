@@ -156,6 +156,13 @@
 - **专项验证**：`ACPSubagentClientTests.testRunAndWaitCancellationPropagatesToActiveSession` → **1 test passed**；ACP 全套测试 → **8 tests passed**。
 - **剩余边界**：真实 iSH ACP entrypoint、EOF/非零退出、重连、后台和 iPhone 16 Pro 仍需设备证据，状态保持 `VERIFY`。
 
+### PARITY-005 · ACP transport termination（2026-09-04）
+
+- **根因**：原 `ACPLineTransport` 只有行输入，没有 EOF/退出通知；子进程提前退出时 `runAndWait` 只能等到超时。
+- **移动端变更**：增加可选终止回调；`ISHACPLineTransport` 在 iSH host 退出或启动失败时触发，客户端立即结算为 `ACPSubagentError.failed(.error)`。
+- **专项验证**：ACP 全套测试 → **9 tests passed**，新增 `testTransportTerminationSettlesWaitingRunImmediately`。
+- **剩余边界**：真实 ACP child 的非零退出码映射、重连策略、后台恢复和真机证据仍需设备运行。
+
 ### PARITY-013 · GitHub webhook envelope 与投递去重（2026-09-04）
 
 - **状态**：VERIFY

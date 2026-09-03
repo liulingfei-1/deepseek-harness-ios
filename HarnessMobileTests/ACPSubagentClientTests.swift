@@ -13,10 +13,15 @@ import XCTest
 final class ACPSubagentClientTests: XCTestCase {
     private final class MockTransport: ACPLineTransport, @unchecked Sendable {
         var onLine: @Sendable (String) -> Void = { _ in }
+        var terminationHandler: @Sendable () -> Void = {}
         private(set) var sent: [String] = []
 
         func send(_ line: String) {
             sent.append(line)
+        }
+
+        func setTerminationHandler(_ handler: @escaping @Sendable () -> Void) {
+            terminationHandler = handler
         }
 
         func agentResponds(_ object: [String: JSONValue]) {
@@ -238,5 +243,24 @@ final class ACPSubagentClientTests: XCTestCase {
         }
         XCTAssertEqual(error as? ACPSubagentError, .cancelled)
         XCTAssertTrue(transport.sent.contains { $0.contains("session/cancel") && $0.contains("cancel-me") })
+    }
+
+    func testTransportTerminationSettlesWaitingRunImmediately() async throws {
+        let transport = MockTransport()
+        let client = ACPSubagentClient(transport: transport, cwd: "/workspace")
+        let task = Task { () -> Result<String, Error> in
+            do {
+                return .success(try await client.runAndWait(prompt: "hi", timeout: .seconds(2)))
+            } catch {
+                return .failure(error)
+            }
+        }
+        while transport.sent.count < 1 { await Task.yield() }
+        transport.terminationHandler()
+        let result = await task.value
+        guard case let .failure(error) = result else {
+            return XCTFail("transport termination must fail the waiting run")
+        }
+        XCTAssertEqual(error as? ACPSubagentError, .failed(.error))
     }
 }
