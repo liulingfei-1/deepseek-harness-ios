@@ -100,6 +100,7 @@ $(SRCROOT)/HarnessMobile/Core/Plugins/NativeAgent/NativeAgentPluginStore.swift
 $(SRCROOT)/HarnessMobile/Core/Plugins/PluginInstallCoordinator.swift
 $(SRCROOT)/HarnessMobile/Core/Trace/SessionPersistence.swift
 $(SRCROOT)/HarnessMobile/Core/Trace/SessionTurnOutline.swift
+$(SRCROOT)/HarnessMobile/Core/Trace/SessionTelemetry.swift
 $(SRCROOT)/HarnessMobile/Core/Trace/SessionQueryReadModel.swift
 $(SRCROOT)/HarnessMobile/Core/Security/CredentialStore.swift
 $(SRCROOT)/HarnessMobile/Core/Storage/HarnessFileSystem.swift
@@ -284,6 +285,7 @@ $(SRCROOT)/HarnessMobileTests/WidgetProjectionTests.swift
 $(SRCROOT)/HarnessMobileTests/SessionTitleSettingsTests.swift
 $(SRCROOT)/HarnessMobileTests/SessionEventTrajectoryTests.swift
 $(SRCROOT)/HarnessMobileTests/SessionTurnOutlineTests.swift
+$(SRCROOT)/HarnessMobileTests/SessionTelemetryTests.swift
 $(SRCROOT)/HarnessMobileTests/DeepSeekSearchProviderTests.swift
 $(SRCROOT)/HarnessMobileTests/DeepSeekLlmAPIExtensionRegistryTests.swift
 $(SRCROOT)/HarnessMobileTests/ExaSearchProviderTests.swift

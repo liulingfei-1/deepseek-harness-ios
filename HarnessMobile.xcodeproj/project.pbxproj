@@ -207,6 +207,7 @@
 		A76BDF15C813870EFE1B3DEA /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 61B518A6F9854F7F0A720088 /* libsqlite3.tbd */; };
 		A9537C4D29A8C86C5F7B9A86 /* BackgroundPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6569113D009298F60C95AA2 /* BackgroundPreferences.swift */; };
 		A95461D9E0B5ECB21EC4A524 /* HarnessSessionWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DA8F6DE14C052C29889F884 /* HarnessSessionWidget.swift */; };
+		AA153470E68D44AF9627048C /* SessionTelemetryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8843395D6A5809064D41110 /* SessionTelemetryTests.swift */; };
 		AB583C4D8A6A9DB6512986CE /* BackgroundSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55D5E1B7003687125A57F69C /* BackgroundSettingsView.swift */; };
 		ACFD9607F0F43CF13041E674 /* SessionRunRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F236495E010DBA48452DBEB /* SessionRunRegistry.swift */; };
 		AEEA6AF7653BE7831FA20C41 /* TrajectoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA2C7DA89914E2E23DB64EA5 /* TrajectoryView.swift */; };
@@ -222,6 +223,7 @@
 		B500AB0CDF740AA3F327582B /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE00F7875B05F0BD87EF47F1 /* ShareViewController.swift */; };
 		B5D2971078B4D2BDC9F920FE /* SessionPersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3362D4DBAB1CCFE22271E63B /* SessionPersistence.swift */; };
 		B7905AA906B1919D6C8FF11F /* SessionTrajectoryTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49A62CD01F6F4F77EF213FEC /* SessionTrajectoryTools.swift */; };
+		B8769B362989E36079211B79 /* SessionTelemetry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8CDFF4A54FB56DA93976F77 /* SessionTelemetry.swift */; };
 		BACAE5AAB2A0A4224B096808 /* OutputRetentionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51CCA3023399F72B0806A3DA /* OutputRetentionTests.swift */; };
 		BAEDA90C4E1849D4CDA37201 /* PluginInstallCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBB9478F49EFF8174C4DC0C3 /* PluginInstallCoordinatorTests.swift */; };
 		BB3953B4165A5C39C1F9F80B /* SessionTrajectoryConversationProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC0E31AB6440A1D2ED433930 /* SessionTrajectoryConversationProjection.swift */; };
@@ -604,6 +606,7 @@
 		A7367C0F502458EFD6AFCA67 /* SystemConfiguration.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SystemConfiguration.framework; path = System/Library/Frameworks/SystemConfiguration.framework; sourceTree = SDKROOT; };
 		A75F15BB060E79512A0927A4 /* CameraPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraPicker.swift; sourceTree = "<group>"; };
 		A80CD25813B3ED4E625B0765 /* AppModel+ShareHandoff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+ShareHandoff.swift"; sourceTree = "<group>"; };
+		A8CDFF4A54FB56DA93976F77 /* SessionTelemetry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTelemetry.swift; sourceTree = "<group>"; };
 		A91F2CEFD6E4204734B6DBF6 /* host.mjs */ = {isa = PBXFileReference; path = host.mjs; sourceTree = "<group>"; };
 		AA6271D621F82EC720EBB913 /* AnonymousUserIDTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnonymousUserIDTests.swift; sourceTree = "<group>"; };
 		AB53E1BB49E1F50687358A54 /* ProductionToolCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionToolCatalogTests.swift; sourceTree = "<group>"; };
@@ -682,6 +685,7 @@
 		E7ED0858F2380200499D3E97 /* RuntimeResourceGovernorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeResourceGovernorTests.swift; sourceTree = "<group>"; };
 		E83A1DE7AF1B033BABE9A3E4 /* ISHPluginHostDynamicHarnessBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ISHPluginHostDynamicHarnessBridge.swift; sourceTree = "<group>"; };
 		E87B297AFBD10908EBA5F963 /* CameraOCRTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraOCRTool.swift; sourceTree = "<group>"; };
+		E8843395D6A5809064D41110 /* SessionTelemetryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTelemetryTests.swift; sourceTree = "<group>"; };
 		E88FC0FE6B4542793C7685E1 /* SessionTitleSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTitleSettings.swift; sourceTree = "<group>"; };
 		EA19DA4D52EA0BB8A41E53EC /* ContactsSearchTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactsSearchTool.swift; sourceTree = "<group>"; };
 		EB208E47CC443CB030271584 /* SkillTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillTools.swift; sourceTree = "<group>"; };
@@ -1043,6 +1047,7 @@
 				CB3A79455A739004B17D123A /* SessionEventTrajectory.swift */,
 				3362D4DBAB1CCFE22271E63B /* SessionPersistence.swift */,
 				1E6AFD5E53A6571813749344 /* SessionQueryReadModel.swift */,
+				A8CDFF4A54FB56DA93976F77 /* SessionTelemetry.swift */,
 				FC0E31AB6440A1D2ED433930 /* SessionTrajectoryConversationProjection.swift */,
 				6622F2CCFC78486A7E665DF2 /* SessionTrajectoryRepository.swift */,
 				1392DD730F03BDB53F6D408C /* SessionTurnOutline.swift */,
@@ -1204,6 +1209,7 @@
 				C8E35254A7434D118B91F81B /* SessionRunRegistryTests.swift */,
 				C42A77E8C9E76C1366719452 /* SessionRunStateTests.swift */,
 				C0818192CDFF581A32575E17 /* SessionStoreTests.swift */,
+				E8843395D6A5809064D41110 /* SessionTelemetryTests.swift */,
 				F544943DF56FBC7F6BC15AF9 /* SessionTitleSettingsTests.swift */,
 				5564E3FFB7B5197AC30F19D0 /* SessionTrajectoryRepositoryTests.swift */,
 				21DFF41C91827488AE5B2E52 /* SessionTrajectoryToolsTests.swift */,
@@ -1829,6 +1835,7 @@
 				1FA1C4D45C3CDFDEE94BDEBC /* SessionRunRegistryTests.swift in Sources */,
 				C23D1B6EF1C85C73ACBB068C /* SessionRunStateTests.swift in Sources */,
 				B1A9201B54D45ACC04DFBDC8 /* SessionStoreTests.swift in Sources */,
+				AA153470E68D44AF9627048C /* SessionTelemetryTests.swift in Sources */,
 				3F8837D3A92181313F0325C1 /* SessionTitleSettingsTests.swift in Sources */,
 				5FAF5BA5B1FE55D8922CAC8D /* SessionTrajectoryRepositoryTests.swift in Sources */,
 				65787989C281FFD69D9438DB /* SessionTrajectoryToolsTests.swift in Sources */,
@@ -2020,6 +2027,7 @@
 				ACFD9607F0F43CF13041E674 /* SessionRunRegistry.swift in Sources */,
 				FE24443F9F786FEE7EB9F08B /* SessionRunState.swift in Sources */,
 				17704DFD9624275EE64885CB /* SessionStore.swift in Sources */,
+				B8769B362989E36079211B79 /* SessionTelemetry.swift in Sources */,
 				002B822D6A8416A0E109CA66 /* SessionTitleSettings.swift in Sources */,
 				BB3953B4165A5C39C1F9F80B /* SessionTrajectoryConversationProjection.swift in Sources */,
 				681001FD0139D8C8637185C9 /* SessionTrajectoryRepository.swift in Sources */,
