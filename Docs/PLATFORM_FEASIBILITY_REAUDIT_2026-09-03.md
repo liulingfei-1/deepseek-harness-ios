@@ -92,7 +92,7 @@
 ## 4. 立即要改的文档（本轮已证伪）
 
 - [x] DESKTOP_FULL_PARITY §4 "Browser client-half 平台限制" → 改"可实现（WKWebView），合规与工程另行评估"
-- [ ] DECISIONS D-010 后果段 同步 Browser 措辞
+- [x] DECISIONS D-010 后果段同步 Browser 措辞；`AGENTS.md` 与桌面对齐文档一并更正
 - [ ] GAP_FULL §3 / MASTER_PROGRESS 中 10 行重判结果回填
 
 ## 5. 行动顺序建议

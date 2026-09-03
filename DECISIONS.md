@@ -89,7 +89,7 @@ D-008 以移动端自设安全模型限制插件面（只走 native 清单或 iS
 决策：
 插件面完全对齐桌面：模型可见并可用 `cordis_inspect_list/query/self/define/run/stop/undefine` 7 工具；市场与模型安装默认走本地 host 运行时装载，不再「先 native 编译」；允许加载任意 Cordis/npm JS 生态包。native 声明式清单保留为可选后端，非默认非前置。执行只在设备本地，不引入远程 executor（D-001 不变）。
 
-平台工具链限制（非安全模型）：Browser/React client-half 因无浏览器容器不装载；`.node` 原生 addon、下载的 Swift/framework 二进制受 iOS/iSH 工具链限制；均报明确平台限制错误。
+平台能力事实：现有 `HarnessBrowserWebKitBackend` 已提供 WKWebView 容器，因此 Browser/React client-half 属可实现但尚未接入的工程差距，不再归类为平台不支持。`.node` 原生 addon、下载的 Swift/framework 二进制仍受 iOS/iSH 工具链限制，报明确平台限制错误。
 
 后果：
 AGENTS.md、SECURITY_GUIDELINES.md 相应条款按本文档修订（见 `Docs/DESKTOP_FULL_PARITY_2026-09-03.md` §1）。默认路径改变影响市场安装 UI 与安装协调器行为。native 编译相关代码保留可选、逐步退出默认路由。

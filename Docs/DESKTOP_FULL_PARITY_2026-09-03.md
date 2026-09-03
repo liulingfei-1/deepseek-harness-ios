@@ -28,7 +28,7 @@
 ### DECISIONS.md
 | 决策 | 处理 |
 |---|---|
-| D-008「动态代码限制」 | 由新决策 **D-010「桌面级插件对齐」取代**。D-010：插件执行模型 = 本地 host 运行时（iSH node），模型可用 cordis_* 7 工具动态 define/run/update/stop/undefine；可加载任意 Cordis/npm JS 包；native 声明式清单保留为可选后端（A3 决策），不再是默认或前置。Browser Client-half/React slot/.node addon 因移动端无浏览器容器与工具链列平台限制（§4），非安全拒绝。 |
+| D-008「动态代码限制」 | 由新决策 **D-010「桌面级插件对齐」取代**。D-010：插件执行模型 = 本地 host 运行时（iSH node），模型可用 cordis_* 7 工具动态 define/run/update/stop/undefine；可加载任意 Cordis/npm JS 包；native 声明式清单保留为可选后端（A3 决策），不再是默认或前置。现有 WKWebView 可承载 Browser Client-half/React slot，属于未接入的工程差距；`.node` addon 仍是工具链限制（§4）。 |
 | D-001「设备内执行边界」 | 保留并重述：对齐桌面也是本机执行；禁止远程 executor 不构成能力差异。 |
 
 ## 2. 能力差距与改造设计
@@ -74,7 +74,7 @@
 
 | 限制 | 原因 | 处理 |
 |---|---|---|
-| Browser Client-half / React slot | 移动端无浏览器 UI 容器 | 桌面 client 包在移动端不装载；报「桌面 Web UI 不适用」 |
+| Browser Client-half / React slot | 现有 `HarnessBrowserWebKitBackend` 已运行 WKWebView，技术上可承载 | 尚未打包/接入桌面 client bundle；原生 SwiftUI 已覆盖主要用户语义，但不能据此宣称同一 client runtime 已完成 |
 | `.node` 原生 addon | iSH 无对应工具链、iOS 无 dlopen 动态库 | 报平台限制错误，不静默 |
 | 下载的 Swift/framework 二进制 | iOS 无运行时 JIT/dlopen | 保持禁止（平台限制而非安全模型） |
 

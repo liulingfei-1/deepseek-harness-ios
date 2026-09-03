@@ -54,7 +54,7 @@
 
 ### P4：本机 server、webhook、team
 
-- **010 LocalStateServer**：保留 loopback-only；已补 `LocalStateHTTPClient` 真实 URLSession GET，并修复发送完成前取消连接的生命周期 bug；继续补 controller JSON schema、端口冲突和 App 前后台启停测试。无浏览器容器时，桌面 `frontend-static` 标 `IOS-REPLACEMENT`。
+- **010 LocalStateServer**：保留 loopback-only；已补 `LocalStateHTTPClient` 真实 URLSession GET，并修复发送完成前取消连接的生命周期 bug；继续补 controller JSON schema、端口冲突和 App 前后台启停测试。现有 WKWebView 可承载前端，但 `frontend-static` 桌面 bundle 尚未接入。
 - **013 webhook**：按上游 `webhook` runtime 的 rule/dispatch 语义，把已验证 GitHub delivery 投影成 Agent/Job 请求；delivery ID 去重必须先于触发，失败可重试且不能重复确认。
 - **009 team**：继续复用 `LocalWorkflowTool`/`WorkflowRunTree`；只有当有独立成员状态、durable claim 和恢复测试时才扩大实现。
 
@@ -62,7 +62,7 @@
 
 - **011**：新增 provider capability snapshot/cache、协议选择和 runtime reload；每个 provider 用 wire fixture 对比上游，OAuth 只在平台能完成完整授权生命周期时注册。
 - **012**：先核对 `packages/e2b/e2b/src/index.ts`、`fs-e2b`、`subprocess-e2b` 与公开 REST 契约；无真实契约不得猜 endpoint。不能提供同机制时实现本机 iSH 语义替代并标 `IOS-REPLACEMENT`，远程后端另行记录配置和数据披露。
-- **014**：Browser/React client-half、Windows PowerShell/win32/ACL 等列为平台不适用；提供原生 UI/API 替代或明确错误，不写成 `DONE`。
+- **014**：Browser/React client-half 已由现有 WKWebView 证明可承载，保留为待接入工程项；Windows PowerShell/win32/ACL 仍是平台不适用。原生 UI/API 替代与桌面同 runtime 必须分开记录。
 
 ## 5. 统一验收命令
 

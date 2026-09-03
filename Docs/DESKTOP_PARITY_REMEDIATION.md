@@ -73,7 +73,15 @@
 - **状态**：VERIFY
 - **移动端变更**：新增 `LocalStateHTTPClient`，实际通过 `URLSession` 请求 loopback `/status`；修复 `LocalStateServer` 在异步发送完成前提前 cancel 连接导致客户端 `NSURLError -1005` 的生命周期缺陷。
 - **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-webclient --filter LocalStateServerTests` → 10 tests passed（含真实 `URLSession` live GET `/status` 与 `/sessions`）；Simulator/真机动态 controller 与端口冲突仍待验证。
-- **剩余动作**：补 `/sessions` live client、端口冲突/前后台恢复及 iPhone 16 Pro HTTP 证据。
+- **剩余动作**：补端口冲突/前后台恢复及 iPhone 16 Pro HTTP 证据。
+
+### PARITY-014 · 平台 capability matrix 事实同步（2026-09-04）
+
+- **状态**：VERIFY
+- **源码证据**：`HarnessBrowserWebKitBackend` 已实际使用 WKWebView；`LocalStateServer` 已提供 loopback HTTP；`Docs/PLATFORM_FEASIBILITY_REAUDIT_2026-09-03.md` 已逐项映射 client 域。
+- **结论**：Browser/React client-half 从“无浏览器容器、平台不支持”更正为“可承载但桌面 bundle 尚未接入”；Windows PowerShell/win32/ACL、下载的 Swift/framework 与 `.node` addon 仍有真实平台/工具链限制。
+- **同步范围**：`AGENTS.md`、D-010、桌面全量 parity、实施计划和执行手册统一使用同一事实，不再以旧文档掩盖可实现项。
+- **剩余动作**：打包并接入桌面 client bundle、建立 client connection/asset/version fixture；独立 headless/sdk 发行形态仍需定义真实 iOS 交付物。
 
 ### PARITY-009 · Agent team orchestration（2026-09-04）
 

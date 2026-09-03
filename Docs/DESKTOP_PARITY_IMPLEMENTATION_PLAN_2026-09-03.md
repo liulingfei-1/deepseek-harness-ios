@@ -146,7 +146,7 @@ git diff --check
 - **目标行为**：本机 server 启停、路由注册、session/settings/workspace controller、事件流和错误 schema；Web 前端仅在平台可承载时实现。
 - **影响文件**：`Core/LocalServer/LocalStateServer.swift`、App lifecycle、session/settings/workspace controllers、tests、平台文档。
 - **步骤**：明确 bind/lifecycle；注册只读和写入 controller；接入 auth/session identity；实现 SSE/WebSocket（若平台可行）；补并发、重启和端口冲突。
-- **完成条件**：本机 API 可被 fixture 客户端调用；桌面 frontend-static/client connection 无浏览器容器时标 `IOS-REPLACEMENT`。
+- **完成条件**：本机 API 可被 fixture 客户端调用；桌面 frontend-static/client connection 可由现有 WKWebView 承载，但 bundle 未接入时保持 `VERIFY`。
 
 ### PARITY-011 · `llm-pi-ai` 等价能力
 
@@ -177,7 +177,7 @@ git diff --check
 ### PARITY-014 · Web、发行形态和 Windows 专属能力
 
 - **上游参考**：`web-app`、server/headless/sdk 发行包、Windows PowerShell/win32/ACL。
-- **当前证据**：移动端为 SwiftUI + iSH；没有桌面浏览器容器、server/headless/sdk 发行形态，也没有 Windows API。
+- **当前证据**：移动端为 SwiftUI + iSH；`HarnessBrowserWebKitBackend` 已有 WKWebView 容器，LocalStateServer 已提供 loopback server，但仍没有桌面 client bundle、独立 headless/sdk 发行形态或 Windows API。
 - **目标行为**：建立逐项 capability matrix，能替代的提供原生 UI/本机 API，不能替代的给平台限制错误。
 - **完成条件**：不把 Browser Client-half、React slot、`.node` addon、Swift/framework 下载执行、PowerShell/win32 宣称为移动端 `DONE`。
 
