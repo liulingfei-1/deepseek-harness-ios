@@ -28,6 +28,16 @@
 - **iPhone 16 Pro**：未验证真实 feedback release、OTLP endpoint 和冷启动恢复，保留 `VERIFY`。
 - **剩余动作**：将 telemetry mode/endpoint 接入设置与 feedback action；补 sink flush/shutdown 生命周期和真实设备验证。
 
+### PARITY-002 · session-log 增量上传与 durable watermark（2026-09-03）
+
+- **状态**：VERIFY
+- **上游证据**：`session-log-deepseek` 的 suffix delivery、accepted cursor 和 `delivery-accepted` 事件契约；移动端原有 `HarnessSyncEnvelope` 提供连续事件 suffix。
+- **移动端变更**：新增 `SessionLogDeliveryCoordinator` actor，按会话持久化 watermark，构造 `dsh_session_log` JSON 请求体，支持 `accepted_cursor`/`accepted_sequence` 确认、HTTP 状态映射和重复投递抑制；transport 采用注入式闭包以复用网络边界。
+- **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-parity-p3 --filter SessionTrajectoryRepositoryTests/testSessionLogDeliveryPersistsAcceptedCursorAndAvoidsDuplicateSuffix` → 1 test passed。
+- **Simulator**：SwiftPM arm64 编译通过；真实 API endpoint 尚未接入 AppModel。
+- **iPhone 16 Pro**：未验证服务端 accepted cursor、断网重试和冷启动水位恢复，保留 `VERIFY`。
+- **剩余动作**：将 coordinator 接入用户显式配置的 DeepSeek session-log endpoint 和生命周期；补 2xx/4xx/超时/重启 fixture 与真机验证。
+
 > 更新：2026-08-29。本文只保留当前仍需行动或验收的事项。已经通过自动化门的历史修补不再作为待办重复列出；完整历史证据由 git 提交、测试报告和本文件的归档索引追溯。
 
 ## 当前结论

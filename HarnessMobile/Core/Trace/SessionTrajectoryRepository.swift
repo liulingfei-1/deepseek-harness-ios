@@ -294,3 +294,110 @@ actor SessionTrajectoryRepository: SessionPersistence {
             ?? event.toolResultData?.turn
     }
 }
+
+enum SessionLogDeliveryError: Error, LocalizedError, Sendable, Equatable {
+    case emptyAcknowledgement
+    case rejected(status: Int)
+    case invalidAcknowledgement
+
+    var errorDescription: String? {
+        switch self {
+        case .emptyAcknowledgement: "Session log 服务端未确认任何 cursor。"
+        case let .rejected(status): "Session log 上传被服务端拒绝（HTTP \(status)）。"
+        case .invalidAcknowledgement: "Session log 服务端确认 cursor 无效。"
+        }
+    }
+}
+
+/// Delivers durable session suffixes using the upstream DeepSeek field shape.
+/// The transport is injected so callers can bind it to the audited provider
+/// HTTP client; no implicit network request is created by this type.
+actor SessionLogDeliveryCoordinator {
+    typealias Transport = @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse)
+
+    private let persistence: SessionTrajectoryRepository
+    private let watermarkURL: URL
+    private let transport: Transport
+    private var watermarks: [String: UInt64]
+
+    init(
+        persistence: SessionTrajectoryRepository,
+        watermarkURL: URL,
+        transport: @escaping Transport
+    ) {
+        self.persistence = persistence
+        self.watermarkURL = watermarkURL
+        self.transport = transport
+        if let data = try? Data(contentsOf: watermarkURL),
+           let decoded = try? JSONDecoder().decode([String: UInt64].self, from: data) {
+            watermarks = decoded
+        } else {
+            watermarks = [:]
+        }
+    }
+
+    func watermark(sessionID: UUID) -> UInt64? {
+        watermarks[sessionID.uuidString.lowercased()]
+    }
+
+    @discardableResult
+    func deliver(sessionID: UUID, endpoint: URL, apiKey: String? = nil) async throws -> UInt64? {
+        let key = sessionID.uuidString.lowercased()
+        let base = watermarks[key] ?? UInt64.max
+        let envelope = try await persistence.makeSyncEnvelope(
+            sessionID: sessionID,
+            baseSequence: base,
+            metadata: ["transport": "session-log-deepseek"]
+        )
+        guard !envelope.events.isEmpty else { return nil }
+
+        let events = try envelope.events.map { event -> JSONValue in
+            let data = try JSONEncoder().encode(event)
+            return try JSONDecoder().decode(JSONValue.self, from: data)
+        }
+        let payload: JSONValue = .object([
+            "session_id": .string(sessionID.uuidString),
+            "base_sequence": .number(Double(envelope.baseSequence)),
+            "events": .array(events)
+        ])
+        let body = try JSONEncoder().encode(payload)
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let apiKey, !apiKey.isEmpty {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
+        request.httpBody = body
+        let (data, response) = try await transport(request)
+        guard (200..<300).contains(response.statusCode) else {
+            throw SessionLogDeliveryError.rejected(status: response.statusCode)
+        }
+        let accepted = Self.acceptedCursor(from: data) ?? envelope.events.last?.seq
+        guard let accepted, accepted >= envelope.events.last!.seq else {
+            throw SessionLogDeliveryError.invalidAcknowledgement
+        }
+        watermarks[key] = accepted
+        try persistWatermarks()
+        return accepted
+    }
+
+    private func persistWatermarks() throws {
+        let data = try JSONEncoder().encode(watermarks)
+        try FileManager.default.createDirectory(
+            at: watermarkURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try data.write(to: watermarkURL, options: .atomic)
+    }
+
+    private static func acceptedCursor(from data: Data) -> UInt64? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let raw = object["accepted_cursor"] ?? object["accepted_sequence"],
+              let number = raw as? NSNumber else { return nil }
+        let value = number.doubleValue
+        guard value.isFinite, value >= 0,
+              value.rounded(.down) == value,
+              value <= Double(UInt64.max) else { return nil }
+        return UInt64(value)
+    }
+}

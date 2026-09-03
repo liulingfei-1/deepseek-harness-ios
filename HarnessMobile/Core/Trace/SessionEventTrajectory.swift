@@ -36,6 +36,7 @@ enum SessionEventVocabulary {
     /// permission preset for a session is durable; the payload is the
     /// preset table key (or `custom` when the effective knobs match none).
     static let permissionPreset = "permission/preset"
+    static let deliveryAccepted = "session-log-deepseek/delivery-accepted"
 
     static let upstreamKnown: Set<String> = [
         "agent-preset/selected",

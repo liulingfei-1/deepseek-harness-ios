@@ -671,6 +671,40 @@ final class SessionTrajectoryRepositoryTests: XCTestCase {
         .object(["type": .string("text"), "text": .string(text)])
     }
 
+    func testSessionLogDeliveryPersistsAcceptedCursorAndAvoidsDuplicateSuffix() async throws {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sessionID = UUID()
+        let repository = SessionTrajectoryRepository(root: root.appendingPathComponent("events"))
+        _ = try await repository.append(.turnStart(turn: 1, time: 1), sessionID: sessionID)
+        let watermarkURL = root.appendingPathComponent("watermarks.json")
+        nonisolated(unsafe) var requests = [URLRequest]()
+        let coordinator = SessionLogDeliveryCoordinator(
+            persistence: repository,
+            watermarkURL: watermarkURL,
+            transport: { request in
+                requests.append(request)
+                let response = HTTPURLResponse(
+                    url: request.url!, statusCode: 200,
+                    httpVersion: nil, headerFields: ["Content-Type": "application/json"]
+                )!
+                return (Data(#"{"accepted_cursor":0}"#.utf8), response)
+            }
+        )
+        let endpoint = URL(string: "https://example.invalid/session-log")!
+        let firstAccepted = try await coordinator.deliver(sessionID: sessionID, endpoint: endpoint)
+        XCTAssertEqual(firstAccepted, 0)
+        let secondAccepted = try await coordinator.deliver(sessionID: sessionID, endpoint: endpoint)
+        XCTAssertNil(secondAccepted)
+        XCTAssertEqual(requests.count, 1)
+        let body = try XCTUnwrap(requests[0].httpBody)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(object["session_id"] as? String, sessionID.uuidString)
+        XCTAssertEqual((object["events"] as? [[String: Any]])?.count, 1)
+        let persistedWatermark = await coordinator.watermark(sessionID: sessionID)
+        XCTAssertEqual(persistedWatermark, 0)
+    }
+
     private func makeRoot() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("session-trajectory-repository-tests", isDirectory: true)
