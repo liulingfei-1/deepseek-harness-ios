@@ -318,6 +318,13 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
                 }
                 for event in try decodeEvents(payload) {
                     if case .finish = event {
+                        if sawSemanticFinish {
+                            // Gateways like OpenRouter re-emit finish_reason on
+                            // the trailing usage-bearing chunk; the second
+                            // finish is the same semantic stop, so drop it
+                            // instead of failing the run downstream.
+                            continue
+                        }
                         sawSemanticFinish = true
                     }
                     if case .toolCallDelta = event {
@@ -333,6 +340,9 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
                 } else {
                     for event in try decodeEvents(payload) {
                         if case .finish = event {
+                            if sawSemanticFinish {
+                                continue
+                            }
                             sawSemanticFinish = true
                         }
                         if case .toolCallDelta = event {
