@@ -180,6 +180,23 @@
 | CordisRuntime 换代（host-runner） | ✅ IOS-REPLACEMENT 完整：`CordisPluginRuntime` actor 已实现上游 registry/lifecycle 全语义——动态注册表+staged 原子替换（=DynamicCordis registry/Run）、服务槽（=service inject）、事件/bail/拦截（=handlers）、unload 生命周期、per-scope 安装；审批请求通道在工具审批层（ToolApprovalRequest） | — |
 | CordisRuntime 换代 / `api` 控制器拆分 / `client` 49 包 / `host` 宿主 / `sdk` / `e2b` / `webhook` / `webworker` / `experimental` | ❌ 其余维持边界判定（AGENTS.md + 平台形态），见 `UPSTREAM_GAP_FULL_2026-09-02.md` 第 3 节 | — |
 
+### 实现级复核（2026-09-03 12:15-13:05，不满足于语义等价判定，逐文件核对）
+
+**本轮补齐的真实差距（提交 `549b1cf1`）**
+- `token-meter/route-pricing` 引擎缺 → 移植 `TokenPricing`：surface 节点（imageFreeTokens+images）、路由视觉定价、数量不匹配 fail-loud、无定价走结构启发式
+- **图片 token 漏计**（真实缺陷）：`ConversationTokenMeter.estimateMessage` 完全忽略 `imageAttachments`，带图请求被低估 → 每个附件补结构价
+
+**复核确认已对齐（实现级证据，非仅语义）**
+- spill-policy 的 run_code 日志副本分支：`CodeModeTool` 对 stdout/stderr 各 bound 112KB（`bounded` helper）——日志副本不会无限增长
+- goal 状态机：pending/active/paused/completed/blocked 五态 + 轮次记账（已随 goal-round-driver 移植）
+- compaction 决策：tokenCompactionPlan + 压缩投影 + cross-version fixture 均存在
+- Cordis ctx API 面 47 符号：逐一核对——核心能力在移动端以**工具级**承载（plugin_marketplace=define/run 管理、run_code=codeRuntime、session query 工具=sessionProjections、spill 工具=spillStore），服务级注入 vs 工具级调用的设计差异，能力面不缺失
+
+**架构级差异（记录，非漏改——需要产品决策开放"模型动态定义任意包执行"）**
+- `tool-cordis` 7 动态包工具（define→run→stop→remove 开发循环）：上游依赖 host-runner 的 VM 沙箱执行插件 JS；移动端安全模型=市场审核+声明式 manifest+iSH——模型不能就地定义并运行任意包
+- `ctx.codeRuntime` / `ctx.sessionProjections` / `ctx.sandboxPolicy` 等服务级注入：移动端等价能力全部在工具面，未做 Cordis 服务注册（native 插件无执行代码可注册服务）
+- host-runner VM（sandbox/guard 门面）执行 host code：执行职责归 iSH（node），不引入 VM 执行层
+
 ### 全量 UI 回归判定（2026-09-03 02:30-03:05）
 
 - `ProductionToolCatalogTests` allowlist 缺 `work_state_get` → **真破坏**，已修（`11d1256`）
