@@ -151,7 +151,7 @@ git diff --check
 ### PARITY-011 · `llm-pi-ai` 等价能力
 
 - **上游参考**：最新上游 `llm-pi-ai` provider/model catalog、native protocol、OAuth、runtime reload、replay metadata、wire protocol。
-- **当前证据**：`ModelProviderCatalog.swift` 静态支持 DeepSeek/OpenAI/Anthropic/OpenRouter/custom OpenAI-compatible，缺动态 catalog、provider-native protocol、OAuth、runtime reload 和完整 metadata。
+- **当前证据**：`ModelProviderCatalog.swift` 支持 DeepSeek/OpenAI/Anthropic/OpenRouter/custom OpenAI-compatible；已接入 OpenAI/enriched 与 Anthropic 原生动态 listing、exact model identity resolution、description metadata 和持久 capability cache，仍缺 OAuth、runtime reload、per-model reasoning/context wire metadata。
 - **目标行为**：provider/model 动态发现、协议选择、授权生命周期、能力协商、运行时 reload、重放 metadata 和错误语义一致。
 - **影响文件**：configuration/network/auth/settings/UI/AgentRuntime/tests。
 - **步骤**：建立 provider plugin protocol；迁移静态 provider；实现 capability/cache；补 OAuth adapter（平台允许的 provider）；统一 request/replay metadata；逐 provider fixture 对比上游。
@@ -226,7 +226,7 @@ git diff --check
 | PARITY-008 Exa/Perplexity | VERIFY | AppModel 统一路由、Keychain origin 存取/删除、显式 provider 选择和 Settings UI 已接入；Exa 映射已按上游丢弃无 highlight 并取首个非空 highlight；Exa 3 tests 通过、Simulator build 通过；真实 API 与真机引用仍待验证 |
 | PARITY-009 agent team | IOS-REPLACEMENT | 现有 workflow tool 提供本机编排、并行/流水线、成员生命周期与可恢复轨迹树；桌面后台 team daemon 机制不适用于 iOS，保留前台语义等价实现 |
 | PARITY-010 LocalStateServer | VERIFY | AppModel 启动 loopback server 并注册 health/status/sessions；新增线程安全快照盒、真实 `LocalStateHTTPClient` GET 与发送完成后再 cancel 的连接修复；LocalStateServer 10 tests 通过；真机 HTTP 仍待验证 |
-| PARITY-011/012/014 | TODO | 已完成源码/上游定位并写入本计划，尚未宣称实现 |
+| PARITY-011/012/014 | VERIFY/TODO | PARITY-011 已实现动态 listing、exact resolution 与 capability cache；OAuth/runtime reload/真实设备仍 VERIFY；PARITY-012/014 仍按下方边界处理 |
 | PARITY-013 webhook | VERIFY | GitHub delivery/event/payload envelope、loopback POST `/webhook/github`、有界去重及跨重启 delivery state 已实现；Settings 可配置/删除 Keychain secret，listener 支持运行时 secret 与真实 POST/HMAC；修复 AppModel sink 初始化时提前 claim delivery 的 bug，Job 投影路径已接通；11 个 LocalStateServer 测试通过；rule/重试/Agent 唤醒仍待实现 |
 
 本表只记录可复核证据，不把“计划存在”或“源码类型存在”当作能力完成。

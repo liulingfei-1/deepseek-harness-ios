@@ -155,9 +155,7 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
         var urlRequest = URLRequest(url: endpoint)
         urlRequest.httpMethod = "GET"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Accept")
-        if let apiKey {
-            urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        }
+        adapter.prepareModelListRequest(&urlRequest, apiKey: apiKey)
 
         let (bytes, response) = try await session.bytes(for: urlRequest)
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -195,6 +193,25 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
             fetchedAt: fetchedAt,
             models: models
         )
+    }
+
+    func resolveModelInfo(_ request: ModelResolutionRequest) async throws -> ProviderModel {
+        let modelID = request.modelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !modelID.isEmpty else { throw AgentConfigurationError.emptyModel }
+        let configuration = request.configuration
+        let descriptor = ModelProviderCatalog.descriptor(for: configuration.providerID)
+        if let builtIn = descriptor.builtInModels.first(where: { $0.id == modelID }) {
+            return builtIn
+        }
+        let snapshot = try await discoverModels(
+            ModelDiscoveryRequest(
+                configuration: configuration,
+                apiKey: request.apiKey,
+                trustedOrigin: request.trustedOrigin
+            )
+        )
+        return snapshot.models.first(where: { $0.id == modelID })
+            ?? ProviderModel(id: modelID, name: modelID)
     }
 
     private func perform(

@@ -14,6 +14,7 @@ protocol ModelProviderAdapter: Sendable {
     func chatCompletionsURL(for configuration: AgentConfiguration) throws -> URL
     func modelListURL(for configuration: AgentConfiguration) throws -> URL
     func decodeModelList(_ data: Data) throws -> [ProviderModel]
+    func prepareModelListRequest(_ request: inout URLRequest, apiKey: String?)
     func makeStreamingRequest(_ request: ModelRequest) throws -> URLRequest
     func httpFailureCode(
         status: Int,
@@ -25,6 +26,12 @@ protocol ModelProviderAdapter: Sendable {
 }
 
 extension ModelProviderAdapter {
+    func prepareModelListRequest(_ request: inout URLRequest, apiKey: String?) {
+        if let apiKey {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
+    }
+
     func httpFailureCode(
         status: Int,
         errorCode: String?,
@@ -145,19 +152,28 @@ struct OpenAIChatCompletionsAdapter: ModelProviderAdapter {
     }
 
     fileprivate static func decodeOpenAIModelList(_ data: Data) throws -> [ProviderModel] {
-        let envelope: OpenAIModelListEnvelope
-        do {
-            envelope = try JSONDecoder().decode(OpenAIModelListEnvelope.self, from: data)
-        } catch {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw ModelDiscoveryError.malformedResponse
+        }
+        let values: [(String?, Any)]
+        if let dataItems = root["data"] as? [Any] {
+            values = dataItems.map { (nil, $0) }
+        } else if let modelMap = root["models"] as? [String: Any] {
+            values = modelMap.keys.sorted().compactMap { key in
+                modelMap[key].map { (key, $0) }
+            }
+        } else {
             throw ModelDiscoveryError.malformedResponse
         }
 
         var seen = Set<String>()
         var models: [ProviderModel] = []
-        models.reserveCapacity(min(envelope.data.count, 1_024))
-        for lossyItem in envelope.data {
-            guard let item = lossyItem.value,
-                  let id = Self.normalizedLabel(item.id),
+        models.reserveCapacity(min(values.count, 1_024))
+        for (mapKey, rawValue) in values {
+            guard JSONSerialization.isValidJSONObject(rawValue),
+                  let itemData = try? JSONSerialization.data(withJSONObject: rawValue),
+                  let item = try? JSONDecoder().decode(OpenAIModelListItem.self, from: itemData),
+                  let id = Self.normalizedLabel(mapKey, item.id),
                   id.utf8.count <= 512,
                   seen.insert(id).inserted else {
                 continue
@@ -168,7 +184,8 @@ struct OpenAIChatCompletionsAdapter: ModelProviderAdapter {
             models.append(
                 ProviderModel(
                     id: id,
-                    name: Self.normalizedLabel(item.name, item.displayName),
+                    name: Self.normalizedLabel(item.name, item.displayName) ?? id,
+                    description: item.description,
                     contextWindow: Self.positiveCapacity(
                         item.contextWindow,
                         item.contextLength
@@ -243,11 +260,37 @@ struct AnthropicMessagesAdapter: ModelProviderAdapter {
     }
 
     func modelListURL(for configuration: AgentConfiguration) throws -> URL {
-        throw AgentConfigurationError.unsupportedModelDiscovery(configuration.providerID)
+        var components = URLComponents(string: configuration.baseURL.trimmingCharacters(in: .whitespacesAndNewlines))
+        guard components?.scheme?.lowercased() == "https",
+              components?.host?.isEmpty == false,
+              components?.user == nil,
+              components?.password == nil,
+              components?.query == nil,
+              components?.fragment == nil else {
+            throw AgentConfigurationError.invalidHTTPSURL
+        }
+        var path = components?.path ?? ""
+        while path.count > 1, path.hasSuffix("/") { path.removeLast() }
+        if path == "/" { path = "" }
+        if !path.hasSuffix("/v1") { path += "/v1" }
+        path += "/models"
+        components?.path = path
+        components?.queryItems = [URLQueryItem(name: "limit", value: "1000")]
+        guard let url = components?.url else {
+            throw AgentConfigurationError.invalidHTTPSURL
+        }
+        return url
     }
 
     func decodeModelList(_ data: Data) throws -> [ProviderModel] {
-        throw ModelDiscoveryError.unsupportedProvider(.anthropic)
+        try OpenAIChatCompletionsAdapter.decodeOpenAIModelList(data)
+    }
+
+    func prepareModelListRequest(_ request: inout URLRequest, apiKey: String?) {
+        if let apiKey {
+            request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        }
+        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
     }
 
     func makeStreamingRequest(_ request: ModelRequest) throws -> URLRequest {
@@ -283,22 +326,11 @@ struct AnthropicMessagesAdapter: ModelProviderAdapter {
     }
 }
 
-private struct OpenAIModelListEnvelope: Decodable {
-    let data: [LossyOpenAIModelListItem]
-}
-
-private struct LossyOpenAIModelListItem: Decodable {
-    let value: OpenAIModelListItem?
-
-    init(from decoder: Decoder) throws {
-        value = try? OpenAIModelListItem(from: decoder)
-    }
-}
-
 private struct OpenAIModelListItem: Decodable {
     let id: String?
     let name: String?
     let displayName: String?
+    let description: String?
     let contextWindow: Int?
     let contextLength: Int?
     let maxTokens: Int?
@@ -310,6 +342,7 @@ private struct OpenAIModelListItem: Decodable {
         case id
         case name
         case displayName = "display_name"
+        case description
         case contextWindow = "context_window"
         case contextLength = "context_length"
         case maxTokens = "max_tokens"
@@ -323,6 +356,7 @@ private struct OpenAIModelListItem: Decodable {
         id = try? container.decode(String.self, forKey: .id)
         name = try? container.decode(String.self, forKey: .name)
         displayName = try? container.decode(String.self, forKey: .displayName)
+        description = try? container.decode(String.self, forKey: .description)
         contextWindow = try? container.decode(Int.self, forKey: .contextWindow)
         contextLength = try? container.decode(Int.self, forKey: .contextLength)
         maxTokens = try? container.decode(Int.self, forKey: .maxTokens)

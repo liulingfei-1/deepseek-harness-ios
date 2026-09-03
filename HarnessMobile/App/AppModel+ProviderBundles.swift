@@ -141,6 +141,30 @@ extension AppModel {
         await providerCapabilityCache.snapshot(profileID: profileID)
     }
 
+    func resolveModelInfo(
+        for configuration: AgentConfiguration,
+        temporaryAPIKey: String? = nil,
+        modelID: String? = nil
+    ) async throws -> ProviderModel {
+        let trustedOrigin = try configuration.credentialOrigin()
+        let normalizedTemporaryKey = temporaryAPIKey?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let apiKey: String?
+        if let normalizedTemporaryKey, !normalizedTemporaryKey.isEmpty {
+            apiKey = normalizedTemporaryKey
+        } else {
+            apiKey = try await self.apiKey(for: configuration)
+        }
+        return try await modelCatalogDiscoverer.resolveModelInfo(
+            ModelResolutionRequest(
+                configuration: configuration,
+                apiKey: apiKey,
+                trustedOrigin: trustedOrigin,
+                modelID: modelID ?? configuration.model
+            )
+        )
+    }
+
     /// Uses the same provider adapter/client as an agent request, but does not
     /// create a session, append messages, or write a trajectory event.
     func quickTestProviderProfile(id: String) async throws -> ProviderQuickTestResult {

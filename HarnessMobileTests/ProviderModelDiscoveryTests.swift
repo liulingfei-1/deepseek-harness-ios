@@ -85,7 +85,7 @@ final class ProviderModelDiscoveryTests: XCTestCase {
         let descriptor = ModelProviderCatalog.descriptor(for: .anthropic)
         XCTAssertEqual(descriptor.wireProtocol, .anthropicMessages)
         XCTAssertTrue(descriptor.supportsCurrentInferenceWire)
-        XCTAssertFalse(descriptor.supportsRemoteModelDiscovery)
+        XCTAssertTrue(descriptor.supportsRemoteModelDiscovery)
         XCTAssertNotNil(descriptor.compatibilityNotice)
 
         let configuration = ModelProviderCatalog.applying(.anthropic, to: AgentConfiguration())
@@ -208,6 +208,83 @@ final class ProviderModelDiscoveryTests: XCTestCase {
         XCTAssertFalse(ModelProviderCatalog.supportsImageInput(remoteVision))
         remoteVision.inputModalities = [.text, .image]
         XCTAssertTrue(ModelProviderCatalog.supportsImageInput(remoteVision))
+    }
+
+    func testEnrichedModelsMapUsesPropertyKeyAndIgnoresPrimitiveEntries() throws {
+        let data = Data(#"{"models":{"gateway-chat":{"id":"canonical-name","display_name":"Gateway Chat","context_window":65536,"max_tokens":4096},"count":3,"vision":{"input_modalities":["text","image"]}}}"#.utf8)
+        let models = try OpenAIChatCompletionsAdapter().decodeModelList(data)
+        XCTAssertEqual(models.map(\.id), ["gateway-chat", "vision"])
+        XCTAssertEqual(models[0].name, "Gateway Chat")
+        XCTAssertEqual(models[0].contextWindow, 65_536)
+        XCTAssertEqual(models[1].inputModalities, [.text, .image])
+    }
+
+    func testAnthropicListingUsesNativeURLAndHeaders() throws {
+        var configuration = ModelProviderCatalog.applying(.anthropic, to: AgentConfiguration())
+        configuration.baseURL = "https://api.anthropic.com"
+        let adapter = AnthropicMessagesAdapter()
+        XCTAssertEqual(
+            try adapter.modelListURL(for: configuration).absoluteString,
+            "https://api.anthropic.com/v1/models?limit=1000"
+        )
+        var request = URLRequest(url: try adapter.modelListURL(for: configuration))
+        adapter.prepareModelListRequest(&request, apiKey: "fixture-key")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "x-api-key"), "fixture-key")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "anthropic-version"), "2023-06-01")
+        XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+    }
+
+    func testAnthropicDiscoveryUsesNativeListingWire() async throws {
+        var configuration = ModelProviderCatalog.applying(.anthropic, to: AgentConfiguration())
+        configuration.baseURL = "https://api.anthropic.com"
+        let sessionConfiguration = OpenAICompatibleClient.makeSessionConfiguration()
+        sessionConfiguration.protocolClasses = [ProviderDiscoveryURLProtocolStub.self]
+        let cacheDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("anthropic-discovery-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: cacheDirectory) }
+        let client = OpenAICompatibleClient(
+            filesClient: DeepSeekFilesClient(),
+            sessionConfiguration: sessionConfiguration,
+            modelDiscoveryCache: ModelDiscoveryCache(directoryURL: cacheDirectory)
+        )
+        ProviderDiscoveryURLProtocolStub.handler = { urlRequest in
+            XCTAssertEqual(urlRequest.url?.path, "/v1/models")
+            XCTAssertEqual(urlRequest.url?.query, "limit=1000")
+            XCTAssertEqual(urlRequest.value(forHTTPHeaderField: "x-api-key"), "fixture-key")
+            XCTAssertNil(urlRequest.value(forHTTPHeaderField: "Authorization"))
+            let response = try XCTUnwrap(
+                HTTPURLResponse(
+                    url: try XCTUnwrap(urlRequest.url),
+                    statusCode: 200,
+                    httpVersion: "HTTP/1.1",
+                    headerFields: ["Content-Type": "application/json"]
+                )
+            )
+            return (response, Data(#"{"data":[{"id":"claude-3-7","display_name":"Claude 3.7"}]}"#.utf8))
+        }
+        let snapshot = try await client.discoverModels(
+            ModelDiscoveryRequest(
+                configuration: configuration,
+                apiKey: "fixture-key",
+                trustedOrigin: try configuration.credentialOrigin(),
+                forceRefresh: true
+            )
+        )
+        XCTAssertEqual(snapshot.models.map(\.id), ["claude-3-7"])
+        XCTAssertEqual(snapshot.models[0].name, "Claude 3.7")
+    }
+
+    func testExactModelResolutionFallsBackToAdvisoryIdentity() async throws {
+        let configuration = ModelProviderCatalog.applying(.openAI, to: AgentConfiguration())
+        let builtIn = try await OpenAICompatibleClient().resolveModelInfo(
+            ModelResolutionRequest(
+                configuration: configuration,
+                apiKey: nil,
+                trustedOrigin: try configuration.credentialOrigin(),
+                modelID: "gpt-5"
+            )
+        )
+        XCTAssertEqual(builtIn.name, "GPT-5")
     }
 
     func testProviderRegistryOwnsThreeDistinctStreamingRequestDialects() throws {

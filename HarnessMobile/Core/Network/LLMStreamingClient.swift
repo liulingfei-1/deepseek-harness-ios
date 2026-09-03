@@ -171,6 +171,32 @@ struct ModelDiscoveryRequest: Sendable {
     }
 }
 
+struct ModelResolutionRequest: Sendable {
+    let configuration: AgentConfiguration
+    let apiKey: String?
+    let trustedOrigin: String
+    let modelID: String
+
+    init(
+        configuration: AgentConfiguration,
+        apiKey: String?,
+        trustedOrigin: String,
+        modelID: String
+    ) {
+        self.configuration = configuration
+        self.apiKey = apiKey
+        self.trustedOrigin = trustedOrigin
+        self.modelID = modelID
+    }
+}
+
 protocol ModelCatalogDiscovering: Sendable {
     func discoverModels(_ request: ModelDiscoveryRequest) async throws -> ModelCatalogSnapshot
+    func resolveModelInfo(_ request: ModelResolutionRequest) async throws -> ProviderModel
+}
+
+extension ModelCatalogDiscovering {
+    func resolveModelInfo(_ request: ModelResolutionRequest) async throws -> ProviderModel {
+        ProviderModel(id: request.modelID, name: request.modelID)
+    }
 }

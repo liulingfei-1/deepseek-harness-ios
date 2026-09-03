@@ -584,6 +584,7 @@ struct SessionModelCatalog {
                 models[position] = ProviderModel(
                     id: discoveredModel.id,
                     name: discoveredModel.name ?? current.name,
+                    description: discoveredModel.description ?? current.description,
                     contextWindow: discoveredModel.contextWindow ?? current.contextWindow,
                     maxOutputTokens: discoveredModel.maxOutputTokens ?? current.maxOutputTokens,
                     // The refreshed catalog is authoritative for capabilities.

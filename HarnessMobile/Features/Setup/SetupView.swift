@@ -747,6 +747,7 @@ private struct SetupModelCatalog {
                 models[position] = ProviderModel(
                     id: discoveredModel.id,
                     name: discoveredModel.name ?? existing.name,
+                    description: discoveredModel.description ?? existing.description,
                     contextWindow: discoveredModel.contextWindow ?? existing.contextWindow,
                     maxOutputTokens: discoveredModel.maxOutputTokens ?? existing.maxOutputTokens,
                     // A refreshed provider catalog is authoritative for model

@@ -150,6 +150,7 @@ actor ModelDiscoveryCache {
         let id = model.id.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !id.isEmpty, id.utf8.count <= 512 else { return false }
         if let name = model.name, name.utf8.count > 512 { return false }
+        if let description = model.description, description.utf8.count > 2_048 { return false }
         if let contextWindow = model.contextWindow, contextWindow <= 0 { return false }
         if let maxOutputTokens = model.maxOutputTokens, maxOutputTokens <= 0 { return false }
         return true

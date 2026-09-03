@@ -33,6 +33,7 @@ enum ModelInputModality: String, Codable, Sendable, Equatable, Hashable {
 struct ProviderModel: Codable, Sendable, Equatable, Hashable, Identifiable {
     let id: String
     let name: String?
+    let description: String?
     let contextWindow: Int?
     let maxOutputTokens: Int?
     let inputModalities: [ModelInputModality]
@@ -41,6 +42,7 @@ struct ProviderModel: Codable, Sendable, Equatable, Hashable, Identifiable {
     init(
         id: String,
         name: String? = nil,
+        description: String? = nil,
         contextWindow: Int? = nil,
         maxOutputTokens: Int? = nil,
         inputModalities: [ModelInputModality] = [.text],
@@ -48,6 +50,7 @@ struct ProviderModel: Codable, Sendable, Equatable, Hashable, Identifiable {
     ) {
         self.id = id
         self.name = name
+        self.description = description
         self.contextWindow = contextWindow
         self.maxOutputTokens = maxOutputTokens
         self.inputModalities = inputModalities
@@ -55,13 +58,14 @@ struct ProviderModel: Codable, Sendable, Equatable, Hashable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, contextWindow, maxOutputTokens, inputModalities, openAICompatibility
+        case id, name, description, contextWindow, maxOutputTokens, inputModalities, openAICompatibility
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         name = try container.decodeIfPresent(String.self, forKey: .name)
+        description = try container.decodeIfPresent(String.self, forKey: .description)
         contextWindow = try container.decodeIfPresent(Int.self, forKey: .contextWindow)
         maxOutputTokens = try container.decodeIfPresent(Int.self, forKey: .maxOutputTokens)
         inputModalities = try container.decodeIfPresent(
@@ -113,7 +117,7 @@ struct ModelProviderDescriptor: Sendable, Equatable, Identifiable {
 
 enum ModelProviderCatalog {
     static let schemaVersion = 1
-    static let revision = 2
+    static let revision = 3
     static let version = "provider-catalog-v\(schemaVersion).r\(revision)"
 
     static let providers: [ModelProviderDescriptor] = [
@@ -172,7 +176,7 @@ enum ModelProviderCatalog {
             detail: "Anthropic Messages API",
             wireProtocol: .anthropicMessages,
             inferenceSupport: .supported,
-            discoverySupport: .builtInCatalogOnly,
+            discoverySupport: .openAICompatibleModels,
             defaultBaseURL: "https://api.anthropic.com/v1",
             defaultModel: "claude-sonnet-4-5",
             defaultReasoningMode: .providerDefault,
@@ -188,7 +192,7 @@ enum ModelProviderCatalog {
                     inputModalities: [.text, .image]
                 )
             ],
-            compatibilityNotice: "Anthropic Messages 已支持流式文本、工具调用、用量和错误解析；官方 API 没有统一模型目录，因此使用内建目录或手动模型 ID。"
+            compatibilityNotice: "Anthropic Messages 支持原生 /v1/models 发现；超过 1000 个模型时仅加载首批，其余模型仍可手动输入。"
         ),
         ModelProviderDescriptor(
             id: .openRouter,

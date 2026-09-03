@@ -153,6 +153,7 @@ struct ProviderProfile: Codable, Sendable, Equatable, Identifiable {
             declaredModels[index] = ProviderModel(
                 id: current.id,
                 name: current.name,
+                description: current.description,
                 contextWindow: current.contextWindow,
                 maxOutputTokens: current.maxOutputTokens,
                 inputModalities: inputModalities,
@@ -353,6 +354,7 @@ struct ProviderProfile: Codable, Sendable, Equatable, Identifiable {
                 ProviderModel(
                     id: id,
                     name: name?.isEmpty == true ? nil : name,
+                    description: model.description,
                     contextWindow: model.contextWindow,
                     maxOutputTokens: model.maxOutputTokens,
                     inputModalities: model.inputModalities,

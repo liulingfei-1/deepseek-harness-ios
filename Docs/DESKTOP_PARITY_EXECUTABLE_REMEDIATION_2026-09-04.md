@@ -90,6 +90,9 @@ git diff --check
 - [x] `ProviderCapabilityCache` 从进程内 actor 快照扩展为可选持久化 JSON 快照；默认写入 Application Support，冷启动自动恢复。
 - [x] 快照使用 ISO-8601、profile ID 一致性校验和 4 MiB 上限；写入失败只影响辅助缓存，不阻断模型发现。
 - [x] 删除 provider profile 或清空配置时同步删除对应快照；新增跨实例恢复/删除测试。
+- [x] `listModels` 支持 OpenAI `data[]`、gateway enriched `models{}`，并保留 description/name fallback 与稳定排序。
+- [x] Anthropic 原生 `/v1/models?limit=1000`、`x-api-key`、版本头和 root/`/v1` 地址规范化已接入。
+- [x] `resolveModelInfo` exact lookup 接入共享发现协议；目录外模型保留 advisory identity，不阻断请求。
 - [ ] OAuth 授权/刷新、provider-specific reasoning/context wire fixture、runtime reload 和真实设备证据。
 
 ## 5. PARITY-010 本批次逐步修改清单
