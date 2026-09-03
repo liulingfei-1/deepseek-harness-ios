@@ -1080,10 +1080,15 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
             throw CredentialStoreError.keyRequiredForOriginChange
         }
         if normalizedKey.isEmpty {
-            guard try await credentialStore.readAPIKey(
+            let hasAPIKey = try await credentialStore.readAPIKey(
                 for: validated.credentialReference,
                 expectedOrigin: newOrigin
-            ) != nil else {
+            ) != nil
+            let hasOAuthCredential = try await credentialStore.readOAuthCredential(
+                for: validated.credentialReference,
+                expectedOrigin: newOrigin
+            ) != nil
+            guard hasAPIKey || hasOAuthCredential else {
                 throw CredentialStoreError.emptyCredential
             }
         }
@@ -1245,6 +1250,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         }
         do {
             try await credentialStore.deleteAPIKey(for: profile.credentialReference)
+            try await credentialStore.deleteOAuthCredential(for: profile.credentialReference)
         } catch {
             do {
                 try settingsStore.save(previousDirectory)

@@ -39,6 +39,7 @@
 - [x] 实现每 profile refresh single-flight：并发 refresh 只执行一次，且 refresh 前重新读取 record。
 - [x] access token 只在请求读取 seam 短暂返回；refresh metadata 不进入配置、轨迹、诊断或 UI 文本。
 - [x] provider request credential lookup 可读取 OAuth access token；profile generation reload 复用既有路径。
+- [x] 编辑 Profile 时允许已有 OAuth grant 作为凭据；删除 Profile 同时清理 API-key 与 OAuth record。
 - [x] 添加纯 Swift 回归测试：编码 round-trip、过期判断、并发 refresh、旧 API-key 兼容。
 - [ ] provider-specific OAuth authorization UI、401 自动重试和真实授权 flow。
 - [ ] 真实 OAuth/API/iSH/真机证据取得前保持 `VERIFY`。
@@ -81,4 +82,4 @@ git diff --check
 
 ## 5. 当前批次记录
 
-2026-09-04：已用 `agent-reach doctor --json`、`gh search code`、GitHub API 和本地源码/测试核对上游 authorization、credential record、E2B、webhook、ACP 入口。本批完成最小 OAuth record + refresh single-flight，并通过专项测试；provider-specific authorization UI、401 自动重试和真实授权仍保持 `VERIFY`。
+2026-09-04：已用 `agent-reach doctor --json`、`gh search code`、GitHub API 和本地源码/测试核对上游 authorization、credential record、E2B、webhook、ACP 入口。本批完成最小 OAuth record + refresh single-flight，并补齐 OAuth-backed Profile 编辑/删除生命周期；provider-specific authorization UI、401 自动重试和真实授权仍保持 `VERIFY`。

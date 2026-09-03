@@ -127,6 +127,43 @@ final class AppModelProviderProfileTests: XCTestCase {
         try await fixture.credentialStore.deleteAllAPIKeys()
     }
 
+    func testOAuthCredentialCanBackProfileSaveAndIsDeletedWithProfile() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanFilesAndDefaults() }
+        let model = fixture.makeModel()
+        let profile = try XCTUnwrap(model.activeProviderProfile)
+        let configuration = try profile.configuration().validated()
+        let origin = try configuration.credentialOrigin()
+        let oauth = ProviderOAuthCredential(
+            accessToken: "oauth-access",
+            refreshToken: "oauth-refresh",
+            expiresAt: Date().addingTimeInterval(3_600)
+        )
+        try await fixture.credentialStore.saveOAuthCredential(
+            oauth,
+            for: profile.credentialReference,
+            origin: origin
+        )
+
+        // Editing an OAuth-backed profile must not require an API-key field.
+        try await model.saveProviderProfile(
+            profile,
+            apiKey: "",
+            makeActive: true,
+            existingProfileID: profile.id
+        )
+        XCTAssertEqual(model.credentialStatus(for: profile), .configured)
+        let resolvedCredential = try await model.apiKey(for: configuration)
+        XCTAssertEqual(resolvedCredential, "oauth-access")
+
+        try await model.removeProviderProfile(id: profile.id)
+        let removedCredential = try await fixture.credentialStore.readOAuthCredential(
+            for: profile.credentialReference,
+            expectedOrigin: origin
+        )
+        XCTAssertNil(removedCredential)
+    }
+
     func testRemovingCompactionProviderAtomicallyReturnsSummaryRouteToInherited() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanFilesAndDefaults() }

@@ -213,6 +213,8 @@
 - **专项验证**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter ProviderRequestLifecycleTests` → **6 tests passed**，含 10 路并发 refresh 只执行一次与 OAuth round-trip/过期判断。
 - **剩余边界**：provider-specific OAuth authorization UI、401 自动重试、真实授权服务、iSH/后台/iPhone 16 Pro 仍未取得证据，不能写成 `DONE`。
 
+2026-09-04 追加：Profile 保存在 API Key 留空时现在会检查同源 OAuth record；删除 Profile 同时删除 API-key 与 OAuth record，避免 OAuth 凭据被误判为缺失或残留。新增 `AppModelProviderProfileTests.testOAuthCredentialCanBackProfileSaveAndIsDeletedWithProfile` 覆盖该生产路径。provider-specific authorization UI、401 自动重试、真实授权服务和设备证据仍为 `VERIFY`。
+
 ### PARITY-006 · 子 Agent reasoning effort 参数（2026-09-03）
 
 - **状态**：VERIFY
