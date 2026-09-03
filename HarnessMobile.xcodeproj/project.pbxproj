@@ -163,6 +163,7 @@
 		7C27A6B9BD8BF36D8575A8F0 /* CompactionSummaryRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = 802ECA6AA8DB3DD784C0A495 /* CompactionSummaryRoute.swift */; };
 		7E3E0B9C126C6A6213E6B48A /* MobileHarnessPrompt.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8928753149EACC692A26388C /* MobileHarnessPrompt.swift */; };
 		7FC70246ACD808D44605173F /* BackgroundRunJournal.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB540A2196E6903056C1862F /* BackgroundRunJournal.swift */; };
+		8304C8163D6790E1390D9501 /* HarnessSchedulePanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9227D9F0C0052CE61498745A /* HarnessSchedulePanel.swift */; };
 		835A4B07D5FD4788F5EE4955 /* RuntimeResourceGovernor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 151D65AED69699ED116203D0 /* RuntimeResourceGovernor.swift */; };
 		83B89DE172E88D279ABD971B /* RootfsPatch.bundle in Resources */ = {isa = PBXBuildFile; fileRef = 9E28C29AA882F3DD6D3D2914 /* RootfsPatch.bundle */; };
 		854E4CF2BAC1C23C9A979436 /* MobileSkillRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D095E59E98F5FFA00A7A21B /* MobileSkillRegistryTests.swift */; };
@@ -590,6 +591,7 @@
 		90EFD8C77B49E10FC74F5B36 /* WorkspaceInstructionTransitions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceInstructionTransitions.swift; sourceTree = "<group>"; };
 		916279C12CC8C377A08A2A39 /* WorkStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkStateView.swift; sourceTree = "<group>"; };
 		91B82ED61A97D994BB50506A /* HarnessBrowserTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HarnessBrowserTool.swift; sourceTree = "<group>"; };
+		9227D9F0C0052CE61498745A /* HarnessSchedulePanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HarnessSchedulePanel.swift; sourceTree = "<group>"; };
 		934EA6C6136EF2311A91F67F /* ContactsSearchToolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactsSearchToolTests.swift; sourceTree = "<group>"; };
 		95119D6FCB4A20C1D2410940 /* SessionTurnOutlineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTurnOutlineTests.swift; sourceTree = "<group>"; };
 		9540ED21CDABF219CCB412D5 /* HarnessWidgetProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HarnessWidgetProjection.swift; sourceTree = "<group>"; };
@@ -1030,6 +1032,7 @@
 				4DA68A15605F43B1E3A63658 /* ChatComposerControls.swift */,
 				286E1C43D1DC55CE4BF1A65E /* ChatView.swift */,
 				CDFE089132BA06F2048F0DCC /* ConversationExportFileDocument.swift */,
+				9227D9F0C0052CE61498745A /* HarnessSchedulePanel.swift */,
 				08C725F0B7FCD400DB2FC984 /* MessageBubble.swift */,
 				C05985F2CAF024C2E122149F /* NativeMarkdownText.swift */,
 				797E5610200BF5139D53248B /* NativeToolEventViews.swift */,
@@ -1961,6 +1964,7 @@
 				B4334089A3B59505148D4C21 /* HarnessListChrome.swift in Sources */,
 				04AEA71E2E786507006F63E9 /* HarnessLiveActivityManager.swift in Sources */,
 				2207D60257AF13CEFF9D07F4 /* HarnessReferenceSyntax.swift in Sources */,
+				8304C8163D6790E1390D9501 /* HarnessSchedulePanel.swift in Sources */,
 				9E51A4E448684190BE62F589 /* HarnessSchedules.swift in Sources */,
 				47A5AD2243DEB4B287D087CC /* HarnessSyncEnvelope.swift in Sources */,
 				295A01997CFB4411C55B5289 /* HarnessTrace.swift in Sources */,

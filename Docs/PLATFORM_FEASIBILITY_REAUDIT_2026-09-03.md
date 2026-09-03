@@ -68,9 +68,9 @@
 ## 3. 全量重判：真差距与真限制
 
 ### 真差距（能实现、未实现——成为改造项）
-1. **ui-schedule 等价 UI**：harness 定时提醒的目录/管理视图（SwiftUI 列表 + 启停）——Core 已具备（HarnessSchedule）
-2. **会话级模型目录**：桌面 `/model` 弹层按 provider 分组目录；移动端 SessionModelPickerView 存在——补齐分组/覆盖呈现
-3. **ui-workflow-run 顶层节点**：workflow 作为独立会话节点+成员折叠呈现
+1. ~~**ui-schedule 等价 UI**~~ ✅ 已补齐：`HarnessSchedulePanel`（Features/Chat）从会话选项可达，只读 pending/finished + pending 取消，UI 测试 + 截图验证
+2. ~~**会话级模型目录**~~ ✅ 实际已对齐：SessionModelPickerView 已分 `providerSection`（选配置）→ `modelSection`（选模型）两段，对应桌面 `/model` provider→model 分层
+3. **ui-workflow-run 顶层节点** ❌ 真缺：大项——workflow 作为独立 chat 节点 + 成员折叠呈现，需改 chat 节点模型，保留为后续
 4. **Browser client-half 承载**（WKWebView）与本地管理 server、e2b/webhook/ACP 出站（见 §1，需 D-001 重裁）
 5. iSH CLI 包 + tmux、快照回放测试链
 

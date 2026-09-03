@@ -1710,6 +1710,28 @@ final class HarnessMobilePluginManagementUITests: XCTestCase {
     }
 
 
+    func testSchedulePanelReachableFromSessionOptions() {
+        let app = XCUIApplication()
+        addTeardownBlock { app.terminate() }
+        app.launchArguments = [
+            "-reset-persistent-state-for-ui-testing",
+            "-bootstrap-configuration-for-ui-testing",
+            "-disable-animations-for-ui-testing",
+        ]
+        app.launch()
+
+        openConversation(in: app)
+        app.buttons["会话选项"].tap()
+        XCTAssertTrue(app.buttons["定时提醒"].waitForExistence(timeout: 5))
+        app.buttons["定时提醒"].tap()
+
+        XCTAssertTrue(app.navigationBars["定时提醒"].waitForExistence(timeout: 5))
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "schedule-panel"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     // MARK: - Live smoke (simulator, real provider)
 
     /// Live-route configuration shared with the simulator through the host

@@ -177,6 +177,7 @@ $(SRCROOT)/HarnessMobile/Core/Agent/NativeMarkdownDocument.swift
 $(SRCROOT)/HarnessMobile/Features/Chat/NativeToolEventViews.swift
 $(SRCROOT)/HarnessMobile/Features/Chat/ToolEventView.swift
 $(SRCROOT)/HarnessMobile/Features/Chat/SessionModelPickerView.swift
+$(SRCROOT)/HarnessMobile/Features/Chat/HarnessSchedulePanel.swift
 $(SRCROOT)/HarnessMobile/Features/Chat/UserQuestionSheet.swift
 $(SRCROOT)/HarnessMobile/Features/Console/ConsoleView.swift
 $(SRCROOT)/HarnessMobile/Features/Plugins/CommunityPluginMarketView.swift

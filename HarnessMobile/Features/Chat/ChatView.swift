@@ -20,6 +20,7 @@ struct ChatView: View {
     @State private var isSettingsPresented = false
     @State private var isJobsPresented = false
     @State private var isSessionOptionsPresented = false
+    @State private var isSchedulePanelPresented = false
     @State private var isExportFormatPresented = false
     @State private var isFileExporterPresented = false
     @State private var exportDocument: ConversationExportFileDocument?
@@ -168,6 +169,14 @@ struct ChatView: View {
         }
         .sheet(isPresented: $isJobsPresented) {
             JobsPanelView()
+        }
+        .sheet(isPresented: $isSchedulePanelPresented) {
+            HarnessSchedulePanel(
+                store: model.scheduleStore,
+                sessionID: model.activeSessionID?.uuidString ?? ""
+            ) {
+                isSchedulePanelPresented = false
+            }
         }
         .sheet(isPresented: agentPresetPickerPresented) {
             AgentPresetPickerView()
@@ -334,6 +343,14 @@ struct ChatView: View {
                 } label: {
                     Label("后台任务", systemImage: "list.bullet.rectangle")
                 }
+
+                Button {
+                    isSessionOptionsPresented = false
+                    isSchedulePanelPresented = true
+                } label: {
+                    Label("定时提醒", systemImage: "clock.badge.checkmark")
+                }
+                .accessibilityIdentifier("定时提醒")
 
                 Button {
                     isExportFormatPresented = true
