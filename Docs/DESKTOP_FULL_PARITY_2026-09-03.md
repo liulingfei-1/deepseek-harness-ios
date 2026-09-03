@@ -33,6 +33,17 @@
 
 ## 2. 能力差距与改造设计
 
+## 执行状态（2026-09-03 更新）
+
+| 阶段 | 状态 | 证据/提交 |
+|---|---|---|
+| P0 | ✅ 提交 | `7fa2030f`（方案+AGENTS/SECURITY/DECISIONS D-010） |
+| P1 host 侧 | ✅ 已验证 | Mac node 真实栈 assemble = 7 工具；`ISHPluginHostNodeSmoke` exit=0（含 contributions 7 工具 + cordis_inspect_list/query 真实调用断言，已有） |
+| P1 移动端同步 | 🔶 代码完整 | `synchronizeISHPluginHost → contributions → bridge definition → registerTool` 链路存在；模拟器端到端 = VERIFY |
+| P2 默认路由 | ✅ 模型层+UI | `0300d228`（install 默认 hostLoad、native 显式 opt-in）+ 本提交（UI 文案/策略语义）；市场 UI 测试绿 |
+| P3 npm 生态 | ⏳ | 需 install.sh 扩展 |
+| P4 UI 面 | ⏳ | 贡献/库存管理 |
+
 ### A1 模型插件工具面：7 工具直通（P1）
 - 目标：模型看到 `cordis_inspect_list / cordis_inspect_query / cordis_inspect_self / cordis_define / cordis_run / cordis_stop / cordis_undefine`（与桌面一致），不经 native 编译前置。
 - 设计：Host 装载 `tool-cordis` 后把 7 工具贡献给移动端；`ISHHostedCordisTool` 已支持，需确认贡献同步链路（host 启动后贡献枚举 → AppModel 工具目录注册）在 7 工具上实际生效；补端到端验证（P1 门）。
