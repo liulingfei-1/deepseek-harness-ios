@@ -42,8 +42,9 @@
 
 - **状态**：VERIFY
 - **上游证据**：桌面 subagent tool 的 model/reasoning route 参数；移动端原有 `LocalSubagentRequest` 只支持 model override。
-- **移动端变更**：`subagent`/`subagent_fork` schema 新增 `reasoning_effort`（providerDefault/off/low/high/max），请求校验并将其应用到 child Agent 的 `AgentConfiguration.reasoningMode`；continuation/fork 保留该字段。
+- **移动端变更**：`subagent`/`subagent_fork` schema 新增 `reasoning_effort`（providerDefault/off/low/high/max），请求校验并将其应用到 child Agent 的 `AgentConfiguration.reasoningMode`；新增纯查询工具 `list_subagent_models` 返回 provider catalog、模型和支持的 reasoning 模式；continuation/fork 保留该字段。
 - **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-parity-p4 --filter HarnessJobsTests` → 22 tests passed。
+- **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-parity-p5 --filter HarnessJobsTests.testKillTransitionsThroughStoppingAndSettlesKilled` → 1 test passed；全量回归 898 tests、5 skipped、1 个既有并发抖动失败（该测试单独复跑通过），未将其伪记为全绿。
 - **Simulator/iPhone**：本轮未做独立 UI/真机路由验证，保留 `VERIFY`。
 - **剩余动作**：补 `list_subagent_models`、provider 显式选择、动态 reasoning capability discovery 和真实多 provider fixture。
 

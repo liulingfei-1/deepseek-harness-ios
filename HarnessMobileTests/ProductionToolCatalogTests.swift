@@ -66,6 +66,7 @@ final class ProductionToolCatalogTests: XCTestCase {
                 "subagent_fork",
                 "subagent_control",
                 "subagent_list",
+                "list_subagent_models",
                 "terminal_open",
                 "terminal_read",
                 "terminal_send",

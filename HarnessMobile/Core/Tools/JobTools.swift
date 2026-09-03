@@ -369,7 +369,7 @@ typealias LocalSubagentReportDeliveryHandler = @Sendable (
 ) async throws -> String
 
 enum SubagentToolSuite {
-    static let names: Set<String> = ["subagent", "subagent_fork", "send_message", "subagent_list", "subagent_control"]
+    static let names: Set<String> = ["subagent", "subagent_fork", "send_message", "subagent_list", "subagent_control", "list_subagent_models"]
 
     static let promptSection = CordisPromptSection(
         name: "tool:subagent",
@@ -406,7 +406,8 @@ enum SubagentToolSuite {
             ),
             SendMessageTool(runner: runner, registry: registry, ownerSession: ownerSession),
             SubagentListTool(registry: registry, ownerSession: ownerSession),
-            SubagentControlTool(registry: registry, ownerSession: ownerSession)
+            SubagentControlTool(registry: registry, ownerSession: ownerSession),
+            SubagentModelListTool()
         ]
     }
 
@@ -440,6 +441,48 @@ enum SubagentToolSuite {
             reportDelivery: request.reportDelivery,
             delivery: delivery
         )
+    }
+}
+
+private struct SubagentModelListTool: LocalAgentTool {
+    var definition: ModelToolDefinition {
+        ModelToolDefinition(
+            name: "list_subagent_models",
+            description: "列出当前移动端 provider catalog 中可用于子 Agent 的模型与 reasoning 能力。",
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([:]),
+                "additionalProperties": .bool(false)
+            ])
+        )
+    }
+
+    let risk: ToolRisk = .pure
+
+    func validate(arguments: [String: JSONValue]) throws {
+        try arguments.requireOnlyKeys([])
+    }
+
+    func summary(arguments: [String: JSONValue]) -> String { "列出子 Agent 模型" }
+
+    func execute(arguments: [String: JSONValue]) async throws -> String {
+        try validate(arguments: arguments)
+        let providers = ModelProviderCatalog.providers.map { descriptor in
+            JSONValue.object([
+                "provider": .string(descriptor.id.rawValue),
+                "models": .array(descriptor.builtInModels.map { model in
+                    .object([
+                        "id": .string(model.id),
+                        "name": model.name.map(JSONValue.string) ?? .null,
+                        "reasoning_effort": .array(ReasoningMode.supportedModes(for: descriptor.id).map {
+                            .string($0.rawValue)
+                        })
+                    ])
+                })
+            ])
+        }
+        let result: JSONValue = .object(["providers": .array(providers)])
+        return result.displayText
     }
 }
 
