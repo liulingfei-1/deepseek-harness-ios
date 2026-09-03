@@ -97,6 +97,14 @@
 - **Simulator/iPhone 16 Pro**：尚未运行真实 ACP 子进程；仍需 iSH entrypoint、Jobs 注册、非零退出/重连和真机证据。
 - **剩余动作**：将 catalog 持久化设置接入子 Agent provider 选择；补真实 ACP child 的 initialize/session/new/prompt/cancel/shutdown 全生命周期。
 
+### PARITY-005 · ACP provider 接入 subagent/Jobs 路径（2026-09-04）
+
+- **状态**：VERIFY
+- **移动端变更**：`subagent`/`subagent_fork` schema 新增 `acp_provider`；`LocalSubagentRequest` 携带 provider id；`AppModel.executeLocalSubagent` 按 catalog 创建 ACP client，并将最终结果投影回现有 Jobs/父 Agent 通道；默认注册 `acp` provider（iSH Node entrypoint）。
+- **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-acp-route --filter HarnessJobsTests.testSubagentDefinitionExposesRC8ProviderBundleAndRejectsUnknownBundle` → 1 test passed；ACP/Jobs 组合专项 29 tests passed。
+- **Simulator/iPhone 16 Pro**：真实 iSH 子进程仍未执行；当前仅完成编译/注入路径验证，保持 `VERIFY`。
+- **剩余动作**：持久化 provider id 与设置 UI；在设备上用真实 ACP agent 验证非零退出、取消、EOF shutdown、重连和后台恢复。
+
 ### PARITY-013 · GitHub webhook envelope 与投递去重（2026-09-04）
 
 - **状态**：VERIFY

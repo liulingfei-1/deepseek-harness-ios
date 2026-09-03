@@ -4893,6 +4893,35 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                 throw error
             }
         }
+        if let acpProviderID = request.acpProviderID {
+            guard request.providerBundleID == nil else {
+                await stopHook("failed")
+                throw LocalToolError.invalidArguments
+            }
+            guard let descriptor = await ACPSubagentProviderCatalog.shared.descriptor(id: acpProviderID) else {
+                await stopHook("failed")
+                throw LocalToolError.pluginDenied("ACP provider (acpProviderID) 尚未注册。")
+            }
+            do {
+                let workspaceURL = try await workspaceStore.rootURL()
+                let client = ACPSubagentProviderFactory.makeClient(
+                    descriptor: descriptor,
+                    workspaceURL: workspaceURL
+                )
+                let result = try await client.runAndWait(prompt: request.prompt)
+                await onOutput(
+                    AgentToolOutputChunk(channel: .progress, text: result)
+                )
+                await stopHook("completed")
+                return result
+            } catch is CancellationError {
+                await stopHook("cancelled")
+                throw CancellationError()
+            } catch {
+                await stopHook("failed")
+                throw error
+            }
+        }
         var configuration = effectiveConfiguration
         if let model = request.model {
             if let profileID = configuration.profileID,

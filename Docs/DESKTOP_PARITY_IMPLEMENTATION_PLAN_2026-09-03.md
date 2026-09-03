@@ -222,7 +222,7 @@ git diff --check
 | PARITY-006 子 Agent reasoning | VERIFY | schema 与 LocalSubagentRequest 支持 reasoning_effort，并应用到 child configuration；新增 `list_subagent_models`；HarnessJobs 专项通过；provider listing/真实多 provider 仍待实现 |
 | PARITY-007 hooks | VERIFY | `AgentRuntime` 已接入 SessionStart/UserPromptSubmit/PreToolUse/PostToolUse/Stop；AppModel 另在子 Agent activation 接入 Claude `SubagentStart/SubagentStop`，Start 可阻断、Stop 失败写诊断；全量 905 tests/5 skipped/0 failures，真机 iSH 命令执行仍待验证 |
 | PARITY-004 turn outline UI | VERIFY | 全日志 outline 折叠接入 AppModel；Trajectory rail 支持预览、按 seq 分页加载和滚动定位；4 项 outline tests 通过；Simulator 被既有 Device-only tool audit 的 URLRequest 误报阻断，真机 UI 未验收 |
-| PARITY-005 ACP transport | VERIFY | `ISHACPLineTransport` 复用 iSH transport，并新增 `ACPSubagentProviderDescriptor/Catalog`、自定义 command/args/env 与 `runAndWait`；7 个 ACP tests 通过；真实 iSH agent、Jobs 注册与真机仍待验证 |
+| PARITY-005 ACP transport | VERIFY | `ISHACPLineTransport` 复用 iSH transport，并新增 `ACPSubagentProviderDescriptor/Catalog`、自定义 command/args/env、`runAndWait`，且 `acp_provider` 已接入 `subagent`/Jobs；ACP/Jobs 专项通过；真实 iSH agent、持久化选择与真机仍待验证 |
 | PARITY-008 Exa/Perplexity | VERIFY | AppModel 统一路由、Keychain origin 存取和显式 provider 选择已接入；6 个 provider mapping tests 通过；设置 UI、真实 API 与真机引用仍待验证 |
 | PARITY-009 agent team | IOS-REPLACEMENT | 现有 workflow tool 提供本机编排、并行/流水线、成员生命周期与可恢复轨迹树；桌面后台 team daemon 机制不适用于 iOS，保留前台语义等价实现 |
 | PARITY-010 LocalStateServer | VERIFY | AppModel 启动 loopback server 并注册 health/status/sessions；新增线程安全快照盒与会话/运行投影更新，6 个路由/快照测试通过；真机 HTTP 仍待验证 |

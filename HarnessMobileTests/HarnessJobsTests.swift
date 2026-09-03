@@ -332,6 +332,7 @@ final class HarnessJobsTests: XCTestCase {
 
         XCTAssertTrue(subagent.definition.parameters.displayText.contains("provider_bundle"))
         XCTAssertTrue(subagent.definition.parameters.displayText.contains("claude-code"))
+        XCTAssertTrue(subagent.definition.parameters.displayText.contains("acp_provider"))
 
         do {
             _ = try await subagent.execute(arguments: [
@@ -345,6 +346,25 @@ final class HarnessJobsTests: XCTestCase {
                 return
             }
         }
+
+        let requests = SubagentRequestRecorder()
+        let acpRunner: LocalSubagentRunner = { request, _ in
+            await requests.append(request)
+            return "acp-result"
+        }
+        let acpTool = try XCTUnwrap(
+            SubagentToolSuite.makeTools(
+                runner: acpRunner,
+                registry: registry,
+                ownerSession: "parent"
+            ).first { $0.definition.name == "subagent" }
+        )
+        _ = try await acpTool.execute(arguments: [
+            "prompt": .string("acp child"),
+            "acp_provider": .string("acp")
+        ])
+        let captured = await requests.snapshot()
+        XCTAssertEqual(captured.first?.acpProviderID, "acp")
     }
 
     func testSubagentForkUsesCompletedParentContextAndHasDistinctDefinition() async throws {

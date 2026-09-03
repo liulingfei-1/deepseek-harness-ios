@@ -62,6 +62,8 @@ struct LocalSubagentRequest: Sendable, Equatable {
     let model: String?
     let reasoningEffort: ReasoningMode?
     let providerBundleID: AgentProviderBundleID?
+    /// Optional deployment-owned out-of-process ACP provider.
+    let acpProviderID: String?
     /// Whether the child starts fresh or receives the parent's completed
     /// conversation prefix. The runner owns the actual seed operation.
     let contextMode: LocalSubagentContextMode
@@ -89,6 +91,7 @@ struct LocalSubagentRequest: Sendable, Equatable {
         model: String?,
         reasoningEffort: ReasoningMode? = nil,
         providerBundleID: AgentProviderBundleID? = nil,
+        acpProviderID: String? = nil,
         contextMode: LocalSubagentContextMode = .fresh,
         delegationDepth: Int = 1,
         maximumDepth: Int = Self.defaultMaximumDepth,
@@ -105,6 +108,7 @@ struct LocalSubagentRequest: Sendable, Equatable {
         self.model = model
         self.reasoningEffort = reasoningEffort
         self.providerBundleID = providerBundleID
+        self.acpProviderID = acpProviderID
         self.contextMode = contextMode
         self.delegationDepth = delegationDepth
         self.maximumDepth = maximumDepth
@@ -124,6 +128,7 @@ struct LocalSubagentRequest: Sendable, Equatable {
             model: model,
             reasoningEffort: reasoningEffort,
             providerBundleID: providerBundleID,
+            acpProviderID: acpProviderID,
             contextMode: contextMode,
             delegationDepth: depth,
             maximumDepth: maximumDepth,
@@ -267,6 +272,7 @@ extension LocalSubagentRequest {
             label: child.label,
             model: child.model,
             providerBundleID: child.providerBundleID,
+            acpProviderID: nil,
             contextMode: child.contextMode,
             delegationDepth: child.delegationDepth,
             maximumDepth: child.maximumDepth,
@@ -599,6 +605,10 @@ private struct SubagentTool: LocalAgentTool {
                         "enum": .array(AgentProviderBundleID.allCases.map { .string($0.rawValue) }),
                         "description": .string("RC.8 coding-agent bundle: codex or claude-code.")
                     ]),
+                    "acp_provider": .object([
+                        "type": .string("string"),
+                        "description": .string("Optional deployment-registered ACP provider id (for example: acp).")
+                    ]),
                     "run_in_background": .object([
                         "type": .string("boolean"),
                         "description": .string(fork
@@ -615,7 +625,7 @@ private struct SubagentTool: LocalAgentTool {
 
     func validate(arguments: [String: JSONValue]) throws {
         _ = try policy.validated()
-        try arguments.requireOnlyKeys(["prompt", "label", "model", "reasoning_effort", "provider_bundle", "run_in_background"])
+        try arguments.requireOnlyKeys(["prompt", "label", "model", "reasoning_effort", "provider_bundle", "acp_provider", "run_in_background"])
         _ = try arguments.requiredString("prompt", maximumUTF8Bytes: Self.maximumPromptBytes)
         if let label = arguments["label"] {
             _ = try string(label, key: "label", maximumBytes: Self.maximumLabelBytes)
@@ -630,6 +640,12 @@ private struct SubagentTool: LocalAgentTool {
         if let bundle = arguments["provider_bundle"],
            AgentProviderBundleID(rawValue: bundle.stringValue ?? "") == nil {
             throw LocalToolError.invalidArguments
+        }
+        if let provider = arguments["acp_provider"] {
+            let value = try string(provider, key: "acp_provider", maximumBytes: 128)
+            guard !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw LocalToolError.invalidArguments
+            }
         }
         if let value = arguments["run_in_background"], Self.bool(value) == nil {
             throw LocalToolError.invalidArguments
@@ -666,6 +682,7 @@ private struct SubagentTool: LocalAgentTool {
             providerBundleID: arguments["provider_bundle"].flatMap {
                 AgentProviderBundleID(rawValue: $0.stringValue ?? "")
             },
+            acpProviderID: arguments["acp_provider"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines),
             contextMode: resolvedPolicy.contextMode,
             delegationDepth: 0,
             maximumDepth: resolvedPolicy.maximumDepth,

@@ -218,6 +218,16 @@ struct ACPSubagentProviderDescriptor: Codable, Sendable, Equatable, Identifiable
 actor ACPSubagentProviderCatalog {
     private var descriptors: [String: ACPSubagentProviderDescriptor]
 
+    static let shared: ACPSubagentProviderCatalog = {
+        let descriptor = try! ACPSubagentProviderDescriptor(
+            id: "acp",
+            command: "/usr/bin/node",
+            args: ["--expose-internals", ISHPersistentPluginHostTransport.defaultEntrypoint],
+            permission: .reject
+        )
+        return ACPSubagentProviderCatalog(descriptors: [descriptor])
+    }()
+
     init(descriptors: [ACPSubagentProviderDescriptor] = []) {
         self.descriptors = Dictionary(uniqueKeysWithValues: descriptors.map { ($0.id, $0) })
     }
