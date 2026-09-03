@@ -60,6 +60,7 @@ struct LocalSubagentRequest: Sendable, Equatable {
     let prompt: String
     let label: String
     let model: String?
+    let reasoningEffort: ReasoningMode?
     let providerBundleID: AgentProviderBundleID?
     /// Whether the child starts fresh or receives the parent's completed
     /// conversation prefix. The runner owns the actual seed operation.
@@ -86,6 +87,7 @@ struct LocalSubagentRequest: Sendable, Equatable {
         prompt: String,
         label: String,
         model: String?,
+        reasoningEffort: ReasoningMode? = nil,
         providerBundleID: AgentProviderBundleID? = nil,
         contextMode: LocalSubagentContextMode = .fresh,
         delegationDepth: Int = 1,
@@ -101,6 +103,7 @@ struct LocalSubagentRequest: Sendable, Equatable {
         self.prompt = prompt
         self.label = label
         self.model = model
+        self.reasoningEffort = reasoningEffort
         self.providerBundleID = providerBundleID
         self.contextMode = contextMode
         self.delegationDepth = delegationDepth
@@ -119,6 +122,7 @@ struct LocalSubagentRequest: Sendable, Equatable {
             prompt: prompt,
             label: label,
             model: model,
+            reasoningEffort: reasoningEffort,
             providerBundleID: providerBundleID,
             contextMode: contextMode,
             delegationDepth: depth,
@@ -542,6 +546,11 @@ private struct SubagentTool: LocalAgentTool {
                         "type": .string("string"),
                         "description": .string("Optional model id override from the active provider profile.")
                     ]),
+                    "reasoning_effort": .object([
+                        "type": .string("string"),
+                        "enum": .array([.string("providerDefault"), .string("off"), .string("low"), .string("high"), .string("max")]),
+                        "description": .string("Optional reasoning effort override for the child model.")
+                    ]),
                     "provider_bundle": .object([
                         "type": .string("string"),
                         "enum": .array(AgentProviderBundleID.allCases.map { .string($0.rawValue) }),
@@ -563,13 +572,17 @@ private struct SubagentTool: LocalAgentTool {
 
     func validate(arguments: [String: JSONValue]) throws {
         _ = try policy.validated()
-        try arguments.requireOnlyKeys(["prompt", "label", "model", "provider_bundle", "run_in_background"])
+        try arguments.requireOnlyKeys(["prompt", "label", "model", "reasoning_effort", "provider_bundle", "run_in_background"])
         _ = try arguments.requiredString("prompt", maximumUTF8Bytes: Self.maximumPromptBytes)
         if let label = arguments["label"] {
             _ = try string(label, key: "label", maximumBytes: Self.maximumLabelBytes)
         }
         if let model = arguments["model"] {
             _ = try string(model, key: "model", maximumBytes: Self.maximumModelBytes)
+        }
+        if let value = arguments["reasoning_effort"],
+           ReasoningMode(rawValue: value.stringValue ?? "") == nil {
+            throw LocalToolError.invalidArguments
         }
         if let bundle = arguments["provider_bundle"],
            AgentProviderBundleID(rawValue: bundle.stringValue ?? "") == nil {
@@ -604,6 +617,9 @@ private struct SubagentTool: LocalAgentTool {
                 ? arguments["label"]?.stringValue ?? "子 Agent"
                 : "子 Agent",
             model: arguments["model"]?.stringValue,
+            reasoningEffort: arguments["reasoning_effort"].flatMap {
+                ReasoningMode(rawValue: $0.stringValue ?? "")
+            },
             providerBundleID: arguments["provider_bundle"].flatMap {
                 AgentProviderBundleID(rawValue: $0.stringValue ?? "")
             },

@@ -38,6 +38,15 @@
 - **iPhone 16 Pro**：未验证服务端 accepted cursor、断网重试和冷启动水位恢复，保留 `VERIFY`。
 - **剩余动作**：将 coordinator 接入用户显式配置的 DeepSeek session-log endpoint 和生命周期；补 2xx/4xx/超时/重启 fixture 与真机验证。
 
+### PARITY-006 · 子 Agent reasoning effort 参数（2026-09-03）
+
+- **状态**：VERIFY
+- **上游证据**：桌面 subagent tool 的 model/reasoning route 参数；移动端原有 `LocalSubagentRequest` 只支持 model override。
+- **移动端变更**：`subagent`/`subagent_fork` schema 新增 `reasoning_effort`（providerDefault/off/low/high/max），请求校验并将其应用到 child Agent 的 `AgentConfiguration.reasoningMode`；continuation/fork 保留该字段。
+- **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-parity-p4 --filter HarnessJobsTests` → 22 tests passed。
+- **Simulator/iPhone**：本轮未做独立 UI/真机路由验证，保留 `VERIFY`。
+- **剩余动作**：补 `list_subagent_models`、provider 显式选择、动态 reasoning capability discovery 和真实多 provider fixture。
+
 > 更新：2026-08-29。本文只保留当前仍需行动或验收的事项。已经通过自动化门的历史修补不再作为待办重复列出；完整历史证据由 git 提交、测试报告和本文件的归档索引追溯。
 
 ## 当前结论

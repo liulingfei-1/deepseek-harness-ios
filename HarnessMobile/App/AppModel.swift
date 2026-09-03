@@ -4779,6 +4779,9 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                 configuration.inputModalities = nil
             }
         }
+        if let reasoningEffort = request.reasoningEffort {
+            configuration.reasoningMode = reasoningEffort
+        }
         configuration = try configuration.validated()
         guard let apiKey = try await apiKey(for: configuration) else {
             throw CredentialStoreError.emptyCredential
