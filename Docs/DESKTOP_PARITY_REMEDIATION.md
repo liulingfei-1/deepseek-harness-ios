@@ -78,6 +78,16 @@
 - **iPhone 16 Pro**：未执行真实多成员长时并发、冷启动恢复和资源压力矩阵，保留平台验证边界。
 - **剩余动作**：若要求桌面同构后台 team daemon，需独立桌面 host；iOS 继续使用本机前台 workflow 作为语义等价替代。
 
+### PARITY-005 · ACP 子 Agent iSH stdio transport（2026-09-04）
+
+- **状态**：VERIFY
+- **上游证据**：`subagent-acp` + `@agentclientprotocol/sdk` 1.4.0，PROTOCOL_VERSION=1；已有 ACP 生命周期 wire tests 5 项通过。
+- **移动端变更**：在 `ACPSubagentClient.swift` 增加 `ISHACPLineTransport`，复用 `ISHPersistentPluginHostTransport` 启动本机 Node entrypoint，提供首包排队、NDJSON stdout 分帧、异步 stdin 写入和退出状态处理；ACP client 可直接注入该 transport。
+- **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter ACPSubagentClientTests` → 5 tests passed。
+- **Simulator**：Xcode arm64 Simulator build 尚未在本项变更后重跑；SwiftPM 编译通过。
+- **iPhone 16 Pro**：未用真实 iSH ACP agent 完成 initialize/session/new/prompt/cancel 全生命周期，保留 `VERIFY`。
+- **剩余动作**：在 iSH 中提供 ACP agent entrypoint 并接入 Jobs/provider catalog；补真实进程退出、超时、取消和重连证据。
+
 ### PARITY-006 · 子 Agent reasoning effort 参数（2026-09-03）
 
 - **状态**：VERIFY

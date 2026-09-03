@@ -286,3 +286,94 @@ protocol ACPLineTransport: AnyObject, Sendable {
     var onLine: @Sendable (String) -> Void { get set }
     func send(_ line: String)
 }
+
+/// Production iSH stdio bridge for ACP agents. The existing plugin-host
+/// transport already owns the device-local Node process; this adapter only
+/// adds newline framing and queues the first request until stdin is ready.
+final class ISHACPLineTransport: ACPLineTransport, @unchecked Sendable {
+    private let transport: ISHPersistentPluginHostTransport
+    private let lock = NSLock()
+    private var started = false
+    private var pending: [String] = []
+    private var buffer = Data()
+    private var lineHandler: @Sendable (String) -> Void = { _ in }
+
+    var onLine: @Sendable (String) -> Void {
+        get {
+            lock.lock(); defer { lock.unlock() }
+            return lineHandler
+        }
+        set {
+            lock.lock(); lineHandler = newValue; lock.unlock()
+        }
+    }
+
+    init(workspaceURL: URL, entrypoint: String) {
+        transport = ISHPersistentPluginHostTransport(
+            workspaceURL: workspaceURL,
+            entrypoint: entrypoint
+        )
+        Task { await start() }
+    }
+
+    func send(_ line: String) {
+        lock.lock()
+        if started {
+            lock.unlock()
+            write(line)
+        } else {
+            pending.append(line)
+            lock.unlock()
+        }
+    }
+
+    private func start() async {
+        do {
+            _ = try await transport.start(
+                onStdout: { [weak self] data in self?.receive(data) },
+                onStderr: { _ in },
+                onExit: { [weak self] _ in self?.markStopped() }
+            )
+            let queued = markStartedAndDrain()
+            for line in queued { write(line) }
+        } catch {
+            markStopped()
+        }
+    }
+
+    private func write(_ line: String) {
+        Task {
+            _ = try? await transport.write(Data((line + "\n").utf8))
+        }
+    }
+
+    private func receive(_ data: Data) {
+        lock.lock()
+        buffer.append(data)
+        var lines: [String] = []
+        while let newline = buffer.firstIndex(of: 0x0A) {
+            let lineData = buffer[..<newline]
+            buffer.removeSubrange(...newline)
+            lines.append(String(decoding: lineData, as: UTF8.self).trimmingCharacters(in: .newlines))
+        }
+        let handler = lineHandler
+        lock.unlock()
+        for line in lines where !line.isEmpty { handler(line) }
+    }
+
+    private func markStopped() {
+        lock.lock()
+        started = false
+        pending.removeAll(keepingCapacity: false)
+        lock.unlock()
+    }
+
+    private func markStartedAndDrain() -> [String] {
+        lock.lock()
+        started = true
+        let queued = pending
+        pending.removeAll(keepingCapacity: true)
+        lock.unlock()
+        return queued
+    }
+}
