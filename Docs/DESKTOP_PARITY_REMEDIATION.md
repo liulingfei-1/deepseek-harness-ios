@@ -46,7 +46,7 @@
 - **上游复核**：feedback-only telemetry 在 canonical `feedback/record` 提交后按 handoff cursor 重放未交接的 session-log suffix；不是预先复制整段日志。
 - **移动端变更**：`SessionTelemetrySink` 增加 `capturePolicy` 与 `releasePending()`（均有默认实现）；`TelemetrySessionPersistence` 对 `.live` 逐条 capture，对 `.onDemand` 在 feedback commit 后读取 canonical suffix、应用投影/脱敏、推进 cursor 并释放 sink。
 - **专项验证**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-telemetry-ondemand --filter SessionTelemetryTests` → **7 tests passed**，覆盖反馈前不发送、首次 prefix、后续 suffix、配置 OTLP endpoint 交付和单次 release。
-- **固定验收门**：`swift test --build-path /tmp/hm-parity-final-telemetry` → **923 tests, 5 skipped, 0 failures**；Xcode arm64 generic iOS Simulator → **BUILD SUCCEEDED**；Plugin Host `npm run check`、Node smoke、`audit-no-remote-execution.sh`、`check-upstream-parity.sh`、`git diff --check` → **PASS**。
+- **固定验收门**：`swift test --build-path /tmp/hm-parity-final-telemetry3` → **924 tests, 5 skipped, 0 failures**；Xcode arm64 generic iOS Simulator → **BUILD SUCCEEDED**；Plugin Host `npm run check`、Node smoke、`audit-no-remote-execution.sh`、`check-upstream-parity.sh`、`git diff --check` → **PASS**。
 - **状态/剩余边界**：保持 **VERIFY**；设置 UI、真实 feedback/OTLP endpoint、flush/shutdown 生命周期和 iPhone 16 Pro 设备证据仍未完成。
 
 ### PARITY-002 · session-log 增量上传与 durable watermark（2026-09-03）

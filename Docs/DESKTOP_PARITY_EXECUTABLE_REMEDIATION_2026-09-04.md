@@ -64,7 +64,7 @@ git diff --check
 - [x] `SessionTelemetrySink` 增加 `capturePolicy` 与异步 `releasePending()` 契约并提供默认实现，保持既有 sink 向后兼容。
 - [x] `TelemetrySessionPersistence` 在 `live` 模式逐条 capture；`onDemand` 模式只在 canonical `feedback/record` 提交后读取未交接的事件 suffix，按 cursor 重放并释放。
 - [x] 新增异步回归测试验证反馈前不发送、首次 feedback 重放完整 prefix、后续 feedback 只发送 suffix、配置 OTLP endpoint 可交付且各自只释放一次；修复 Swift 6 测试夹具的 async/锁隔离问题。
-- [x] 固定门复跑：SwiftPM **923 tests, 5 skipped, 0 failures**；Xcode arm64 Simulator **BUILD SUCCEEDED**；Plugin Host check、Node smoke、设备-only audit、upstream parity、`git diff --check` 均通过。
+- [x] 固定门复跑：SwiftPM **924 tests, 5 skipped, 0 failures**；Xcode arm64 Simulator **BUILD SUCCEEDED**；Plugin Host check、Node smoke、设备-only audit、upstream parity、`git diff --check` 均通过。
 - [ ] 设置 UI、真实 feedback/OTLP endpoint、flush/shutdown 生命周期和 iPhone 16 Pro 证据；未取得前保持 `VERIFY`。
 
 ## 2. PARITY-013 本批次逐步修改清单
