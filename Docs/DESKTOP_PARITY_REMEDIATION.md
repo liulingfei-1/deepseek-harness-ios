@@ -72,7 +72,7 @@
 
 - **状态**：VERIFY
 - **移动端变更**：新增 `LocalStateHTTPClient`，实际通过 `URLSession` 请求 loopback `/status`；修复 `LocalStateServer` 在异步发送完成前提前 cancel 连接导致客户端 `NSURLError -1005` 的生命周期缺陷。
-- **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-webclient --filter LocalStateServerTests` → 10 tests passed（含 live HTTP client）；Simulator/真机动态 controller 与端口冲突仍待验证。
+- **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-webclient --filter LocalStateServerTests` → 10 tests passed（含真实 `URLSession` live GET `/status` 与 `/sessions`）；Simulator/真机动态 controller 与端口冲突仍待验证。
 - **剩余动作**：补 `/sessions` live client、端口冲突/前后台恢复及 iPhone 16 Pro HTTP 证据。
 
 ### PARITY-009 · Agent team orchestration（2026-09-04）

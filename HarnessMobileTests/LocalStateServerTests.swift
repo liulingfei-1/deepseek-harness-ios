@@ -79,7 +79,8 @@ final class LocalStateServerTests: XCTestCase {
 
     func testLiveHTTPClientReadsLoopbackEndpoint() async throws {
         let server = LocalStateServer(endpoints: [
-            .init(path: "/status", handler: { #"{"status":"live","turns":7}"# })
+            .init(path: "/status", handler: { #"{"status":"live","turns":7}"# }),
+            .init(path: "/sessions", handler: { #"{"sessions":[{"id":"session-live","running":true}]}"# })
         ])
         XCTAssertNotNil(server)
         server?.start()
@@ -95,6 +96,8 @@ final class LocalStateServerTests: XCTestCase {
         XCTAssertGreaterThan(assignedPort, 0)
         let body = try await LocalStateHTTPClient(port: assignedPort).get(path: "/status")
         XCTAssertTrue(body.contains(#""status":"live""#))
+        let sessions = try await LocalStateHTTPClient(port: assignedPort).get(path: "/sessions")
+        XCTAssertTrue(sessions.contains("session-live"))
         do {
             _ = try await LocalStateHTTPClient(port: assignedPort).get(path: "status")
             XCTFail("relative paths must be rejected")

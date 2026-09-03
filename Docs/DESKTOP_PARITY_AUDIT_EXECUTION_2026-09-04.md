@@ -29,7 +29,7 @@
 | 007 | VERIFY | Claude/Codex command hook runner 已接入；本批次补齐子 Agent生命周期事件 | 真机 iSH/ACP、超时/取消、诊断轨迹 |
 | 008 | VERIFY | Exa/Perplexity provider 路由、Keychain origin、设置 UI 和删除/状态反馈已接线；Exa 映射与上游首个非空 highlight 语义一致 | 401/429/timeout、真实 citations、真机 Keychain/UI |
 | 009 | IOS-REPLACEMENT | Workflow 提供本机 team 语义替代 | 多成员长时并发/恢复真机证据 |
-| 010 | VERIFY | loopback `/health`、`/status`、`/sessions` 已启动并动态投影；`LocalStateHTTPClient` live GET 已验证 | `/sessions` live、端口冲突、生命周期、真机 |
+| 010 | VERIFY | loopback `/health`、`/status`、`/sessions` 已启动并动态投影；`LocalStateHTTPClient` 已用真实 `URLSession` 验证 `/status` 与 `/sessions` GET | 端口冲突、生命周期、真机 |
 | 011 | TODO | 静态 provider catalog；缺动态 catalog/OAuth/reload | 先建立 capability cache，再逐 provider 接入 |
 | 012 | TODO | 无 e2b/fs/subprocess provider | 先写上游 REST compatibility fixture，再决定本机替代或显式远程适配 |
 | 013 | VERIFY | GitHub envelope、loopback POST、持久去重、可选 HMAC 已实现 | Agent/Job 触发、重试、配置 UI、后台/公网边界 |
