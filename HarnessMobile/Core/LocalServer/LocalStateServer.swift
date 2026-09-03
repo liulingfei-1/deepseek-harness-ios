@@ -44,8 +44,13 @@ final class LocalStateServer: @unchecked Sendable {
     private let listener: NWListener
     private let queue = DispatchQueue(label: "local-state-server", qos: .utility)
     private let endpoints: [String: Endpoint]
+    private let webhookHandler: (@Sendable (LocalWebhookEvent) -> Void)?
 
-    init?(endpoints: [Endpoint], port: UInt16 = 0) {
+    init?(
+        endpoints: [Endpoint],
+        port: UInt16 = 0,
+        webhookHandler: (@Sendable (LocalWebhookEvent) -> Void)? = nil
+    ) {
         guard let listener = try? NWListener(
             using: .tcp,
             on: NWEndpoint.Port(rawValue: port) ?? .any
@@ -55,6 +60,7 @@ final class LocalStateServer: @unchecked Sendable {
         listener.parameters.requiredInterfaceType = .loopback
         self.listener = listener
         self.endpoints = Dictionary(uniqueKeysWithValues: endpoints.map { ($0.path, $0) })
+        self.webhookHandler = webhookHandler
     }
 
     var port: UInt16? {
@@ -83,15 +89,51 @@ final class LocalStateServer: @unchecked Sendable {
         request: String,
         endpoints: [String: Endpoint]
     ) -> (status: Int, body: String) {
+        route(request: request, endpoints: endpoints, webhookHandler: nil)
+    }
+
+    static func route(
+        request: String,
+        endpoints: [String: Endpoint],
+        webhookHandler: (@Sendable (LocalWebhookEvent) -> Void)?
+    ) -> (status: Int, body: String) {
         let methodLine = request.split(separator: "\r\n", maxSplits: 1).first.map(String.init)
         guard let methodLine,
               let tokens = methodLine.split(separator: " ") as [Substring]?,
               tokens.count >= 2,
-              tokens[0] == "GET",
               tokens[1].hasPrefix("/") else {
             return (400, #"{"error":"unsupported request"}"#)
         }
         let pathString = String(tokens[1])
+        if tokens[0] == "POST", pathString == "/webhook/github" {
+            guard let separator = request.range(of: "\r\n\r\n") else {
+                return (400, #"{"error":"missing request body"}"#)
+            }
+            let headerLines = request[..<separator.lowerBound].split(separator: "\r\n")
+            var headers: [String: String] = [:]
+            for line in headerLines.dropFirst() {
+                let parts = line.split(separator: ":", maxSplits: 1).map(String.init)
+                guard parts.count == 2 else { continue }
+                headers[parts[0].trimmingCharacters(in: .whitespacesAndNewlines).lowercased()] =
+                    parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            let body = String(request[separator.upperBound...])
+            guard let deliveryID = headers["x-github-delivery"],
+                  let eventName = headers["x-github-event"],
+                  let payload = try? JSONDecoder().decode(JSONValue.self, from: Data(body.utf8)),
+                  let event = LocalWebhookParser.github(
+                      deliveryID: deliveryID,
+                      eventName: eventName,
+                      payload: payload
+                  ) else {
+                return (400, #"{"error":"invalid github webhook"}"#)
+            }
+            webhookHandler?(event)
+            return (202, #"{"accepted":true}"#)
+        }
+        guard tokens[0] == "GET" else {
+            return (400, #"{"error":"unsupported request"}"#)
+        }
         if pathString == "/health" {
             return (200, #"{"status":"ok"}"#)
         }
@@ -110,7 +152,11 @@ final class LocalStateServer: @unchecked Sendable {
             defer { connection.cancel() }
             guard let self, let data, !data.isEmpty else { return }
             let request = String(decoding: data, as: UTF8.self)
-            let routed = Self.route(request: request, endpoints: self.endpoints)
+            let routed = Self.route(
+                request: request,
+                endpoints: self.endpoints,
+                webhookHandler: self.webhookHandler
+            )
             let body = routed.body
             let headers = "HTTP/1.1 \(routed.status)\r\n"
                 + "Content-Type: application/json\r\n"

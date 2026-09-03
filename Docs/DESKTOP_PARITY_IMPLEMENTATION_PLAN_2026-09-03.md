@@ -227,6 +227,6 @@ git diff --check
 | PARITY-009 agent team | IOS-REPLACEMENT | 现有 workflow tool 提供本机编排、并行/流水线、成员生命周期与可恢复轨迹树；桌面后台 team daemon 机制不适用于 iOS，保留前台语义等价实现 |
 | PARITY-010 LocalStateServer | VERIFY | AppModel 启动 loopback server 并注册 health/status/sessions；新增线程安全快照盒与会话/运行投影更新，6 个路由/快照测试通过；真机 HTTP 仍待验证 |
 | PARITY-011/012/014 | TODO | 已完成源码/上游定位并写入本计划，尚未宣称实现 |
-| PARITY-013 webhook | VERIFY | GitHub delivery/event/payload envelope 解析与进程内有界去重已实现；5 个 LocalStateServer 测试通过；POST listener、签名验证、持久化 delivery state 和 Agent/Job 触发待实现 |
+| PARITY-013 webhook | VERIFY | GitHub delivery/event/payload envelope、loopback POST `/webhook/github`、进程内有界去重已实现；7 个 LocalStateServer 测试通过；签名验证、持久化 delivery state 和 Agent/Job 触发待实现 |
 
 本表只记录可复核证据，不把“计划存在”或“源码类型存在”当作能力完成。

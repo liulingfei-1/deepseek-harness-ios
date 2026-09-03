@@ -547,6 +547,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
     @ObservationIgnored private let runtimeHangWatchdog: RuntimeHangWatchdog
     @ObservationIgnored private let runtimeMetricKitSubscriber: RuntimeMetricKitSubscriber
     @ObservationIgnored private let localStateSnapshotStore = LocalStateSnapshotStore()
+    @ObservationIgnored private let localWebhookDeduplicator = LocalWebhookDeduplicator()
     @ObservationIgnored private var localStateServer: LocalStateServer?
     @ObservationIgnored private let backgroundResumeCoordinator = SessionBackgroundResumeCoordinator()
     @ObservationIgnored let terminalProvider: any ISHTerminalProviding
@@ -710,7 +711,9 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         localStateServer = LocalStateServer(endpoints: [
             .init(path: "/status", handler: { [localStateSnapshotStore] in localStateSnapshotStore.status() }),
             .init(path: "/sessions", handler: { [localStateSnapshotStore] in localStateSnapshotStore.sessions() })
-        ])
+        ], webhookHandler: { [localWebhookDeduplicator] event in
+            Task { _ = await localWebhookDeduplicator.accept(event.deliveryID) }
+        })
         localStateServer?.start()
     }
 

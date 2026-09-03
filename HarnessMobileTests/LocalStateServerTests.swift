@@ -105,4 +105,21 @@ final class LocalStateServerTests: XCTestCase {
         XCTAssertTrue(store.status().contains(#""sessionCount":2"#))
         XCTAssertTrue(store.sessions().contains(#""id":"one"#))
     }
+
+    func testRouteAcceptsGitHubWebhookPostAndInvokesHandler() {
+        nonisolated(unsafe) var received: LocalWebhookEvent?
+        let request = "POST /webhook/github HTTP/1.1\r\n"
+            + "X-GitHub-Delivery: delivery-2\r\n"
+            + "X-GitHub-Event: issues\r\n"
+            + "Content-Type: application/json\r\n\r\n"
+            + #"{"action":"opened"}"#
+        let result = LocalStateServer.route(
+            request: request,
+            endpoints: [:],
+            webhookHandler: { received = $0 }
+        )
+        XCTAssertEqual(result.status, 202)
+        XCTAssertEqual(received?.deliveryID, "delivery-2")
+        XCTAssertEqual(received?.eventName, "issues")
+    }
 }
