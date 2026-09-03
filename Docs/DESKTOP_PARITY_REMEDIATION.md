@@ -447,3 +447,29 @@ git diff --check
 ## 已归档完成能力（不再作为待办）
 
 `BASE-001..006`、`WIRE-001/002/004`、`IMG-001/002/008`、`TOOL-013`、`CMD-005/007`、`PROVIDER-003`、`WEB-001..003`、`CTX-003..006`、以及已通过自动化门的 Cordis generation/Prompt 单例、凭据误报修复、trace session 归属、UI-010/011 基础实现，均已从活动清单移除。它们的实现和测试仍保留在工作树与 git 历史中；只有真机边界仍在上面的 VERIFY 项中追踪。
+
+### PAR-100 · 插件面桌面级对齐与 live 验证通道（2026-09-03）
+
+- 决策 D-010 取代 D-008：插件面完全对齐桌面——host 运行时动态 `cordis_define/run/stop/undefine` + 任意 Cordis/npm JS 包；native 清单降为可选后端。AGENTS.md/SECURITY_GUIDELINES 同步（`7fa2030f`）。
+- 市场安装默认路由改为 **hostLoad**（本地 host 运行时装载，桌面行为），native 编译为显式 `.nativeCompile`（`0300d228`）；市场 UI 未标记条目显示「装载到本地运行时」（`8abfcf5c`）。
+- host 侧验证：Mac node 真实栈 assemble 恰好 7 个 `cordis_*` 工具；`ISHPluginHostNodeSmoke` 通过（contributions 7 工具 + inspect 真实调用）。移动端同步链路代码完整，模拟器/真机 iSH 端到端仍 `VERIFY`。
+- live 验证通道：`NativeAgentPluginCompilerLiveTests`（真实路由编译插件源码→原生清单）、live 聊天/插件安装 UI 冒烟（TEST_RUNNER_* 注入，守卫式跳过）。DeepSeek 官方与 OpenRouter 路由均实测通过；**修复 OpenRouter 双 finish chunk 兼容**（wire 层丢弃重复 finish，`8a2c5fc`）。
+- 新增 `ISHMarketplaceInstallPreference`（Core/Plugins/ISHHost）与 UI 文案/测试联动。
+
+### PAR-101 · 会话遥测 + OTel 后端（2026-09-03）
+
+- `SessionTelemetry`：ledger/ops 双通道、严重度预映射（工具错误/turn 失败→error）、最小身份属性、fail-closed 脱敏瀑布；`SessionTelemetryOtelSink` OTLP/JSON 三模式（FULL/FEEDBACK_ONLY/DISABLED，默认关）。5 测试（`d1816ff`）。HTTP transport 注入式（loopback 无关，属用户配置导出）。
+
+### PAR-102 · 可配置远程执行后端（D-011，2026-09-03）
+
+- D-011 修改 D-001：本机执行默认；用户显式配置的 e2b 代码沙箱/webhook 入站/ACP 远端在配置后可用（`9b3c2bde`）。e2b 待其 iOS/REST 契约；webhook 需本地 server + 隧道（server 内核已备）；ACP 协议实现待上游 acp 契约核对。
+- `LocalStateServer`（webserver parity）：NWListener 仅 loopback + 纯路由函数（/health、注入式 /status、404），4 测试 0.06s（`ccebcc13`）；审计豁免（无法执行/转发/接收远程流量）。
+
+### PAR-103 · UI 对齐补齐与可观测性（2026-09-03）
+
+- **ui-schedule 等价 UI**：`HarnessSchedulePanel` 从会话选项打开（pending/claimed 活动 + 已完成/取消分组、pending 取消）；修复 claimed 行落入分组间隙消失（`f30ace96`、`17dd3502`）；UI 测试+截图。
+- **ui-workflow-run**：核对确认聊天 `WorkflowToolCard` 已呈现 run 摘要+阶段+成员（=桌面节点折叠等价）；另加 `WorkflowRunTree` 数据层供轨迹/导出分组（`9486b34c`）。
+- **token-meter route-pricing**：`TokenPricing` 引擎（路由视觉定价、fail-loud 对齐）+ 修复图片附件 token 漏计（`549b1cf1`）。
+- **api 控制器协议边界**：SessionControlling/SettingsControlling/WorkspaceControlling（AppModel 遵循，`476339f3`）。
+- **iSH tmux/git/openssh**：install.sh guest 包扩展（`9bf73a0d`）。
+- 平台可行性全量重审：`Docs/PLATFORM_FEASIBILITY_REAUDIT_2026-09-03.md`（46 模块逐项对照 + 10 行形态重判；Browser client-half 判定可承载于既有 WKWebView）。
