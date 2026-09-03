@@ -68,6 +68,16 @@
 - **iPhone 16 Pro**：尚未验证端口冲突、前后台重启和实际控制器数据，保留 `VERIFY`。
 - **剩余动作**：将 session/settings/workspace controller 的动态 JSON 接入 loopback 路由，并补真机 HTTP/生命周期证据；桌面 frontend-static 仍需原生替代。
 
+### PARITY-009 · Agent team orchestration（2026-09-04）
+
+- **状态**：IOS-REPLACEMENT
+- **上游证据**：桌面 agent-team 的成员/任务/消息生命周期；移动端 `WorkflowTool` 已提供本机前台 JavaScript 编排、并行/流水线 fan-out、成员生命周期事件和取消语义，`WorkflowRunTree` 将 `tool-workflow/*` 事件折叠为可恢复轨迹树。
+- **移动端变更**：复用现有 `LocalWorkflowTool` 与 `WorkflowRunTree`，不另造一套 team runtime；生产工具目录已注册 workflow，成员调用沿用本机 provider 与子 Agent runner。
+- **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-parity-p4 --filter 'WorkflowToolTests|WorkflowRunTreeTests'` → 现有 workflow 编排与轨迹树测试通过（全量基线 899 tests、5 skipped、0 failures）。
+- **Simulator**：Xcode arm64 Simulator build `/tmp/hm-xcode9` 成功。
+- **iPhone 16 Pro**：未执行真实多成员长时并发、冷启动恢复和资源压力矩阵，保留平台验证边界。
+- **剩余动作**：若要求桌面同构后台 team daemon，需独立桌面 host；iOS 继续使用本机前台 workflow 作为语义等价替代。
+
 ### PARITY-006 · 子 Agent reasoning effort 参数（2026-09-03）
 
 - **状态**：VERIFY
