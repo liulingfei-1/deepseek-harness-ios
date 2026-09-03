@@ -198,7 +198,10 @@ struct OpenAIChatCompletionsAdapter: ModelProviderAdapter {
                         item.inputModalities ?? item.input
                     ),
                     reasoningModes: Self.validatedReasoningModes(
-                        item.reasoningModes ?? item.reasoningEfforts
+                        item.reasoningModes
+                            ?? item.reasoningEfforts
+                            ?? item.reasoningOptions
+                                .first(where: { $0.type == "effort" })?.values
                     ),
                     defaultReasoningMode: item.defaultReasoningMode.flatMap(ReasoningMode.init)
                 )
@@ -346,6 +349,7 @@ private struct OpenAIModelListItem: Decodable {
     let description: String?
     let reasoningModes: [String]?
     let reasoningEfforts: [String]?
+    let reasoningOptions: [ReasoningOption]
     let defaultReasoningMode: String?
     let contextWindow: Int?
     let contextLength: Int?
@@ -361,6 +365,7 @@ private struct OpenAIModelListItem: Decodable {
         case description
         case reasoningModes = "reasoning_modes"
         case reasoningEfforts = "reasoning_efforts"
+        case reasoningOptions = "reasoning_options"
         case defaultReasoningMode = "reasoning_default"
         case contextWindow = "context_window"
         case contextLength = "context_length"
@@ -378,6 +383,7 @@ private struct OpenAIModelListItem: Decodable {
         description = try? container.decode(String.self, forKey: .description)
         reasoningModes = try? container.decode([String].self, forKey: .reasoningModes)
         reasoningEfforts = try? container.decode([String].self, forKey: .reasoningEfforts)
+        reasoningOptions = (try? container.decode([ReasoningOption].self, forKey: .reasoningOptions)) ?? []
         defaultReasoningMode = try? container.decode(String.self, forKey: .defaultReasoningMode)
         contextWindow = try? container.decode(Int.self, forKey: .contextWindow)
         contextLength = try? container.decode(Int.self, forKey: .contextLength)
@@ -385,5 +391,10 @@ private struct OpenAIModelListItem: Decodable {
         maxOutputTokens = try? container.decode(Int.self, forKey: .maxOutputTokens)
         inputModalities = try? container.decode([String].self, forKey: .inputModalities)
         input = try? container.decode([String].self, forKey: .input)
+    }
+
+    struct ReasoningOption: Decodable {
+        let type: String?
+        let values: [String]?
     }
 }

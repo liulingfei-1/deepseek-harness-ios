@@ -94,6 +94,7 @@ git diff --check
 - [x] Anthropic 原生 `/v1/models?limit=1000`、`x-api-key`、版本头和 root/`/v1` 地址规范化已接入。
 - [x] `resolveModelInfo` exact lookup 接入共享发现协议；目录外模型保留 advisory identity，不阻断请求。
 - [x] `ProviderModel` 保存逐模型 reasoning levels/default；配置校验、picker 和 OpenAI reasoning wire 覆盖上游七级集合。
+- [x] OpenAI/enriched model listing 读取上游 `reasoning_options` 的 effort values，budget-only 声明保持无离散 levels，避免误报能力。
 - [ ] OAuth 授权/刷新、provider-specific reasoning/context wire fixture、runtime reload 和真实设备证据。
 
 ## 5. PARITY-010 本批次逐步修改清单

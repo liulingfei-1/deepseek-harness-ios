@@ -241,6 +241,14 @@ final class ProviderModelDiscoveryTests: XCTestCase {
         }
     }
 
+    func testModelListingReadsUpstreamReasoningOptionsEffortValues() throws {
+        let data = Data(#"{"models":{"claude-opus-4-7":{"reasoning":true,"reasoning_options":[{"type":"effort","values":["low","medium","high","xhigh","max"]}]},"claude-haiku-4-5":{"reasoning_options":[{"type":"budget_tokens","min":1024}]}}}"#.utf8)
+        let models = try OpenAIChatCompletionsAdapter().decodeModelList(data)
+        XCTAssertEqual(models.map(\.id), ["claude-haiku-4-5", "claude-opus-4-7"])
+        XCTAssertNil(models[0].reasoningModes)
+        XCTAssertEqual(models[1].reasoningModes, [.low, .medium, .high, .xhigh, .max])
+    }
+
     func testAnthropicListingUsesNativeURLAndHeaders() throws {
         var configuration = ModelProviderCatalog.applying(.anthropic, to: AgentConfiguration())
         configuration.baseURL = "https://api.anthropic.com"
