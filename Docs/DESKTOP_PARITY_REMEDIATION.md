@@ -98,6 +98,13 @@
 - **iPhone 16 Pro**：尚未验证真实 GitHub delivery、前后台生命周期、隧道可达性和重启去重，保留 `VERIFY`。
 - **剩余动作**：补 GitHub 签名验证、重试与 Agent/Job 触发；公网 ingress 和 iOS 后台持续监听仍按平台证据标记。
 
+### PARITY-013 · webhook 投影为本机 Job（2026-09-04）
+
+- **状态**：VERIFY
+- **移动端变更**：`LocalStateServer` 支持初始化完成后的 webhook sink 注入；`AppModel` 先以 delivery ID 做持久去重，再把 GitHub event 投影为可通过 `job_list`/`job_output` 读取的已完成本机 `webhook` Job，保留事件名和 JSON payload。重复 delivery 不会重复建 Job。
+- **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-webhook-trigger --filter LocalStateServerTests` → 9 tests passed；arm64 Simulator build 待本批次完成后记录。
+- **剩余动作**：将 webhook rule 配置、失败重试和可选 Agent 唤醒接入设置；公网 ingress、隧道和后台持续监听仍需平台/真机证据。
+
 ### PARITY-006 · 子 Agent reasoning effort 参数（2026-09-03）
 
 - **状态**：VERIFY

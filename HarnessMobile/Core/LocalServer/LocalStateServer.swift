@@ -45,7 +45,8 @@ final class LocalStateServer: @unchecked Sendable {
     private let listener: NWListener
     private let queue = DispatchQueue(label: "local-state-server", qos: .utility)
     private let endpoints: [String: Endpoint]
-    private let webhookHandler: (@Sendable (LocalWebhookEvent) -> Void)?
+    private let webhookHandlerLock = NSLock()
+    private var webhookHandler: (@Sendable (LocalWebhookEvent) -> Void)?
     private let webhookSecret: String?
 
     init?(
@@ -85,6 +86,15 @@ final class LocalStateServer: @unchecked Sendable {
 
     func stop() {
         listener.cancel()
+    }
+
+    /// Replace the event sink after the owner has finished initialization.
+    /// This keeps the listener usable during app construction without forcing
+    /// an unsafe self-capture from an initializer.
+    func setWebhookHandler(_ handler: (@Sendable (LocalWebhookEvent) -> Void)?) {
+        webhookHandlerLock.lock()
+        webhookHandler = handler
+        webhookHandlerLock.unlock()
     }
 
     /// Pure request routing used by the network shell. Split out so the
@@ -165,10 +175,13 @@ final class LocalStateServer: @unchecked Sendable {
             defer { connection.cancel() }
             guard let self, let data, !data.isEmpty else { return }
             let request = String(decoding: data, as: UTF8.self)
+            self.webhookHandlerLock.lock()
+            let webhookHandler = self.webhookHandler
+            self.webhookHandlerLock.unlock()
             let routed = Self.route(
                 request: request,
                 endpoints: self.endpoints,
-                webhookHandler: self.webhookHandler,
+                webhookHandler: webhookHandler,
                 webhookSecret: self.webhookSecret
             )
             let body = routed.body

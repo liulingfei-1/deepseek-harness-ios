@@ -719,6 +719,30 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
             Task { _ = await localWebhookDeduplicator.accept(event.deliveryID) }
         })
         localStateServer?.start()
+        localStateServer?.setWebhookHandler { [weak self] event in
+            Task { @MainActor [weak self] in
+                await self?.handleLocalWebhook(event)
+            }
+        }
+    }
+
+    /// Turn an accepted local webhook delivery into a durable, inspectable job.
+    /// Delivery IDs are claimed before starting work so retries cannot create
+    /// duplicate jobs; the payload remains available through `job_output`.
+    private func handleLocalWebhook(_ event: LocalWebhookEvent) async {
+        guard await localWebhookDeduplicator.accept(event.deliveryID) else { return }
+        let ownerSession = activeSessionID?.uuidString.lowercased()
+        let output = event.payload.displayText
+        _ = try? await jobRegistry.start(
+            kind: "webhook",
+            label: event.eventName,
+            ownerSession: ownerSession,
+            outputLimitBytes: 64 * 1_024
+        ) { emit in
+            await emit(output)
+            return HarnessJobOutcome(status: .completed, output: output)
+        }
+        await refreshVisibleJobs()
     }
 
 #if DEBUG
