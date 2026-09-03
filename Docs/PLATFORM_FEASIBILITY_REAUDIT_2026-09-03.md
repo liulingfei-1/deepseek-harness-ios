@@ -70,7 +70,7 @@
 ### 真差距（能实现、未实现——成为改造项）
 1. ~~**ui-schedule 等价 UI**~~ ✅ 已补齐：`HarnessSchedulePanel`（Features/Chat）从会话选项可达，只读 pending/finished + pending 取消，UI 测试 + 截图验证
 2. ~~**会话级模型目录**~~ ✅ 实际已对齐：SessionModelPickerView 已分 `providerSection`（选配置）→ `modelSection`（选模型）两段，对应桌面 `/model` provider→model 分层
-3. **ui-workflow-run 顶层节点** ❌ 真缺：大项——workflow 作为独立 chat 节点 + 成员折叠呈现，需改 chat 节点模型，保留为后续
+3. ~~**ui-workflow-run 顶层节点**~~ ✅ 已对齐：聊天以 `WorkflowToolCard` 呈现 run 摘要+阶段+子 Agent 成员+日志+结果（= 桌面 run 节点折叠的等价）；新增 `WorkflowRunTree` 数据层（Core/Trace）供轨迹/导出按 run 分组（提交 本轮）
 4. **Browser client-half 承载**（WKWebView）与本地管理 server、e2b/webhook/ACP 出站（见 §1，需 D-001 重裁）
 5. iSH CLI 包 + tmux、快照回放测试链
 
