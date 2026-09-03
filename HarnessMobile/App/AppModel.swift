@@ -551,6 +551,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         storageURL: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("HarnessMobile/Webhooks/github-deliveries.json")
     )
+    @ObservationIgnored private var loadedHookConfiguration: AgentHookConfiguration?
     @ObservationIgnored private var localStateServer: LocalStateServer?
     @ObservationIgnored private let backgroundResumeCoordinator = SessionBackgroundResumeCoordinator()
     @ObservationIgnored let terminalProvider: any ISHTerminalProviding
@@ -826,6 +827,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         }
         await refreshProviderCredentialStatuses()
         await refreshWorkspace()
+        await loadHookConfiguration()
         // `latest-image.*` is retained for the local camera_ocr tool, but it
         // is not a pending composer attachment. Restoring it here made every
         // newly-created conversation inherit the last image from a previous
@@ -2996,6 +2998,61 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         }
     }
 
+    private func loadHookConfiguration() async {
+        let candidates: [(path: String, mode: HookMatcherGroup.MatcherMode)] = [
+            (".codex/hooks.json", .codex),
+            (".claude/settings.json", .claudeCode),
+            (".dsh/hooks.json", .codex)
+        ]
+        for candidate in candidates {
+            guard let text = try? await workspaceStore.readText(path: candidate.path),
+                  let raw = try? JSONDecoder().decode(JSONValue.self, from: Data(text.utf8)) else {
+                continue
+            }
+            do {
+                let groups: [HookPoint: [HookMatcherGroup]]
+                switch candidate.mode {
+                case .codex:
+                    groups = try CodexHookConfigParser.parse(raw: raw).config
+                case .claudeCode:
+                    groups = try ClaudeCodeHookConfigParser.parse(raw: raw).config
+                }
+                guard !groups.isEmpty else { continue }
+                let workspaceStore = self.workspaceStore
+                let executor: HookRunner.Executor = { command, stdinJSON, timeoutSec in
+                    let workspaceURL = try await workspaceStore.rootURL()
+                    let encoded = Data(stdinJSON.utf8).base64EncodedString()
+                    let script = "printf '%s' '\(encoded)' | base64 -d | (\(command))"
+                    let result = try await ISHSandboxCoordinator.shared.execute(
+                        sessionID: "hook.\(UUID().uuidString.lowercased())",
+                        command: script,
+                        workspaceURL: workspaceURL,
+                        timeout: TimeInterval(timeoutSec ?? 300),
+                        maximumOutputBytes: 128 * 1_024,
+                        policy: ISHSandboxExecutionPolicy(
+                            mode: .dangerFullAccess,
+                            workspaceRoot: workspaceURL
+                        )
+                    )
+                    return HookProtocol.parseHookOutput(
+                        exitCode: result.exitCode,
+                        stdout: result.stdout,
+                        stderr: result.stderr
+                    )
+                }
+                loadedHookConfiguration = AgentHookConfiguration(
+                    groups: groups,
+                    mode: candidate.mode,
+                    executor: executor
+                )
+                return
+            } catch {
+                continue
+            }
+        }
+        loadedHookConfiguration = nil
+    }
+
     func refreshPluginInventory() async {
         await refreshNativePluginInventory()
         if ishPluginHostClient != nil {
@@ -4998,6 +5055,9 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                 guard let self else { throw ProviderProfileError.missingProfile("runtime") }
                 return try await self.providerRequestRoute(for: configuration)
             },
+            hookConfigurationProvider: { [weak self] in
+                await self?.loadedHookConfiguration
+            },
             toolResultOutputPolicy: ToolResultOutputPolicy(
                 fileSystem: WorkspaceFileSystemProvider(store: workspaceStore)
             ),
@@ -5493,6 +5553,9 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                         step: step,
                         now: now
                     )
+                },
+                hookConfigurationProvider: { [weak self] in
+                    await self?.loadedHookConfiguration
                 },
                 imageAttachmentProvider: { [workspaceStore] refs in
                     var payloads: [ModelImagePayload] = []

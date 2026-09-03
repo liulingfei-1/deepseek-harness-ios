@@ -112,10 +112,10 @@
 
 - **状态**：VERIFY
 - **上游证据**：`hooks-claude-code`、`hooks-codex` 与既有 `HookProtocol` parser/matcher。
-- **移动端变更**：新增 `HookRunner`，按配置顺序匹配 hook point/tool、构造 stdin JSON、调用注入式 host executor，折叠 additionalContext，并在 halt/deny/exit-2 或执行异常时返回阻断结果。
-- **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-parity-p6 --filter HookProtocolTests/testRunnerExecutesMatchingHooksInOrderAndStopsOnBlock` → 1 test passed。
-- **Simulator/iPhone**：runner 尚未接入 AgentRuntime 生命周期，未做真机命令执行验证，保留 `VERIFY`。
-- **剩余动作**：接入 iSH/ACP command executor、SessionStart/PreToolUse/PostToolUse/Stop 触发点、超时/取消和诊断轨迹。
+- **移动端变更**：新增 `HookRunner`，按配置顺序匹配 hook point/tool、构造 stdin JSON、调用注入式 host executor，折叠 additionalContext，并在 halt/deny/exit-2 或执行异常时返回阻断结果；`AgentRuntime` 已接入 SessionStart、UserPromptSubmit、PreToolUse、PostToolUse和 Stop，`AppModel` 支持从 `.codex/hooks.json` / `.claude/settings.json` / `.dsh/hooks.json` 加载配置并使用 iSH executor。
+- **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter HookProtocolTests/testRunnerExecutesMatchingHooksInOrderAndStopsOnBlock` → 1 test passed；`--filter AgentRuntimeTests/testConfiguredHooksRunAcrossSessionPromptAndToolLifecycle` → 1 test passed。
+- **Simulator/iPhone**：本批次将重跑 Simulator build；未做真机 iSH 命令执行和配置文件端到端验证，保留 `VERIFY`。
+- **剩余动作**：补 SubagentStart/SubagentStop 事件、真机 iSH/ACP 命令执行、超时/取消和诊断轨迹证据。
 
 > 更新：2026-08-29。本文只保留当前仍需行动或验收的事项。已经通过自动化门的历史修补不再作为待办重复列出；完整历史证据由 git 提交、测试报告和本文件的归档索引追溯。
 

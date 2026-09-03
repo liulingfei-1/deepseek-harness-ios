@@ -99,6 +99,12 @@ struct AgentRuntimeInstructionInjection: Sendable, Equatable {
     }
 }
 
+struct AgentHookConfiguration: Sendable {
+    let groups: [HookPoint: [HookMatcherGroup]]
+    let mode: HookMatcherGroup.MatcherMode
+    let executor: HookRunner.Executor
+}
+
 private enum EffectiveToolDecision: Sendable, Equatable {
     case allow
     case ask
@@ -121,6 +127,7 @@ actor AgentRuntime {
     typealias TimeContextInjectionProvider = @Sendable (
         [AgentMessage], Int, Int, Date
     ) async throws -> AgentRuntimeInstructionInjection?
+    typealias HookConfigurationProvider = @Sendable () async -> AgentHookConfiguration?
     typealias ImageAttachmentProvider = @Sendable ([AgentImageAttachmentRef]) async throws -> [ModelImagePayload]
     typealias TraceHandler = @Sendable (HarnessTraceDraft) async -> Void
     typealias SessionEventHandler = @Sendable (SessionEventDraft) async throws -> SessionEvent?
@@ -147,6 +154,7 @@ actor AgentRuntime {
     private let userMessageInjectionProvider: UserMessageInjectionProvider?
     private let preStepInstructionProvider: PreStepInstructionProvider?
     private let timeContextInjectionProvider: TimeContextInjectionProvider?
+    private let hookConfigurationProvider: HookConfigurationProvider?
     private let imageAttachmentProvider: ImageAttachmentProvider?
     private let toolResultOutputPolicy: ToolResultOutputPolicy?
     private let systemPrompt: String
@@ -183,6 +191,7 @@ actor AgentRuntime {
         userMessageInjectionProvider: UserMessageInjectionProvider? = nil,
         preStepInstructionProvider: PreStepInstructionProvider? = nil,
         timeContextInjectionProvider: TimeContextInjectionProvider? = nil,
+        hookConfigurationProvider: HookConfigurationProvider? = nil,
         imageAttachmentProvider: ImageAttachmentProvider? = nil,
         toolResultOutputPolicy: ToolResultOutputPolicy? = nil,
         permissionMode: ToolPermissionMode = .workspaceWrite,
@@ -213,6 +222,7 @@ actor AgentRuntime {
         self.userMessageInjectionProvider = userMessageInjectionProvider
         self.preStepInstructionProvider = preStepInstructionProvider
         self.timeContextInjectionProvider = timeContextInjectionProvider
+        self.hookConfigurationProvider = hookConfigurationProvider
         self.imageAttachmentProvider = imageAttachmentProvider
         self.toolResultOutputPolicy = toolResultOutputPolicy
         self.permissionMode = permissionMode
@@ -264,6 +274,15 @@ actor AgentRuntime {
         )
         await publishAgentStarted(
             source: requestHeaderReason == .initial ? .startup : .resume
+        )
+        try await runHook(
+            point: .sessionStart,
+            toolName: nil,
+            payload: .object([
+                "agentId": .string(agentID.uuidString.lowercased()),
+                "runId": .string(runID.uuidString.lowercased()),
+                "source": .string(requestHeaderReason == .initial ? "startup" : "resume")
+            ])
         )
 
         do {
@@ -343,6 +362,15 @@ actor AgentRuntime {
 
         try await beginTurn(turn, userMessage: initialUserMessage)
         if let initialUserMessage {
+            try await runHook(
+                point: .userPromptSubmit,
+                toolName: nil,
+                payload: .object([
+                    "message": .string(initialUserMessage.content),
+                    "sessionId": .string(agentID.uuidString.lowercased()),
+                    "turn": .number(Double(turn))
+                ])
+            )
             try await appendInstructionInjections(
                 for: initialUserMessage,
                 turn: turn,
@@ -1900,6 +1928,17 @@ actor AgentRuntime {
                 summary: summary
             )
             execution = preparedExecution
+            try await runHook(
+                point: .preToolUse,
+                toolName: call.name,
+                payload: .object([
+                    "tool": .string(call.name),
+                    "callId": .string(call.id),
+                    "arguments": .object(arguments),
+                    "turn": .number(Double(turn)),
+                    "step": .number(Double(step))
+                ])
+            )
             let platformDecision = permissionMode.decision(for: tool.risk)
             let baseCheckpointDecision = Self.cordisDecision(platformDecision)
             var checkpointDecision = baseCheckpointDecision
@@ -2370,6 +2409,20 @@ actor AgentRuntime {
             } else {
                 cordisResult = try await defaultExecution()
             }
+            try await runHook(
+                point: .postToolUse,
+                toolName: prepared.call.name,
+                payload: .object([
+                    "tool": .string(prepared.call.name),
+                    "callId": .string(prepared.call.id),
+                    "result": .object([
+                        "text": .string(cordisResult.text),
+                        "isError": .bool(cordisResult.isError)
+                    ]),
+                    "turn": .number(Double(prepared.execution.turn)),
+                    "step": .number(Double(prepared.execution.step))
+                ])
+            )
             try Task.checkCancellation()
             let rawFinalizedResult = LocalToolFinalizer.apply(
                 tool: prepared.tool,
@@ -4120,6 +4173,14 @@ actor AgentRuntime {
     }
 
     private func publishAgentStopped() async {
+        await runHookIgnoringFailure(
+            point: .stop,
+            toolName: nil,
+            payload: .object([
+                "agentId": .string(agentID.uuidString.lowercased()),
+                "runId": .string(runID.uuidString.lowercased())
+            ])
+        )
         guard let plugins else { return }
         let target = CordisDispatchTarget.agent(agentID)
         await plugins.emit(
@@ -4136,6 +4197,49 @@ actor AgentRuntime {
             input: CordisAgentIdentityContext(agentID: agentID, runID: runID),
             target: target
         )
+    }
+
+    private func runHook(
+        point: HookPoint,
+        toolName: String?,
+        payload: JSONValue
+    ) async throws {
+        guard let configuration = await hookConfigurationProvider?(),
+              let groups = configuration.groups[point],
+              !groups.isEmpty else { return }
+        let result = await HookRunner.run(
+            point: point,
+            toolName: toolName,
+            payload: payload,
+            groups: groups,
+            mode: configuration.mode,
+            executor: configuration.executor
+        )
+        guard !result.blocked else {
+            throw AgentRuntimeError.hookBlocked(
+                point: point,
+                reason: result.blockReason ?? "hook blocked"
+            )
+        }
+    }
+
+    private func runHookIgnoringFailure(
+        point: HookPoint,
+        toolName: String?,
+        payload: JSONValue
+    ) async {
+        do {
+            try await runHook(point: point, toolName: toolName, payload: payload)
+        } catch {
+            await traceHandler(
+                HarnessTraceDraft(
+                    kind: .error,
+                    runID: runID,
+                    name: "hook/\(point.rawValue)",
+                    error: Self.failureDescription(error)
+                )
+            )
+        }
     }
 
     private func finishTrace(
@@ -4418,6 +4522,7 @@ enum AgentRuntimeError: LocalizedError, Sendable {
     case compactionSummaryStreamFailedAfterPartialOutput(String)
     case imageInputUnsupported(String)
     case imageAttachmentUnavailable
+    case hookBlocked(point: HookPoint, reason: String)
 
     var errorDescription: String? {
         switch self {
@@ -4465,6 +4570,8 @@ enum AgentRuntimeError: LocalizedError, Sendable {
             return "当前会话包含图片输入（可能来自历史消息），但当前模型 \(model) 未声明图片输入能力。这不是模型输出图片错误；请切换到支持图片输入的模型，或新建纯文本会话后重试。"
         case .imageAttachmentUnavailable:
             return "图片附件无法从本机工作区读取。请重新选择图片后再试。"
+        case let .hookBlocked(point, reason):
+            return "\(point.rawValue) hook 拒绝了本次操作：\(reason)"
         }
     }
 }

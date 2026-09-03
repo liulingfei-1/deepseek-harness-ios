@@ -78,7 +78,7 @@ struct HookMatcherGroup: Codable, Sendable, Equatable {
     /// Claude Code uses literal matching when the pattern is purely
     /// `[A-Za-z0-9_|]+` (pipe = exact-match alternation) and regex otherwise.
     /// Codex is always regex.
-    enum MatcherMode {
+    enum MatcherMode: Sendable {
         case claudeCode
         case codex
     }

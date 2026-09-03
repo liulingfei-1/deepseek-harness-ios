@@ -7,6 +7,65 @@ import XCTest
 #endif
 
 final class AgentRuntimeTests: XCTestCase {
+    func testConfiguredHooksRunAcrossSessionPromptAndToolLifecycle() async throws {
+        let script = ModelScript(turns: [[
+            .toolCallDelta(
+                index: 0,
+                id: "hook-call",
+                type: "function",
+                name: "echo",
+                arguments: #"{"value":"hello"}"#
+            ),
+            .finish(.toolCalls)
+        ], [
+            .text("done"),
+            .finish(.stop)
+        ]])
+        let hooks = HookInvocationRecorder()
+        let groups = Dictionary(uniqueKeysWithValues: [
+            HookPoint.sessionStart,
+            .userPromptSubmit,
+            .preToolUse,
+            .postToolUse,
+            .stop
+        ].map { point in
+            (point, [HookMatcherGroup(matcher: nil, hooks: [CommandHook(command: point.rawValue)])])
+        })
+        let runtime = AgentRuntime(
+            client: ScriptedModelClient(script: script),
+            registry: LocalToolRegistry(tools: [EchoTool(counter: ToolCounter())]),
+            approvalHandler: { _ in true },
+            eventHandler: { _ in },
+            hookConfigurationProvider: {
+                AgentHookConfiguration(
+                    groups: groups,
+                    mode: .codex,
+                    executor: { command, _, _ in
+                        await hooks.append(command)
+                        return HookProtocol.parseHookOutput(exitCode: 0, stdout: "", stderr: "")
+                    }
+                )
+            },
+            permissionMode: .dangerFullAccess
+        )
+
+        try await runtime.run(
+            history: [],
+            configuration: AgentConfiguration(),
+            apiKey: "test-only",
+            initialUserMessage: .user("run hooks")
+        )
+
+        let commands = await hooks.commands
+        XCTAssertEqual(commands, [
+            "SessionStart",
+            "UserPromptSubmit",
+            "PreToolUse",
+            "PostToolUse",
+            "Stop"
+        ])
+    }
+
     func testDefinitionOwnedFinalizerRunsOnceAndPreservesCanonicalValue() async throws {
         let counter = FinalizerCounter()
         let tool = FinalizingEchoTool(counter: counter, shouldThrow: false)
@@ -4581,6 +4640,14 @@ private actor EventRecorder {
             guard case let .toolEventChanged(toolEvent) = event else { return false }
             return toolEvent.callID == callID && toolEvent.status == status
         }
+    }
+}
+
+private actor HookInvocationRecorder {
+    private(set) var commands: [String] = []
+
+    func append(_ command: String) {
+        commands.append(command)
     }
 }
 
