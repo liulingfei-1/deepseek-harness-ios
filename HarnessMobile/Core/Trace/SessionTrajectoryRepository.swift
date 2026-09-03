@@ -461,17 +461,15 @@ struct SessionLogDeepSeekExtensionProvider: Sendable {
                   !session.isEmpty,
                   let raw = object["throughSeq"],
                   case let .number(number) = raw,
-                  number.isFinite,
-                  number.rounded(.down) == number,
-                  number >= -1,
-                  number <= Double(Int64.max) else {
+                  let accepted = Int64(exactly: number),
+                  accepted >= -1 else {
                 throw SessionTrajectoryRepositoryError.malformedDeliveryAcceptance(event.seq)
             }
-            if event.seq <= UInt64(Int64.max), number >= Double(event.seq) {
+            if accepted >= 0, UInt64(accepted) >= event.seq {
                 throw SessionTrajectoryRepositoryError.malformedDeliveryAcceptance(event.seq)
             }
             if session.lowercased() == expected {
-                current = max(current, Int64(number))
+                current = max(current, accepted)
             }
         }
         return current
