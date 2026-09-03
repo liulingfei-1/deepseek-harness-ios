@@ -220,6 +220,7 @@ git diff --check
 | PARITY-002 session-log | VERIFY | 新增 `SessionLogDeliveryCoordinator`：durable watermark、`dsh_session_log` suffix body、accepted cursor 与重复抑制；专项测试通过；尚未接入 AppModel/真实 endpoint |
 | PARITY-003 telemetry | VERIFY | `TelemetrySessionPersistence` 接入 AppModel append；5 项 telemetry tests 通过；全量 897 tests/5 skipped/0 failures；模式设置、feedback release、真机 OTLP 待验证 |
 | PARITY-006 子 Agent reasoning | VERIFY | schema 与 LocalSubagentRequest 支持 reasoning_effort，并应用到 child configuration；新增 `list_subagent_models`；HarnessJobs 专项通过；provider listing/真实多 provider 仍待实现 |
-| PARITY-004/005/007..014 | TODO | 已完成源码/上游定位并写入本计划，尚未宣称实现 |
+| PARITY-007 hooks | VERIFY | 新增注入式 `HookRunner`，匹配/顺序/阻断折叠专项测试通过；AgentRuntime 生命周期和真实 executor 待接线 |
+| PARITY-004/005/008..014 | TODO | 已完成源码/上游定位并写入本计划，尚未宣称实现 |
 
 本表只记录可复核证据，不把“计划存在”或“源码类型存在”当作能力完成。

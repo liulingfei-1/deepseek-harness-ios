@@ -229,3 +229,68 @@ enum HookProtocol {
         return String(output.stderr.prefix(defaultStderrSummaryMaxChars))
     }
 }
+
+struct HookRunResult: Sendable, Equatable {
+    let outputs: [HookOutput]
+    let blocked: Bool
+    let blockReason: String?
+    let additionalContext: [String]
+}
+
+/// Executes configured command hooks in declaration order. Process spawning
+/// remains an injected boundary (iSH/ACP/host supplies the executor), while
+/// matching, stdin JSON construction and decision folding are shared with the
+/// desktop hook protocol.
+enum HookRunner {
+    typealias Executor = @Sendable (_ command: String, _ stdinJSON: String, _ timeoutSec: Int?) async throws -> HookOutput
+
+    static func run(
+        point: HookPoint,
+        toolName: String?,
+        payload: JSONValue,
+        groups: [HookMatcherGroup],
+        mode: HookMatcherGroup.MatcherMode,
+        executor: @escaping Executor
+    ) async -> HookRunResult {
+        let stdinJSON = payload.displayText
+        var outputs: [HookOutput] = []
+        var contexts: [String] = []
+        for group in groups {
+            guard group.matches(toolName: toolName ?? "", mode: mode) else { continue }
+            for hook in group.hooks {
+                do {
+                    let output = try await executor(hook.command, stdinJSON, hook.timeoutSec)
+                    outputs.append(output)
+                    if let context = output.additionalContext, !context.isEmpty {
+                        contexts.append(context)
+                    }
+                    if HookProtocol.blocks(output) {
+                        return HookRunResult(
+                            outputs: outputs,
+                            blocked: true,
+                            blockReason: HookProtocol.blockReason(output),
+                            additionalContext: contexts
+                        )
+                    }
+                } catch {
+                    let output = HookOutput(
+                        exitCode: nil,
+                        stderr: String(describing: error),
+                        stdout: "",
+                        continueFlag: false,
+                        stopReason: "hook execution failed",
+                        decision: .block,
+                        reason: String(describing: error),
+                        hookEventName: point.rawValue,
+                        additionalContext: nil,
+                        systemMessage: nil,
+                        updatedInputPresent: false
+                    )
+                    outputs.append(output)
+                    return HookRunResult(outputs: outputs, blocked: true, blockReason: HookProtocol.blockReason(output), additionalContext: contexts)
+                }
+            }
+        }
+        return HookRunResult(outputs: outputs, blocked: false, blockReason: nil, additionalContext: contexts)
+    }
+}

@@ -85,4 +85,33 @@ final class HookProtocolTests: XCTestCase {
         XCTAssertEqual(withContext.additionalContext, "ctx for next request")
         XCTAssertEqual(withContext.systemMessage, "heads up")
     }
+
+    func testRunnerExecutesMatchingHooksInOrderAndStopsOnBlock() async {
+        let groups = [
+            HookMatcherGroup(matcher: "Bash", hooks: [
+                CommandHook(command: "first"),
+                CommandHook(command: "second")
+            ]),
+            HookMatcherGroup(matcher: "Edit", hooks: [CommandHook(command: "edit")])
+        ]
+        nonisolated(unsafe) var commands = [String]()
+        let result = await HookRunner.run(
+            point: .preToolUse,
+            toolName: "Bash",
+            payload: .object(["tool": .string("Bash")]),
+            groups: groups,
+            mode: .claudeCode,
+            executor: { command, _, _ in
+                commands.append(command)
+                return HookProtocol.parseHookOutput(
+                    exitCode: command == "second" ? 2 : 0,
+                    stdout: "",
+                    stderr: command == "second" ? "blocked" : ""
+                )
+            }
+        )
+        XCTAssertEqual(commands, ["first", "second"])
+        XCTAssertTrue(result.blocked)
+        XCTAssertEqual(result.blockReason, "blocked")
+    }
 }

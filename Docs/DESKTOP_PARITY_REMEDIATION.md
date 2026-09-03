@@ -48,6 +48,15 @@
 - **Simulator/iPhone**：本轮未做独立 UI/真机路由验证，保留 `VERIFY`。
 - **剩余动作**：补 `list_subagent_models`、provider 显式选择、动态 reasoning capability discovery 和真实多 provider fixture。
 
+### PARITY-007 · Hooks runner 决策折叠（2026-09-03）
+
+- **状态**：VERIFY
+- **上游证据**：`hooks-claude-code`、`hooks-codex` 与既有 `HookProtocol` parser/matcher。
+- **移动端变更**：新增 `HookRunner`，按配置顺序匹配 hook point/tool、构造 stdin JSON、调用注入式 host executor，折叠 additionalContext，并在 halt/deny/exit-2 或执行异常时返回阻断结果。
+- **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-parity-p6 --filter HookProtocolTests/testRunnerExecutesMatchingHooksInOrderAndStopsOnBlock` → 1 test passed。
+- **Simulator/iPhone**：runner 尚未接入 AgentRuntime 生命周期，未做真机命令执行验证，保留 `VERIFY`。
+- **剩余动作**：接入 iSH/ACP command executor、SessionStart/PreToolUse/PostToolUse/Stop 触发点、超时/取消和诊断轨迹。
+
 > 更新：2026-08-29。本文只保留当前仍需行动或验收的事项。已经通过自动化门的历史修补不再作为待办重复列出；完整历史证据由 git 提交、测试报告和本文件的归档索引追溯。
 
 ## 当前结论
