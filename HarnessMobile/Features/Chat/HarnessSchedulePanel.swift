@@ -96,7 +96,11 @@ struct HarnessSchedulePanel: View {
     }
 
     private var pending: [HarnessScheduleSnapshot] {
-        schedules.filter { $0.status == .pending }.sorted { $0.runAt < $1.runAt }
+        // Claimed rows are mid-execution: they stay in the active section
+        // with their own badge instead of disappearing between groups.
+        schedules
+            .filter { $0.status == .pending || $0.status == .claimed }
+            .sorted { $0.runAt < $1.runAt }
     }
 
     private var finished: [HarnessScheduleSnapshot] {
