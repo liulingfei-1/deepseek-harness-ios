@@ -473,3 +473,9 @@ git diff --check
 - **api 控制器协议边界**：SessionControlling/SettingsControlling/WorkspaceControlling（AppModel 遵循，`476339f3`）。
 - **iSH tmux/git/openssh**：install.sh guest 包扩展（`9bf73a0d`）。
 - 平台可行性全量重审：`Docs/PLATFORM_FEASIBILITY_REAUDIT_2026-09-03.md`（46 模块逐项对照 + 10 行形态重判；Browser client-half 判定可承载于既有 WKWebView）。
+
+### PAR-104 · 纯开发待办收官：ACP 客户端 + 快照宿主（2026-09-03）
+
+- **ACP 远端子 agent 客户端**（`8f3c4d68`）：对齐 `subagent-acp` × `@agentclientprotocol/sdk` 1.4.0（PROTOCOL_VERSION=1）——initialize（无可选 client capabilities）→ session/new（cwd+空 mcpServers）→ session/prompt（text blocks）→ `agent_message_chunk` 流式折叠 → 终态 stopReason 映射（closed vocabulary；`max_turn_requests` 与未知变体一律 error，不冒充成功）；`session/request_permission` 按策略自动应答（allow 取首个 allow_once/allow_always，无则/拒绝答 cancelled）；`session/cancel`。Wire 为纯函数 + 注入式 line transport（iSH stdio 子进程或任意桥接），5 测试钉全生命周期/双权限策略/取消/映射。传输端真进程接线与远端 agent 属真机/配置项（D-011）。
+- **会话快照宿主**（`9087c55f`）：桌面 session-snapshot 的 SwiftPM 等值——录制（事件表→封闭 fixture）、规范化（seq/time/id 与 uuid 形 ids 折叠为占位）、凭据形状串进不了 fixture、回放报首个精确 mismatch（条数或事件下标）、`SNAPSHOT_UPDATE=1` 刷新模式与缺失即录制；4 测试。真场景 fixture 积累与 ACP 录制驱动列后续。
+- 收尾 SwiftPM 全量绿。
