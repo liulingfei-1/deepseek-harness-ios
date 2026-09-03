@@ -160,7 +160,7 @@ enum ACPWire {
     }
 }
 
-enum PermissionPolicy: String, Sendable, Equatable {
+enum PermissionPolicy: String, Codable, Sendable, Equatable {
     case allow
     case reject
 }
@@ -171,6 +171,89 @@ enum ACPSubagentOutcome: String, Sendable, Equatable {
     case refusal
     case aborted
     case error
+}
+
+enum ACPSubagentError: Error, Sendable, Equatable {
+    case timedOut
+    case cancelled
+    case failed(ACPSubagentOutcome)
+}
+
+/// Deployment-owned ACP provider configuration. This mirrors the desktop
+/// `subagent-acp` config without coupling the Jobs layer to process details.
+struct ACPSubagentProviderDescriptor: Codable, Sendable, Equatable, Identifiable {
+    let id: String
+    let command: String
+    let args: [String]
+    let cwd: String?
+    let permission: PermissionPolicy
+    let environment: [String: String]
+
+    init(
+        id: String,
+        command: String,
+        args: [String] = [],
+        cwd: String? = nil,
+        permission: PermissionPolicy = .reject,
+        environment: [String: String] = [:]
+    ) throws {
+        let normalizedID = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedCommand = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedID.isEmpty, normalizedID.utf8.count <= 128,
+              !normalizedCommand.isEmpty, normalizedCommand.utf8.count <= 1_024,
+              args.allSatisfy({ $0.utf8.count <= 4_096 }),
+              environment.keys.allSatisfy({ !$0.isEmpty && $0.utf8.count <= 256 }) else {
+            throw ACPSubagentError.failed(.error)
+        }
+        self.id = normalizedID
+        self.command = normalizedCommand
+        self.args = args
+        self.cwd = cwd?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true ? nil : cwd
+        self.permission = permission
+        self.environment = environment
+    }
+}
+
+/// Small in-memory catalog; persistence/UI can supply descriptors later.
+actor ACPSubagentProviderCatalog {
+    private var descriptors: [String: ACPSubagentProviderDescriptor]
+
+    init(descriptors: [ACPSubagentProviderDescriptor] = []) {
+        self.descriptors = Dictionary(uniqueKeysWithValues: descriptors.map { ($0.id, $0) })
+    }
+
+    func register(_ descriptor: ACPSubagentProviderDescriptor) {
+        descriptors[descriptor.id] = descriptor
+    }
+
+    func descriptor(id: String) -> ACPSubagentProviderDescriptor? {
+        descriptors[id]
+    }
+
+    func all() -> [ACPSubagentProviderDescriptor] {
+        descriptors.values.sorted { $0.id < $1.id }
+    }
+}
+
+enum ACPSubagentProviderFactory {
+    static func makeClient(
+        descriptor: ACPSubagentProviderDescriptor,
+        workspaceURL: URL,
+        entrypoint: String = ISHPersistentPluginHostTransport.defaultEntrypoint
+    ) -> ACPSubagentClient {
+        let transport = ISHACPLineTransport(
+            workspaceURL: workspaceURL,
+            entrypoint: entrypoint,
+            command: descriptor.command,
+            arguments: descriptor.args,
+            environment: descriptor.environment
+        )
+        return ACPSubagentClient(
+            transport: transport,
+            cwd: descriptor.cwd ?? workspaceURL.path,
+            permissionPolicy: descriptor.permission
+        )
+    }
 }
 
 /// Drives one remote ACP subagent session over an injected line transport.
@@ -204,6 +287,29 @@ final class ACPSubagentClient: @unchecked Sendable {
         nextID += 1
         pendingStage = .initialize
         pendingPrompt = prompt
+    }
+
+    /// Await one complete ACP activation. The wire callback remains available
+    /// for streaming callers; this convenience is the provider-facing result
+    /// seam used by Jobs. A terminal non-success outcome is surfaced instead
+    /// of being mistaken for a completed child.
+    func runAndWait(prompt: String, timeout: Duration = .seconds(600)) async throws -> String {
+        run(prompt: prompt)
+        let clock = ContinuousClock()
+        let deadline = clock.now + timeout
+        while outcome == nil {
+            try Task.checkCancellation()
+            if clock.now >= deadline {
+                cancel()
+                throw ACPSubagentError.timedOut
+            }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        guard outcome == .completed else {
+            if Task.isCancelled { throw ACPSubagentError.cancelled }
+            throw ACPSubagentError.failed(outcome ?? .error)
+        }
+        return outputText
     }
 
     func cancel() {
@@ -308,10 +414,19 @@ final class ISHACPLineTransport: ACPLineTransport, @unchecked Sendable {
         }
     }
 
-    init(workspaceURL: URL, entrypoint: String) {
+    init(
+        workspaceURL: URL,
+        entrypoint: String,
+        command: String = "/usr/bin/node",
+        arguments: [String]? = nil,
+        environment: [String: String] = [:]
+    ) {
         transport = ISHPersistentPluginHostTransport(
             workspaceURL: workspaceURL,
-            entrypoint: entrypoint
+            entrypoint: entrypoint,
+            command: command,
+            arguments: arguments ?? ["--expose-internals", entrypoint],
+            environment: environment
         )
         Task { await start() }
     }

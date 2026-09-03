@@ -104,6 +104,9 @@ actor ISHPersistentPluginHostTransport: ISHPluginHostTransport {
 
     private let workspaceURL: URL
     private let entrypoint: String
+    private let command: String
+    private let arguments: [String]
+    private let extraEnvironment: [String: String]
     private let coordinator: ISHSandboxCoordinator
 
 #if os(iOS) && canImport(HarnessISH)
@@ -113,10 +116,16 @@ actor ISHPersistentPluginHostTransport: ISHPluginHostTransport {
     init(
         workspaceURL: URL,
         entrypoint: String = ISHPersistentPluginHostTransport.defaultEntrypoint,
+        command: String = "/usr/bin/node",
+        arguments: [String]? = nil,
+        environment: [String: String] = [:],
         coordinator: ISHSandboxCoordinator = .shared
     ) {
         self.workspaceURL = workspaceURL
         self.entrypoint = entrypoint
+        self.command = command
+        self.arguments = arguments ?? ["--expose-internals", entrypoint]
+        self.extraEnvironment = environment
         self.coordinator = coordinator
     }
 
@@ -131,7 +140,7 @@ actor ISHPersistentPluginHostTransport: ISHPluginHostTransport {
         }
         try await coordinator.prepare(workspaceURL: workspaceURL)
 
-        let environment = [
+        var environment = [
             "HOME": "/root",
             "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
             "NODE_ENV": "production",
@@ -141,11 +150,12 @@ actor ISHPersistentPluginHostTransport: ISHPluginHostTransport {
             "NODE_OPTIONS": "--dns-result-order=ipv4first",
             "HARNESS_PLUGIN_HOST_ON_DEVICE": "1"
         ]
+        environment.merge(extraEnvironment, uniquingKeysWith: { _, new in new })
         let outputRelay = ISHPluginHostOutputRelay(onStdout: onStdout, onStderr: onStderr)
         let exitRelay = ISHPluginHostProcessExitRelay(transport: self, onExit: onExit)
         guard let started = ISHShellExecutor.startPersistentExecutable(
-            "/usr/bin/node",
-            arguments: ["--expose-internals", entrypoint],
+            command,
+            arguments: arguments,
             environment: environment,
             fsContext: 0,
             outputCallback: outputRelay.receive,

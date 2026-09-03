@@ -160,4 +160,53 @@ final class ACPSubagentClientTests: XCTestCase {
         client.cancel()
         XCTAssertTrue(transport.sent.contains { $0.contains("session/cancel") && $0.contains("s-9") })
     }
+
+    func testProviderCatalogValidatesAndOrdersDescriptors() async throws {
+        let zed = try ACPSubagentProviderDescriptor(id: "zed", command: "/usr/bin/node")
+        let alpha = try ACPSubagentProviderDescriptor(
+            id: "alpha",
+            command: "/usr/bin/node",
+            args: ["agent.mjs"],
+            permission: .allow,
+            environment: ["DEEPSEEK_API_KEY": "explicit"]
+        )
+        let catalog = ACPSubagentProviderCatalog(descriptors: [zed])
+        await catalog.register(alpha)
+        let ids = await catalog.all().map(\.id)
+        let alphaPermission = await catalog.descriptor(id: "alpha")?.permission
+        XCTAssertEqual(ids, ["alpha", "zed"])
+        XCTAssertEqual(alphaPermission, .allow)
+        XCTAssertThrowsError(try ACPSubagentProviderDescriptor(id: "", command: "/usr/bin/node"))
+    }
+
+    func testRunAndWaitReturnsStreamedOutput() async throws {
+        let transport = MockTransport()
+        let client = ACPSubagentClient(transport: transport, cwd: "/workspace")
+        Task {
+            while transport.sent.count < 1 { await Task.yield() }
+            transport.agentResponds([
+                "jsonrpc": .string("2.0"), "id": .number(1), "result": .object([:])
+            ])
+            transport.agentResponds([
+                "jsonrpc": .string("2.0"), "id": .number(2),
+                "result": .object(["sessionId": .string("s")])
+            ])
+            transport.agentResponds([
+                "jsonrpc": .string("2.0"), "method": .string("session/update"),
+                "params": .object([
+                    "sessionId": .string("s"),
+                    "update": .object([
+                        "sessionUpdate": .string("agent_message_chunk"),
+                        "content": .object(["text": .string("ok")])
+                    ])
+                ])
+            ])
+            transport.agentResponds([
+                "jsonrpc": .string("2.0"), "id": .number(3),
+                "result": .object(["stopReason": .string("end_turn")])
+            ])
+        }
+        let result = try await client.runAndWait(prompt: "hi", timeout: .seconds(2))
+        XCTAssertEqual(result, "ok")
+    }
 }

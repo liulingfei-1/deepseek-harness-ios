@@ -24,7 +24,7 @@
 | 002 | VERIFY | session-log suffix/watermark coordinator 已有单测 | AppModel/真实 endpoint、断网重启 |
 | 003 | VERIFY | append telemetry wrapper 已接线 | 设置、feedback release、真实 sink |
 | 004 | VERIFY | turn outline 已接入轨迹 rail 与分页 | 长会话、冷启动、VoiceOver、真机 |
-| 005 | VERIFY | ACP NDJSON iSH transport 已实现 | 真实 ACP entrypoint、provider/jobs 注册、cancel/exit/reconnect |
+| 005 | VERIFY | ACP NDJSON iSH transport、可配置 provider catalog 与 `runAndWait` 已实现 | 真实 ACP entrypoint、provider/jobs 注册、cancel/exit/reconnect |
 | 006 | VERIFY | reasoning/provider 参数与 listing tool 已有 | 动态 capability、显式 provider、真实多 provider |
 | 007 | VERIFY | Claude/Codex command hook runner 已接入；本批次补齐子 Agent生命周期事件 | 真机 iSH/ACP、超时/取消、诊断轨迹 |
 | 008 | VERIFY | Exa/Perplexity provider 路由与 Keychain origin 已接线 | 设置 UI、401/429/timeout、真实 citations |
@@ -48,7 +48,7 @@
 
 ### P3：ACP、hooks、搜索 provider
 
-- **005 ACP**：在 `ACPSubagentClient.swift` 保持协议层与 transport 分离；为 iSH 提供固定 ACP entrypoint，注册到 Jobs/provider catalog；覆盖 initialize/session/new/prompt/cancel/shutdown、EOF、非零退出、超时和重连。上游 `subagent-acp/src/index.ts` 的 provider 不继承父上下文，移动端要在轨迹中保留 parent/child/run identity。
+- **005 ACP**：在 `ACPSubagentClient.swift` 保持协议层与 transport 分离；已增加 `ACPSubagentProviderDescriptor/Catalog`、自定义 command/args/env transport 和可等待结果接口；下一步为 iSH 提供真实 ACP entrypoint，注册到 Jobs/provider catalog；覆盖 initialize/session/new/prompt/cancel/shutdown、EOF、非零退出、超时和重连。上游 `subagent-acp/src/index.ts` 的 provider 不继承父上下文，移动端要在轨迹中保留 parent/child/run identity。
 - **007 hooks**：Claude 配置可解析 `SubagentStart`/`SubagentStop`；在创建/结算子 Agent 的同一 activation 周期调用 runner。阻断 start 必须不启动 child；stop 失败只写诊断，不伪造 child 结果。
 - **008 搜索**：设置页提供 provider 选择和 Keychain 引用；网络层保留 provider-specific 状态码/限流/超时；引用只接受 provider 返回的 URL/title/snippet，不能把错误响应渲染成 citation。
 
