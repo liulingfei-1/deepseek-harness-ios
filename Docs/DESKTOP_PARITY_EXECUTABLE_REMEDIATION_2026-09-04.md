@@ -50,7 +50,7 @@ git diff --check
 
 ## 3. 变更后执行顺序
 
-1. 运行 `LocalStateServerTests`，确认 14 项通过。
+1. 运行 `LocalStateServerTests`，确认当前路由、schema 与真实 URLSession 覆盖全部通过（当前 15 项）。
 2. 运行固定验收门；失败时记录真实错误文本，不放宽校验。
 3. `git diff --check`、`git status --short --branch`，按单一 PARITY ID 提交并推送。
 4. 回写 `Docs/DESKTOP_PARITY_REMEDIATION.md` 的状态、命令、真实输出与剩余边界。
