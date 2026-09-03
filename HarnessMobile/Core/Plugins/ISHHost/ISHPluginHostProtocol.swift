@@ -653,6 +653,13 @@ struct ISHMarketplaceCatalog: Codable, Sendable, Equatable {
 enum ISHMarketplaceInstallPreference: String, Codable, Sendable, Equatable {
     case hostLoad = "host-load"
     case nativeCompile = "native-compile"
+
+    var label: String {
+        switch self {
+        case .hostLoad: "装载到本地运行时"
+        case .nativeCompile: "原生优先"
+        }
+    }
 }
 
 /// Installation is native-first for every catalog entry. The value is a

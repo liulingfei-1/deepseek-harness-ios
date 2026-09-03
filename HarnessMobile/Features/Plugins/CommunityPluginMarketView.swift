@@ -690,8 +690,14 @@ private struct CommunityPluginCatalogRow: View {
                     Text("·")
                         .accessibilityHidden(true)
                     Label(
-                        item.nativeInstallStrategy?.title ?? ISHMarketplaceNativeInstallStrategy.nativeFirst.title,
-                        systemImage: item.nativeInstallStrategy?.iconName ?? ISHMarketplaceNativeInstallStrategy.nativeFirst.iconName
+                        // Desktop parity (D-010): entries without an explicit
+                        // strategy install into the local host runtime by
+                        // default; only entries tagged native-first show the
+                        // native manifest compile.
+                        item.nativeInstallStrategy?.title
+                            ?? ISHMarketplaceInstallPreference.hostLoad.label,
+                        systemImage: item.nativeInstallStrategy?.iconName
+                            ?? "shippingbox"
                     )
                 }
                 .font(.caption)
@@ -836,12 +842,15 @@ private struct CommunityPluginCatalogDetailView: View {
                                     kind: .market,
                                     location: item.repositoryURL
                                 ),
-                                replace: item.installed
+                                replace: item.installed,
+                                preference: item.nativeInstallStrategy == .nativeFirst
+                                    ? .nativeCompile
+                                    : .hostLoad
                             )
                         }
                     }
                 } message: {
-                    Text("插件不会获得模型密钥。可安全映射的能力走原生工具，其余能力明确标记为 iSH 回退。")
+                    Text("桌面对齐（D-010）：插件默认装载进本地运行时；标记为原生优先的条目走原生工具编译。插件不会获得模型密钥。")
                 }
             } else {
                 ContentUnavailableView("插件不可用", systemImage: "shippingbox")
