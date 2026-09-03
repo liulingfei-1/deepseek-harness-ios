@@ -160,7 +160,7 @@
 | `session-checkpoint-policy` | ✅（核对即对齐：`checkpointSession` + `shouldCheckpointBeforeRun` 请求前落盘） | — |
 | `web-search-exa` / `web-search-perplexity` | ✅ 能力就绪（凭据 thunk 挂起，配置 key 后启用） | `5e8e562` |
 | `util/output-retention` | ✅ 库对齐（字节导向 + UTF-8 边界安全 + 精确省略元数据） | `9bb5eff` |
-| `compaction-tool-result-pruner` | 🟡 库就绪（`ToolResultPruner.prune`，head+marker+tail），**Compactor 集成待单独设计**——移动端压缩是"整单元保留"哲学，需先定义剪枝与摘要流的交互 | `9bb5eff` |
+| `compaction-tool-result-pruner` | ✅ 完整集成：压缩投影内超预算工具结果替换为 head+marker+tail（元数据保留、原文留日志），`pruneOversizedToolResults` + 集成测试 | `f2b12bb` |
 | goal-round UI（轮次/阻塞可见性） | ✅ 工作区 dock 显示 used/cap 徽标与阻塞警示 | `01c23de` |
 | `anonymous-user-id` | ✅ | `08696c2` |
 | `deepseek-llm-api-extensions` | ✅ 注册表 + prepare/accept 语义 | `1e7f50d` |
@@ -180,7 +180,7 @@
 - 以下 4 个经 checkout `dd33417`（改动前）对照**同样失败**，为既有问题、非本轮引入，待后续专项修复：
   - `BackgroundAudioKeepAliveTests.testFailedStartRetries...`：模拟器 AVAudioSession 重试断言（1≠3），音频服务环境敏感
   - `SessionQueryReadModelTests.testTenThousandSessionRebuild...`：sqlite-shm 临时文件删除冲突（NSCocoaErrorDomain 4）
-  - `HarnessMobileConversationModeUITests.testConversationSwitches...`、`HarnessMobileMarkdownUITests.testOneMillionCharacter...`：UI 全量久未跑，与本轮改动面无交集
+  - `HarnessMobileConversationModeUITests.testConversationSwitches...`、`HarnessMobileMarkdownUITests.testOneMillionCharacter...`：经 checkout `dd33417` 对照**同样失败**（已证实为既有问题），与本轮改动面无关
 - SwiftPM 全量（823 项）在本轮全部提交后通过
 | `session-title`（first-prompt/all-prompts/llm） | ✅（核对即对齐：`SessionTitleAutomaticMode` 三档 + 预算/超时/校验） | — |
 | `skill-filesystem` | ✅（核对即对齐：`skillDocuments()` 扫描/frontmatter/发现，仅限私有工作区） | — |
