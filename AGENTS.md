@@ -87,4 +87,4 @@
 - 先读规则、上游契约和现有测试；每个修补保持小步、可回滚，完成一个 parity ID 就更新文档日志。
 - 不覆盖用户已有改动，不执行 `git reset --hard`、`git checkout --` 或宽范围删除；提交前检查 `git status`、`git diff --check`、测试和边界审计。
 - 新增 API key、日志或 fixtures 时只保存凭据引用/脱敏摘要，绝不写入源码、测试输出或导出文件。
-- 动态插件只走审计过的 native manifest 或 iSH Host JS；不动态加载下载的 Swift/机器码，不暴露任意 Web/React 插槽。
+- 插件与桌面版对齐（决策 D-010）：模型可用本地 host 运行时动态 define/run/update/stop/undefine Cordis 包，加载任意 Cordis/npm JS 生态包；执行只在设备本地（iSH node / JavaScriptCore），不引入远程 executor。`.node` 原生 addon、下载的 Swift/framework 二进制、Browser/React client-half 属平台工具链限制（见 `Docs/DESKTOP_FULL_PARITY_2026-09-03.md` §4），报明确平台限制错误，不以安全模型拒绝。

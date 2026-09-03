@@ -27,8 +27,8 @@
 1. API Key 使用 `WhenUnlockedThisDeviceOnly` Keychain，不写入源码、日志、会话、插件或导出。
 2. Provider 地址要求 HTTPS，拒绝 user info、query/fragment 异常和跨源凭据重定向。
 3. 工作区路径必须相对、规范化、位于 sandbox 内，并防止 symlink/archive traversal。
-4. 模型只能调用生产工具目录或验证后的动态贡献；未知工具失败关闭。
-5. iSH/插件不得启动 host 或远程 executor，也不得加载下载的 Swift、framework、native addon 或机器码。
+4. 模型可调用生产工具目录与本地 host 动态贡献（cordis_* 生命周期工具、插件贡献工具）；host 贡献随运行状态同步，未同步的旧贡献失败关闭。
+5. iSH/插件不得启动远程 executor，也不得加载下载的 Swift、framework 或机器码；允许加载 Cordis/npm JS 生态包（决策 D-010）。`.node` 原生 addon 与 Browser client-half 属平台工具链限制，报平台限制错误（见 `Docs/DESKTOP_FULL_PARITY_2026-09-03.md` §4）。
 6. Harness 授权与 iOS 权限独立；任一拒绝都必须阻止操作。
 7. 危险操作使用精确资源范围，不能用设备级通配授权替代确认。
 8. 轨迹、设置、JSON-RPC 和导出在持久化/传输前做大小限制与凭据脱敏。

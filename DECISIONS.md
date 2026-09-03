@@ -14,7 +14,7 @@
 | D-005 | SwiftUI 原生控件与共享语义主题优先 | Accepted | 2026-08-31 |
 | D-006 | `VERIFY` 与真机证据分离 | Accepted | 2026-08-31 |
 | D-007 | `project.yml` 是 Xcode 工程真源 | Accepted | 2026-08-31 |
-| D-008 | 不支持下载原生代码与 Browser Client-half | Accepted | 2026-08-31 |
+| D-008 | 不支持下载原生代码与 Browser Client-half | Superseded by D-010 | 2026-09-03 |
 | D-009 | 12 份控制文档由 `AGENTS.md` 路由 | Accepted | 2026-08-31 |
 
 ## D-001 · 设备内执行边界
@@ -49,9 +49,34 @@ API Key 使用设备专属 Keychain 引用，只有 Provider 请求路径在需�
 
 允许验证后的原生清单和 iSH Host-half JavaScript；不支持 Browser Client-half、React slot、`.node` addon、下载的 Swift/framework 或机器码。无法安全适配时显示明确不兼容。
 
+> **Superseded by D-010（2026-09-03）**：插件面改为桌面级对齐——host 运行时动态 define/run + 任意 Cordis/npm JS 包；native 清单降为可选后端；平台工具链限制报明确错误而非安全拒绝。
+
 ## D-009 · Harness 控制文档
 
 `AGENTS.md` 是控制入口；PRD、设计、流程、前后端、安全、能力、技术、质量、平台、实施和决策文档按变更类型加载。详细事实保留在源码、测试和已有 `Docs/` 真源，控制文档不复制长清单。
+
+## D-010 · 桌面级插件对齐（取代 D-008）
+
+状态：Accepted
+日期：2026-09-03
+取代：D-008
+
+背景：
+D-008 以移动端自设安全模型限制插件面（只走 native 清单或 iSH Host-half JS）。桌面版通过本地 host 运行时（cordis-host-runner + tool-cordis）让模型动态 define/run/update/stop/undefine Cordis 包并加载任意 npm 生态依赖。设备上 host.mjs 已 import 上游全栈，通路存在，差异只在默认路径与工具面仍被旧模型主导。
+
+决策：
+插件面完全对齐桌面：模型可见并可用 `cordis_inspect_list/query/self/define/run/stop/undefine` 7 工具；市场与模型安装默认走本地 host 运行时装载，不再「先 native 编译」；允许加载任意 Cordis/npm JS 生态包。native 声明式清单保留为可选后端，非默认非前置。执行只在设备本地，不引入远程 executor（D-001 不变）。
+
+平台工具链限制（非安全模型）：Browser/React client-half 因无浏览器容器不装载；`.node` 原生 addon、下载的 Swift/framework 二进制受 iOS/iSH 工具链限制；均报明确平台限制错误。
+
+后果：
+AGENTS.md、SECURITY_GUIDELINES.md 相应条款按本文档修订（见 `Docs/DESKTOP_FULL_PARITY_2026-09-03.md` §1）。默认路径改变影响市场安装 UI 与安装协调器行为。native 编译相关代码保留可选、逐步退出默认路由。
+
+验证：
+P1：模拟器 iSH host 运行，模型工具目录出现 7 工具，`cordis_inspect_list` 真实返回注册表。
+P2：市场安装走 host 装载；真实插件 define→run→stop 全链路通过。
+P3：带 npm 依赖的真实 cordis 插件安装成功。
+
 
 ## 新决策模板
 
