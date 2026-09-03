@@ -22,7 +22,7 @@
 |---|---|---|---|
 | 001 | VERIFY | DeepSeek request extension 已接入请求序列化；结构化 body/session/purpose、取消、并发 preparation、幂等 acceptance 和真实 URLProtocol 2xx wire fixture 已验证 | 真实 provider/插件注册、重试和回放 |
 | 002 | VERIFY | `dsh_session_log` provider 已接入 DeepSeek request registry；canonical suffix、acceptance watermark 与 malformed 数据校验均有单测 | 真实 endpoint、断网重启、服务端 ack 与 iPhone 16 Pro |
-| 003 | VERIFY | append telemetry wrapper 已接线 | 设置、feedback release、真实 sink |
+| 003 | VERIFY | append telemetry wrapper 已接线；feedback-only append 会调用 `releasePending()`，专项 6 tests 通过 | 设置、真实 feedback/OTLP sink、flush/shutdown 与真机 |
 | 004 | VERIFY | turn outline 已接入轨迹 rail 与分页 | 长会话、冷启动、VoiceOver、真机 |
 | 005 | VERIFY | ACP NDJSON iSH transport、可配置 provider catalog 与 `subagent`/Jobs 路径已接线；取消传播和 transport EOF/退出即时结算已有回归测试 | 真实 ACP entrypoint、持久化 provider 选择、非零退出/重连 |
 | 006 | VERIFY | reasoning/provider 参数与 listing tool 已有 | 动态 capability、显式 provider、真实多 provider |

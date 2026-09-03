@@ -21,13 +21,25 @@ final class SessionTelemetryTests: XCTestCase {
 
     private final class MemorySink: SessionTelemetrySink, @unchecked Sendable {
         var records: [SessionTelemetry.Record] = []
+        var releaseCount = 0
+        let capturePolicy: SessionTelemetryCapturePolicy
         private let lock = NSLock()
+        init(capturePolicy: SessionTelemetryCapturePolicy = .live) {
+            self.capturePolicy = capturePolicy
+        }
         func emit(_ record: SessionTelemetry.Record) {
             lock.lock(); defer { lock.unlock() }
             records.append(record)
         }
         func flush() async {}
         func shutdown() async {}
+        private func incrementReleaseCount() {
+            lock.lock(); defer { lock.unlock() }
+            releaseCount += 1
+        }
+        func releasePending() async {
+            incrementReleaseCount()
+        }
     }
 
     private func jobject(_ json: JSONValue?) -> [String: JSONValue]? {
@@ -187,5 +199,72 @@ final class SessionTelemetryTests: XCTestCase {
             body: .object([:])
         ))
         XCTAssertFalse(sink.mode == .full)
+    }
+
+    func testFeedbackAppendReleasesFeedbackOnlyTelemetry() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("telemetry-feedback-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let base = SessionTrajectoryRepository(root: root)
+        let sink = MemorySink(capturePolicy: .onDemand)
+        let persistence = TelemetrySessionPersistence(base: base, sink: sink)
+        let sessionID = UUID()
+        _ = try await persistence.append(
+            SessionEventDraft(
+                type: SessionEventVocabulary.userMessage,
+                data: .object(["content": .string("before feedback")])
+            ),
+            sessionID: sessionID
+        )
+        XCTAssertTrue(sink.records.isEmpty)
+        _ = try await persistence.append(
+            SessionEventDraft(
+                type: "feedback/record",
+                data: .object(["rating": .string("positive")])
+            ),
+            sessionID: sessionID
+        )
+        XCTAssertEqual(sink.releaseCount, 1)
+        XCTAssertEqual(sink.records.count, 2)
+        _ = try await persistence.append(
+            SessionEventDraft(
+                type: "feedback/record",
+                data: .object(["rating": .string("negative")])
+            ),
+            sessionID: sessionID
+        )
+        XCTAssertEqual(sink.releaseCount, 2)
+        XCTAssertEqual(sink.records.count, 3)
+    }
+
+    func testFeedbackOnlySinkDeliversConfiguredOTLPEndpoint() async {
+        final class DeliveryCounter: @unchecked Sendable {
+            private let lock = NSLock()
+            private var value = 0
+            func increment() {
+                lock.lock(); defer { lock.unlock() }
+                value += 1
+            }
+            func count() -> Int {
+                lock.lock(); defer { lock.unlock() }
+                return value
+            }
+        }
+        let counter = DeliveryCounter()
+        let sink = SessionTelemetryOtelSink(configuration: .init(
+            mode: .feedbackOnly,
+            endpoint: URL(string: "https://telemetry.example.test/v1/logs"),
+            delivery: { _, _ in counter.increment() },
+            outputDirectory: FileManager.default.temporaryDirectory
+        ))
+        sink.emit(SessionTelemetry.Record(
+            channel: .ledger,
+            time: 0,
+            severity: .info,
+            attributes: [:],
+            body: .object([:])
+        ))
+        await sink.releasePending()
+        XCTAssertEqual(counter.count(), 1)
     }
 }

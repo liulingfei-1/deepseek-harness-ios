@@ -1,12 +1,26 @@
 import Foundation
 
+enum SessionTelemetryCapturePolicy: Sendable {
+    case live
+    case onDemand
+    case disabled
+}
+
 /// The minimum backend contract. `emit` must be a non-blocking enqueue —
 /// the coordinator calls it from the append hot path. Errors thrown here are
 /// contained by the coordinator and never reach the agent loop.
 protocol SessionTelemetrySink: Sendable {
+    var capturePolicy: SessionTelemetryCapturePolicy { get }
     func emit(_ record: SessionTelemetry.Record)
+    /// Releases records parked by a feedback-only backend after consent is committed.
+    func releasePending() async
     func flush() async
     func shutdown() async
+}
+
+extension SessionTelemetrySink {
+    var capturePolicy: SessionTelemetryCapturePolicy { .live }
+    func releasePending() async {}
 }
 
 /// Mirrors upstream `dsh-session-telemetry`: the capture side of session
@@ -117,12 +131,14 @@ enum SessionTelemetry {
 
     /// On-demand canonical capture: projects a whole event window and runs the
     /// redaction waterfall, dropping records a redactor rejects.
+    @discardableResult
     static func capture(
         events: [SessionEvent],
         sessionID: UUID,
         redactors: [Redactor] = [],
         sink: SessionTelemetrySink
-    ) {
+    ) -> UInt64? {
+        var lastDeliveredSequence: UInt64?
         for event in events {
             guard var record = project(event, sessionID: sessionID) else { continue }
             var withheld = false
@@ -136,7 +152,9 @@ enum SessionTelemetry {
             }
             guard !withheld else { continue }
             sink.emit(record)
+            lastDeliveredSequence = event.seq
         }
+        return lastDeliveredSequence
     }
 }
 
@@ -158,8 +176,8 @@ final class SessionTelemetryOtelSink: SessionTelemetrySink, @unchecked Sendable 
     struct Configuration: Sendable {
         var mode: Mode = .disabled
         /// OTLP/HTTP JSON endpoint. When set together with `delivery`, FULL
-        /// mode posts released batches there; otherwise batches are written
-        /// to `outputDirectory` as OTLP/JSON files.
+        /// and FEEDBACK_ONLY modes post released batches there; otherwise
+        /// batches are written to `outputDirectory` as OTLP/JSON files.
         var endpoint: URL?
         /// The HTTP transport closure lives outside this file because raw
         /// network I/O is confined to the audited network boundary.
@@ -191,6 +209,14 @@ final class SessionTelemetryOtelSink: SessionTelemetrySink, @unchecked Sendable 
     }
 
     var mode: Mode { configuration.mode }
+
+    var capturePolicy: SessionTelemetryCapturePolicy {
+        switch configuration.mode {
+        case .full: .live
+        case .feedbackOnly: .onDemand
+        case .disabled: .disabled
+        }
+    }
 
     func emit(_ record: SessionTelemetry.Record) {
         guard configuration.mode == .full || configuration.mode == .feedbackOnly else {
@@ -237,8 +263,7 @@ final class SessionTelemetryOtelSink: SessionTelemetrySink, @unchecked Sendable 
         let payload = Self.otlpJSON(records: batch, serviceName: configuration.serviceName)
         releasedBatchCount += 1
         if let endpoint = configuration.endpoint,
-           let delivery = configuration.delivery,
-           configuration.mode == .full {
+           let delivery = configuration.delivery {
             await delivery(endpoint, payload)
         } else {
             let file = configuration.outputDirectory
@@ -337,6 +362,7 @@ final class TelemetrySessionPersistence: SessionPersistence, @unchecked Sendable
     private let base: any SessionPersistence
     private let sink: SessionTelemetrySink
     private let redactors: [SessionTelemetry.Redactor]
+    private let handoffCursors = TelemetryHandoffCursorStore()
 
     init(
         base: any SessionPersistence,
@@ -354,7 +380,26 @@ final class TelemetrySessionPersistence: SessionPersistence, @unchecked Sendable
 
     func append(_ draft: SessionEventDraft, sessionID: UUID) async throws -> SessionEvent {
         let event = try await base.append(draft, sessionID: sessionID)
-        SessionTelemetry.capture(events: [event], sessionID: sessionID, redactors: redactors, sink: sink)
+        switch sink.capturePolicy {
+        case .live:
+            SessionTelemetry.capture(events: [event], sessionID: sessionID, redactors: redactors, sink: sink)
+        case .onDemand where event.type == "feedback/record":
+            let after = await handoffCursors.value(for: sessionID)
+            let events = try await base.allEvents(sessionID: sessionID).filter { candidate in
+                (after.map { sequence in candidate.seq > sequence } ?? true) && candidate.seq <= event.seq
+            }
+            if let deliveredThrough = SessionTelemetry.capture(
+                events: events,
+                sessionID: sessionID,
+                redactors: redactors,
+                sink: sink
+            ) {
+                await handoffCursors.advance(deliveredThrough, for: sessionID)
+            }
+            await sink.releasePending()
+        case .onDemand, .disabled:
+            break
+        }
         return event
     }
 
@@ -400,5 +445,17 @@ final class TelemetrySessionPersistence: SessionPersistence, @unchecked Sendable
 
     func resetAll() async throws {
         try await base.resetAll()
+    }
+}
+
+private actor TelemetryHandoffCursorStore {
+    private var cursors: [UUID: UInt64] = [:]
+
+    func value(for sessionID: UUID) -> UInt64? {
+        cursors[sessionID]
+    }
+
+    func advance(_ sequence: UInt64, for sessionID: UUID) {
+        cursors[sessionID] = max(cursors[sessionID] ?? 0, sequence)
     }
 }

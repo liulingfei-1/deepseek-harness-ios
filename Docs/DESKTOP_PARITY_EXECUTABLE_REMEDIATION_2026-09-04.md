@@ -25,7 +25,7 @@ git diff --check
 |---|---|---|---|---|
 | PARITY-001 | DeepSeek request extension 注册与 provider wire serializer | `DeepSeekLlmAPIExtensionRegistry` → request serializer | VERIFY | 已补结构化 body/session/purpose、并发 preparation、取消、幂等 acceptance 与真实 URLProtocol 2xx wire fixture；仍需真实 provider/插件注册、重试回放和真机证据 |
 | PARITY-002 | `session-log-deepseek` delivery-accepted + suffix/watermark | `SessionLogDeepSeekExtensionProvider` → canonical trajectory → DeepSeek request registry | VERIFY | 已接入可选 `dsh_session_log` provider、suffix/watermark、2xx acceptance 事件和 malformed watermark 拒绝；仍缺真实 endpoint、断网重启和真机证据 |
-| PARITY-003 | telemetry ledger + OTLP sink | `SessionTelemetry`/`SessionTelemetryOtelSink` | VERIFY | 真实 feedback sink 与设置 UI；默认关闭保持可见 |
+| PARITY-003 | telemetry ledger + OTLP sink | `SessionTelemetry`/`TelemetrySessionPersistence`/`SessionTelemetryOtelSink` | VERIFY | live append 与 feedback-only canonical suffix replay/cursor 已接线；仍缺设置 UI、真实 OTLP sink/endpoint 与真机证据，默认关闭保持可见 |
 | PARITY-004 | turn outline/trajectory rail | `SessionTurnOutline` + Chat rail | VERIFY | 长会话、分页、VoiceOver、真机 |
 | PARITY-005 | ACP `initialize → session/new → session/prompt → session/update` | `ACPSubagentClient`、iSH transport、provider catalog | VERIFY | 已补取消传播与 transport EOF/退出即时结算；仍缺真实 ACP entrypoint、重连、持久 provider 选择和真机证据 |
 
@@ -58,6 +58,14 @@ git diff --check
 
 - [x] 修复 `LocalStateServer` 单次 `NWConnection.receive` 导致的分片 HTTP 请求误报 400；现在按 header 与 `Content-Length` 聚合完整请求后再路由。
 - [x] 真实 `URLSession` loopback webhook 回归通过，保留 64 KiB 请求上限。
+
+### PARITY-003 本批次逐步修改清单
+
+- [x] `SessionTelemetrySink` 增加 `capturePolicy` 与异步 `releasePending()` 契约并提供默认实现，保持既有 sink 向后兼容。
+- [x] `TelemetrySessionPersistence` 在 `live` 模式逐条 capture；`onDemand` 模式只在 canonical `feedback/record` 提交后读取未交接的事件 suffix，按 cursor 重放并释放。
+- [x] 新增异步回归测试验证反馈前不发送、首次 feedback 重放完整 prefix、后续 feedback 只发送 suffix、配置 OTLP endpoint 可交付且各自只释放一次；修复 Swift 6 测试夹具的 async/锁隔离问题。
+- [x] 固定门复跑：SwiftPM **923 tests, 5 skipped, 0 failures**；Xcode arm64 Simulator **BUILD SUCCEEDED**；Plugin Host check、Node smoke、设备-only audit、upstream parity、`git diff --check` 均通过。
+- [ ] 设置 UI、真实 feedback/OTLP endpoint、flush/shutdown 生命周期和 iPhone 16 Pro 证据；未取得前保持 `VERIFY`。
 
 ## 2. PARITY-013 本批次逐步修改清单
 
