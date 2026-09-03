@@ -224,6 +224,8 @@ git diff --check
 | PARITY-004 turn outline UI | VERIFY | 全日志 outline 折叠接入 AppModel；Trajectory rail 支持预览、按 seq 分页加载和滚动定位；4 项 outline tests 通过；Simulator 被既有 Device-only tool audit 的 URLRequest 误报阻断，真机 UI 未验收 |
 | PARITY-005 ACP transport | TODO | 客户端 wire 已有 fixture，真实 iSH stdio/provider 注册仍待实现 |
 | PARITY-008 Exa/Perplexity | VERIFY | AppModel 统一路由、Keychain origin 存取和显式 provider 选择已接入；6 个 provider mapping tests 通过；设置 UI、真实 API 与真机引用仍待验证 |
-| PARITY-009..014 | TODO | 已完成源码/上游定位并写入本计划，尚未宣称实现 |
+| PARITY-009 agent team | TODO | 已完成源码/上游定位并写入本计划，尚未宣称实现 |
+| PARITY-010 LocalStateServer | VERIFY | AppModel 启动 loopback server 并注册 health/status/sessions；4 个路由测试、Xcode arm64 Simulator build 通过；动态 controller 与真机 HTTP 仍待验证 |
+| PARITY-011..014 | TODO | 已完成源码/上游定位并写入本计划，尚未宣称实现 |
 
 本表只记录可复核证据，不把“计划存在”或“源码类型存在”当作能力完成。

@@ -546,6 +546,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
     @ObservationIgnored let runtimeTelemetryStore = RuntimeTelemetryStore()
     @ObservationIgnored private let runtimeHangWatchdog: RuntimeHangWatchdog
     @ObservationIgnored private let runtimeMetricKitSubscriber: RuntimeMetricKitSubscriber
+    @ObservationIgnored private var localStateServer: LocalStateServer?
     @ObservationIgnored private let backgroundResumeCoordinator = SessionBackgroundResumeCoordinator()
     @ObservationIgnored let terminalProvider: any ISHTerminalProviding
     @ObservationIgnored let mcpRegistry: MCPClientRegistry
@@ -705,6 +706,11 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         backgroundKeepAliveCoordinator.onStateChange = { [weak self] _ in
             self?.refreshBackgroundSystemProjection()
         }
+        localStateServer = LocalStateServer(endpoints: [
+            .init(path: "/status", handler: { #"{"status":"ok","source":"harness-mobile"}"# }),
+            .init(path: "/sessions", handler: { #"{"sessions":[]}"# })
+        ])
+        localStateServer?.start()
     }
 
 #if DEBUG
@@ -840,6 +846,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         }
 #endif
     }
+
 
 #if os(iOS) && canImport(BackgroundTasks)
     /// Register app-wide background handlers from the SwiftUI app lifecycle.
