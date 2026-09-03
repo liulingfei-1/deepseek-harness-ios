@@ -1709,6 +1709,140 @@ final class HarnessMobilePluginManagementUITests: XCTestCase {
         add(screenshot)
     }
 
+
+    // MARK: - Live smoke (simulator, real provider)
+
+    /// Live-route configuration shared with the simulator through the host
+    /// temp directory (simulators share the host filesystem, so a file beats
+    /// environment variables that never reach the on-device test runner).
+    private struct LiveRouteFile: Codable {
+        let baseURL: String
+        let model: String
+        let apiKey: String
+    }
+
+    private func liveRouteConfig() -> LiveRouteFile? {
+        // xcodebuild forwards host environment variables prefixed with
+        // TEST_RUNNER_ to the on-device test runner.
+        let environment = ProcessInfo.processInfo.environment
+        let route = LiveRouteFile(
+            baseURL: environment["UITEST_BASE_URL"] ?? "",
+            model: environment["UITEST_MODEL"] ?? "",
+            apiKey: environment["UITEST_API_KEY"] ?? ""
+        )
+        guard !route.apiKey.isEmpty else { return nil }
+        return route
+    }
+
+    /// Full chat round trip through the configured route. Skips unless
+    /// UITEST_API_KEY is set, so normal CI and local runs are unaffected.
+    func testLiveChatRoundTripWhenExplicitlyEnabled() throws {
+        guard let route = liveRouteConfig() else {
+            throw XCTSkip("Export TEST_RUNNER_UITEST_API_KEY (optionally UITEST_BASE_URL/UITEST_MODEL) for the live smoke test.")
+        }
+        let apiKey = route.apiKey
+
+        let app = XCUIApplication()
+        addTeardownBlock { app.terminate() }
+        app.launchArguments = [
+            "-reset-persistent-state-for-ui-testing",
+            "-bootstrap-configuration-for-ui-testing",
+            "-disable-animations-for-ui-testing",
+        ]
+        app.launchEnvironment["UITEST_BASE_URL"] = route.baseURL
+        app.launchEnvironment["UITEST_MODEL"] = route.model
+        app.launchEnvironment["UITEST_API_KEY"] = apiKey
+        app.launch()
+
+        openConversation(in: app)
+
+        let field = app.descendants(matching: .any)["chat-input"]
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        field.tap()
+        field.typeText("Reply with exactly OK")
+
+        app.buttons["chat-send-button"].tap()
+
+        // The assistant reply must arrive through the live route within the
+        // streaming budget.
+        let reply = app.descendants(matching: .any)["message-assistant"].firstMatch
+        XCTAssertTrue(reply.waitForExistence(timeout: 120))
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "live-chat-roundtrip"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
+    /// Native-first plugin install from the built-in community catalog. The
+    /// marketplace compiler issues a real model call; the plugin must end up
+    /// installed (native backend preferred, iSH fallback allowed).
+    func testLiveNativePluginInstallWhenExplicitlyEnabled() throws {
+        guard let route = liveRouteConfig() else {
+            throw XCTSkip("Export TEST_RUNNER_UITEST_API_KEY (optionally UITEST_BASE_URL/UITEST_MODEL) for the live plugin install test.")
+        }
+        let apiKey = route.apiKey
+
+        let app = XCUIApplication()
+        addTeardownBlock { app.terminate() }
+        app.launchArguments = [
+            "-reset-persistent-state-for-ui-testing",
+            "-bootstrap-configuration-for-ui-testing",
+            "-disable-animations-for-ui-testing",
+            "-present-plugin-market-for-ui-testing",
+        ]
+        app.launchEnvironment["UITEST_BASE_URL"] = route.baseURL
+        app.launchEnvironment["UITEST_MODEL"] = route.model
+        app.launchEnvironment["UITEST_API_KEY"] = apiKey
+        app.launch()
+
+        XCTAssertTrue(app.navigationBars["社区插件"].waitForExistence(timeout: 15))
+        // A fresh reset starts with an empty directory; the refresh control
+        // repopulates it within a few seconds on a live network.
+        let firstEntry = app.staticTexts["Git Tools"]
+        if !firstEntry.waitForExistence(timeout: 10) {
+            app.buttons["刷新目录"].firstMatch.tap()
+        }
+        XCTAssertTrue(firstEntry.waitForExistence(timeout: 20))
+        // Git Tools starts uninstalled in a reset container, so this drives
+        // the full native-compilation path end to end.
+        XCTAssertTrue(app.staticTexts["Git Tools"].waitForExistence(timeout: 10))
+
+        app.staticTexts["Git Tools"].tap()
+
+        // The detail sheet gates the install behind a confirmation dialog;
+        // the button label reflects the strategy (原生优先安装 / iSH 安装).
+        let install = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS %@", "安装")
+        ).firstMatch
+        XCTAssertTrue(install.waitForExistence(timeout: 10))
+        install.tap()
+        let confirm = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS %@", "安装")
+        ).firstMatch
+        if confirm.waitForExistence(timeout: 3) {
+            confirm.tap()
+        }
+
+        // Compilation is a real model round trip; allow a generous budget.
+        let installedLabel = app.staticTexts.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "已安装")
+        ).firstMatch
+        let deadline = Date().addingTimeInterval(300)
+        var sawInstalled = false
+        while Date() < deadline {
+            if installedLabel.exists {
+                sawInstalled = true
+                break
+            }
+            sleep(5)
+        }
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "live-native-plugin-install"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        XCTAssertTrue(sawInstalled, "plugin did not reach installed state within 300s")
+    }
+
     func testLiveMarketplaceCatalogRPCOnDevice() throws {
         try XCTSkipUnless(
             ProcessInfo.processInfo.environment["HARNESS_RUN_LIVE_ISH_NETWORK_TEST"] == "1",

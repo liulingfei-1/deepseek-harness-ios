@@ -56,9 +56,21 @@ struct DeepSeekHarnessMobileApp: App {
                     }
                     if ProcessInfo.processInfo.arguments.contains("-bootstrap-configuration-for-ui-testing") {
                         do {
+                            var configuration = AgentConfiguration()
+                            // Optional live-route override so a simulator run
+                            // can exercise real model calls (marketplace
+                            // compilation, chat) through a custom provider.
+                            let environment = ProcessInfo.processInfo.environment
+                            if let baseURL = environment["UITEST_BASE_URL"], !baseURL.isEmpty {
+                                configuration.baseURL = baseURL
+                            }
+                            if let model = environment["UITEST_MODEL"], !model.isEmpty {
+                                configuration.model = model
+                            }
+                            let apiKey = environment["UITEST_API_KEY"] ?? "ui-test-placeholder-key"
                             try await model.saveConfiguration(
-                                AgentConfiguration(),
-                                apiKey: "ui-test-placeholder-key"
+                                configuration,
+                                apiKey: apiKey
                             )
                         } catch {
                             model.presentError(

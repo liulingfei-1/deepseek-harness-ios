@@ -261,6 +261,7 @@ $(SRCROOT)/HarnessMobileTests/MobileSkillRegistryTests.swift
 $(SRCROOT)/HarnessMobileTests/NativeAgentPluginTests.swift
 $(SRCROOT)/HarnessMobileTests/NativeToolEventPresentationTests.swift
 $(SRCROOT)/HarnessMobileTests/NativeMarkdownTextTests.swift
+$(SRCROOT)/HarnessMobileTests/NativeAgentPluginCompilerLiveTests.swift
 $(SRCROOT)/HarnessMobileTests/PhonePermissionsTests.swift
 $(SRCROOT)/HarnessMobileTests/PluginMarketplaceToolTests.swift
 $(SRCROOT)/HarnessMobileTests/PluginInstallCoordinatorTests.swift
