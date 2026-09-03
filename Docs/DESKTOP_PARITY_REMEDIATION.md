@@ -50,7 +50,7 @@
 - **Simulator**：SwiftPM arm64 编译通过；真实 API endpoint 尚未接入 AppModel。
 - **iPhone 16 Pro**：未验证服务端 accepted cursor、断网重试和冷启动水位恢复，保留 `VERIFY`。
 - **最新接线（2026-09-04）**：新增 `SessionLogDeepSeekExtensionProvider`，从 canonical `SessionPersistence` 折叠 `delivery-accepted` watermark，向 `DeepSeekLlmAPIExtensionRegistry` 提供 `dsh_session_log` suffix，并在 2xx acceptance 后追加 canonical acceptance event；`AppModel(sessionLogEnabled:)` 提供显式接线，默认关闭。
-- **专项验证**：`SessionTrajectoryRepositoryTests` + `DeepSeekLlmAPIExtensionRegistryTests` → **25 tests passed**，覆盖 suffix、acceptance 幂等、第二次 watermark 和 malformed acceptance；固定门本轮 SwiftPM **920 tests, 5 skipped, 1 existing flaky loopback failure**，修复分片 HTTP 请求聚合后 `LocalStateServerTests` **15 tests passed**，Xcode arm64 Simulator **BUILD SUCCEEDED**。
+- **专项验证**：`SessionTrajectoryRepositoryTests` + `DeepSeekLlmAPIExtensionRegistryTests` → **25 tests passed**，覆盖 suffix、acceptance 幂等、第二次 watermark 和 malformed acceptance；修复分片 HTTP 请求聚合后固定门 SwiftPM **920 tests, 5 skipped, 0 failures**，`LocalStateServerTests` **15 tests passed**，Xcode arm64 Simulator **BUILD SUCCEEDED**。
 - **剩余动作**：将 provider 绑定用户显式 endpoint 生命周期，补真实服务端 ack、断网/重启和 iPhone 16 Pro 证据；缺少这些证据时保持 `VERIFY`。
 
 ### PARITY-010 · loopback HTTP 分片请求修复（2026-09-04）
