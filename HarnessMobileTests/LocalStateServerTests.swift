@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import XCTest
 #if canImport(HarnessMobile)
 @testable import HarnessMobile
@@ -137,5 +138,33 @@ final class LocalStateServerTests: XCTestCase {
         let newAcceptance = await reloaded.accept("delivery-new")
         XCTAssertFalse(duplicateAcceptance)
         XCTAssertTrue(newAcceptance)
+    }
+
+    func testRouteValidatesOptionalGitHubHMACSignature() {
+        let body = #"{"action":"opened"}"#
+        let key = SymmetricKey(data: Data("test-secret".utf8))
+        let digest = HMAC<SHA256>.authenticationCode(for: Data(body.utf8), using: key)
+        let signature = digest.map { String(format: "%02x", $0) }.joined()
+        let request = "POST /webhook/github HTTP/1.1\r\n"
+            + "X-GitHub-Delivery: delivery-3\r\n"
+            + "X-GitHub-Event: issues\r\n"
+            + "X-Hub-Signature-256: sha256=\(signature)\r\n\r\n"
+            + body
+        let accepted = LocalStateServer.route(
+            request: request,
+            endpoints: [:],
+            webhookHandler: nil,
+            webhookSecret: "test-secret"
+        )
+        XCTAssertEqual(accepted.status, 202)
+
+        let invalidSignature = (signature.first == "0" ? "1" : "0") + String(signature.dropFirst())
+        let rejected = LocalStateServer.route(
+            request: request.replacingOccurrences(of: signature, with: invalidSignature),
+            endpoints: [:],
+            webhookHandler: nil,
+            webhookSecret: "test-secret"
+        )
+        XCTAssertEqual(rejected.status, 401)
     }
 }

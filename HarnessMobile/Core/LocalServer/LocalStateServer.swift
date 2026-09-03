@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import CryptoKit
 
 /// Synchronous projection shared by the main-actor model and Network queue.
 /// The lock keeps endpoint handlers independent from actor isolation.
@@ -45,11 +46,13 @@ final class LocalStateServer: @unchecked Sendable {
     private let queue = DispatchQueue(label: "local-state-server", qos: .utility)
     private let endpoints: [String: Endpoint]
     private let webhookHandler: (@Sendable (LocalWebhookEvent) -> Void)?
+    private let webhookSecret: String?
 
     init?(
         endpoints: [Endpoint],
         port: UInt16 = 0,
-        webhookHandler: (@Sendable (LocalWebhookEvent) -> Void)? = nil
+        webhookHandler: (@Sendable (LocalWebhookEvent) -> Void)? = nil,
+        webhookSecret: String? = nil
     ) {
         guard let listener = try? NWListener(
             using: .tcp,
@@ -61,6 +64,7 @@ final class LocalStateServer: @unchecked Sendable {
         self.listener = listener
         self.endpoints = Dictionary(uniqueKeysWithValues: endpoints.map { ($0.path, $0) })
         self.webhookHandler = webhookHandler
+        self.webhookSecret = webhookSecret
     }
 
     var port: UInt16? {
@@ -95,7 +99,8 @@ final class LocalStateServer: @unchecked Sendable {
     static func route(
         request: String,
         endpoints: [String: Endpoint],
-        webhookHandler: (@Sendable (LocalWebhookEvent) -> Void)?
+        webhookHandler: (@Sendable (LocalWebhookEvent) -> Void)?,
+        webhookSecret: String? = nil
     ) -> (status: Int, body: String) {
         let methodLine = request.split(separator: "\r\n", maxSplits: 1).first.map(String.init)
         guard let methodLine,
@@ -128,6 +133,14 @@ final class LocalStateServer: @unchecked Sendable {
                   ) else {
                 return (400, #"{"error":"invalid github webhook"}"#)
             }
+            if let webhookSecret,
+               !LocalWebhookParser.verifyGitHubSignature(
+                   payload: Data(body.utf8),
+                   signature: headers["x-hub-signature-256"],
+                   secret: webhookSecret
+               ) {
+                return (401, #"{"error":"invalid github signature"}"#)
+            }
             webhookHandler?(event)
             return (202, #"{"accepted":true}"#)
         }
@@ -155,7 +168,8 @@ final class LocalStateServer: @unchecked Sendable {
             let routed = Self.route(
                 request: request,
                 endpoints: self.endpoints,
-                webhookHandler: self.webhookHandler
+                webhookHandler: self.webhookHandler,
+                webhookSecret: self.webhookSecret
             )
             let body = routed.body
             let headers = "HTTP/1.1 \(routed.status)\r\n"
@@ -193,6 +207,21 @@ enum LocalWebhookParser {
               !name.isEmpty, name.utf8.count <= 128,
               payload.objectValue != nil else { return nil }
         return LocalWebhookEvent(deliveryID: id, eventName: name, payload: payload)
+    }
+
+    static func verifyGitHubSignature(
+        payload: Data,
+        signature: String?,
+        secret: String
+    ) -> Bool {
+        guard let signature,
+              signature.hasPrefix("sha256="),
+              signature.count == 71,
+              signature.dropFirst(7).allSatisfy({ $0.isHexDigit }) else { return false }
+        let key = SymmetricKey(data: Data(secret.utf8))
+        let digest = HMAC<SHA256>.authenticationCode(for: payload, using: key)
+        let expected = digest.map { String(format: "%02x", $0) }.joined()
+        return signature.dropFirst(7).caseInsensitiveCompare(expected) == .orderedSame
     }
 }
 
