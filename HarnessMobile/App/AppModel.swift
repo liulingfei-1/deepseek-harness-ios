@@ -531,6 +531,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
     @ObservationIgnored let nativeAgentPluginStore: NativeAgentPluginStore
     @ObservationIgnored let pluginInstallCoordinator: PluginInstallCoordinator
     @ObservationIgnored let modelCatalogDiscoverer: any ModelCatalogDiscovering
+    @ObservationIgnored let providerCapabilityCache = ProviderCapabilityCache()
     @ObservationIgnored let traceStore: HarnessTraceStore
     @ObservationIgnored let trajectoryRepository: any SessionPersistence
     @ObservationIgnored private let sessionTelemetrySink: SessionTelemetryOtelSink
@@ -550,6 +551,10 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
     @ObservationIgnored private let localWebhookDeduplicator = LocalWebhookDeduplicator(
         storageURL: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("HarnessMobile/Webhooks/github-deliveries.json")
+    )
+    @ObservationIgnored private let localWebhookRuleRegistry = LocalWebhookRuleRegistry(
+        storageURL: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("HarnessMobile/Webhooks/rules.json")
     )
     @ObservationIgnored private var loadedHookConfiguration: AgentHookConfiguration?
     @ObservationIgnored private var localStateServer: LocalStateServer?
@@ -724,23 +729,61 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         }
     }
 
-    /// Turn an accepted local webhook delivery into a durable, inspectable job.
-    /// Delivery IDs are claimed before starting work so retries cannot create
-    /// duplicate jobs; the payload remains available through `job_output`.
+    /// Turn an accepted local webhook delivery into durable, inspectable jobs.
+    /// Delivery IDs are claimed before admission; failed admission releases
+    /// the claim so the sender can retry without duplicating successful jobs.
     private func handleLocalWebhook(_ event: LocalWebhookEvent) async {
-        guard await localWebhookDeduplicator.accept(event.deliveryID) else { return }
+        guard await localWebhookDeduplicator.claim(event.deliveryID) else { return }
         let ownerSession = activeSessionID?.uuidString.lowercased()
-        let output = event.payload.displayText
-        _ = try? await jobRegistry.start(
-            kind: "webhook",
-            label: event.eventName,
-            ownerSession: ownerSession,
-            outputLimitBytes: 64 * 1_024
-        ) { emit in
-            await emit(output)
-            return HarnessJobOutcome(status: .completed, output: output)
+        var rules = await localWebhookRuleRegistry.matching(event)
+        if rules.isEmpty { rules = [.defaultJob(for: event)] }
+        var admitted = false
+        for rule in rules {
+            var jobID: String?
+            for attempt in 1...rule.maximumAttempts {
+                do {
+                    jobID = try await jobRegistry.start(
+                        kind: "webhook",
+                        label: rule.jobLabel,
+                        ownerSession: ownerSession,
+                        outputLimitBytes: 64 * 1_024
+                    ) { emit in
+                        let output = event.payload.displayText
+                        await emit(output)
+                        return HarnessJobOutcome(status: .completed, output: output)
+                    }
+                    break
+                } catch {
+                    if attempt < rule.maximumAttempts {
+                        try? await Task.sleep(for: .milliseconds(50 * attempt))
+                    }
+                }
+            }
+            if jobID != nil {
+                admitted = true
+                if rule.wakeActiveSession, ownerSession != nil {
+                    _ = await send(rule.renderedPrompt(for: event))
+                }
+            }
+        }
+        if admitted {
+            await localWebhookDeduplicator.complete(event.deliveryID)
+        } else {
+            await localWebhookDeduplicator.requeue(event.deliveryID)
         }
         await refreshVisibleJobs()
+    }
+
+    func localWebhookRules() async -> [LocalWebhookRule] {
+        await localWebhookRuleRegistry.list()
+    }
+
+    func saveLocalWebhookRule(_ rule: LocalWebhookRule) async throws {
+        try await localWebhookRuleRegistry.upsert(rule)
+    }
+
+    func deleteLocalWebhookRule(id: String) async throws {
+        try await localWebhookRuleRegistry.remove(id: id)
     }
 
     static let localWebhookCredentialOrigin = "https://local.harness-mobile/webhook/github"

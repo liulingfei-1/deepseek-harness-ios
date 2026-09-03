@@ -12,6 +12,34 @@ final class ProviderModelDiscoveryTests: XCTestCase {
         super.tearDown()
     }
 
+    func testProviderCapabilityCacheReplacesSnapshotOnRefreshAndRemovesProfile() async {
+        let cache = ProviderCapabilityCache()
+        let first = ModelCatalogSnapshot(
+            providerID: .openAI,
+            source: .remote,
+            catalogVersion: "v1",
+            fetchedAt: Date(timeIntervalSince1970: 1),
+            models: [ProviderModel(id: "gpt-5")]
+        )
+        let second = ModelCatalogSnapshot(
+            providerID: .openAI,
+            source: .remote,
+            catalogVersion: "v2",
+            fetchedAt: Date(timeIntervalSince1970: 2),
+            models: [ProviderModel(id: "gpt-5-mini")]
+        )
+        await cache.update(profileID: "openai", snapshot: first)
+        let firstSnapshot = await cache.snapshot(profileID: "openai")
+        XCTAssertEqual(firstSnapshot?.catalog.catalogVersion, "v1")
+        await cache.update(profileID: "openai", snapshot: second)
+        let secondSnapshot = await cache.snapshot(profileID: "openai")
+        XCTAssertEqual(secondSnapshot?.catalog.models.map(\.id), ["gpt-5-mini"])
+        XCTAssertEqual(secondSnapshot?.reasoningModes, ReasoningMode.allCases)
+        await cache.remove(profileID: "openai")
+        let removed = await cache.snapshot(profileID: "openai")
+        XCTAssertNil(removed)
+    }
+
     func testProviderCatalogIsVersionedAndKeepsDesktopDeepSeekDefaults() {
         XCTAssertEqual(ModelProviderCatalog.schemaVersion, 1)
         XCTAssertFalse(ModelProviderCatalog.version.isEmpty)

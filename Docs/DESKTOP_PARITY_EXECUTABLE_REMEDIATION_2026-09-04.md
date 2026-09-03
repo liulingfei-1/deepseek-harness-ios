@@ -1,0 +1,72 @@
+# 最新桌面版对齐：逐项执行与验收清单
+
+更新时间：2026-09-04
+目标分支：`codex/deepseek-parity`
+上游基线：`deepseek-ai/deepseek-harness` master `76fda729799fe9b3848dbe2c211d4b231032b81e`
+
+这份文档是可照着执行的工作单，不把控制文档当作能力证明。每一项必须先核对上游源码，再核对本地生产调用链，完成代码、测试和构建后才可勾选。`DONE` 只表示当前可获得证据已闭环；缺真实 API、iSH、后台或真机证据时保留 `VERIFY`。iOS 系统权限、平台限制和数据安全边界不删除，也不以文档宣称绕过。
+
+## 0. 固定验收门
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build
+DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer xcodebuild -project HarnessMobile.xcodeproj -scheme HarnessMobile -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' ARCHS=arm64 ONLY_ACTIVE_ARCH=YES -derivedDataPath /tmp/hm-xcode-parity build
+cd HarnessMobile/Resources/PluginHost && npm run check
+node HarnessMobileTests/ISHPluginHostNodeSmoke.mjs HarnessMobile/Resources/PluginHost
+cd /Users/liulingfei/Documents/ChatGPT/deepseek
+./Scripts/audit-no-remote-execution.sh
+./Scripts/check-upstream-parity.sh
+git diff --check
+```
+
+## 1. 逐项工作单
+
+| ID | 上游事实（已用 GitHub API 复核） | 本地生产路径 | 当前状态 | 下一步与完成证据 |
+|---|---|---|---|---|
+| PARITY-001 | DeepSeek request extension 注册与 provider wire serializer | `DeepSeekLlmAPIExtensionRegistry` → request serializer | VERIFY | 真实 provider、重试、回放 metadata；补 wire fixture 后重跑固定验收门 |
+| PARITY-002 | `session-log-deepseek` delivery-accepted + suffix/watermark | Trace/session persistence | VERIFY | 断网重启、真实 endpoint；watermark accepted cursor 证据 |
+| PARITY-003 | telemetry ledger + OTLP sink | `SessionTelemetry`/`SessionTelemetryOtelSink` | VERIFY | 真实 feedback sink 与设置 UI；默认关闭保持可见 |
+| PARITY-004 | turn outline/trajectory rail | `SessionTurnOutline` + Chat rail | VERIFY | 长会话、分页、VoiceOver、真机 |
+| PARITY-005 | ACP `initialize → session/new → session/prompt → session/update` | `ACPSubagentClient`、iSH transport、provider catalog | VERIFY | 真实 ACP entrypoint、cancel/exit/reconnect、持久 provider 选择 |
+| PARITY-006 | provider/model/reasoning capability 由 runtime 查询 | `ModelProviderCatalog`、`ModelDiscoveryCache` | VERIFY | 真实多 provider capability cache 与 reload |
+| PARITY-007 | Claude `SubagentStart/Stop` 与 Codex hook 生命周期 | `HookProtocol` + AppModel child activation | VERIFY | iSH/ACP 真机超时与取消轨迹 |
+| PARITY-008 | Exa/Perplexity provider adapter 与 citation 映射 | `ExaSearchProvider`、`PerplexitySearchProvider` | VERIFY | 401/429/timeout、真实 citation、Keychain/UI 真机 |
+| PARITY-009 | team/workflow 为独立成员状态与恢复 | `LocalWorkflowTool`、`WorkflowRunTree` | IOS-REPLACEMENT | 多成员长时并发与恢复真机 |
+| PARITY-010 | webserver status/session 路由 | loopback `LocalStateServer` + `URLSession` client | VERIFY | controller schema、端口冲突、前后台和真机 |
+| PARITY-011 | provider catalog 支持动态 listModels/resolveModelInfo/reload | Swift provider profiles + model discovery | VERIFY | 统一 capability snapshot/cache；OAuth 仅在完整授权生命周期可用时注册 |
+| PARITY-012 | E2B 包通过官方 npm SDK `Sandbox.create`，含 fs/subprocess provider | 无 E2B SDK；本机 iSH 可作为语义替代 | IOS-REPLACEMENT/VERIFY | 先保存上游 fixture 与账号配置契约；没有可靠 REST 契约不得猜 endpoint |
+| PARITY-013 | provider-neutral webhook rule registry；规则返回可选 Session request | loopback POST → parse/HMAC → durable dedup → rule → Job/可选 wake | VERIFY | 当前批次已补通用 provider 路由、持久规则、重试、可选唤醒；仍缺公网隧道、后台持续监听、真机 |
+| PARITY-014 | frontend-static/client-half、Windows host 包 | WKWebView 已可承载但桌面 bundle 未接入 | OUT-OF-SCOPE/VERIFY | 打包并接入真实 bundle；Windows PowerShell/win32/ACL 保持平台不适用 |
+
+## 2. PARITY-013 本批次逐步修改清单
+
+- [x] `LocalWebhookEvent` 增加 `providerKind`，`LocalWebhookParser.parse` 支持 provider-neutral envelope；GitHub 保留专用签名校验。
+- [x] `LocalStateServer` 接受 `POST /webhook/{provider}`；GitHub 使用 `X-GitHub-*`，其他 provider 使用 `X-Webhook-*`。
+- [x] 新增 `LocalWebhookRule` 与持久化 `LocalWebhookRuleRegistry`：provider/event 匹配、`*` 通配、Job 标签、提示模板、1–5 次 admission 重试、可选当前 Agent 唤醒。
+- [x] delivery 去重拆为 claim/complete/requeue；Job admission 失败时释放 claim，避免“已接收但无 Job”永久丢失。
+- [x] Settings 增加规则列表、保存/删除、重试次数和唤醒开关入口。
+- [x] 专项测试覆盖 generic route、registry 冷启动恢复、dedup requeue 和既有 GitHub/HMAC/live loopback 路径。
+- [ ] 公网 ingress/tunnel、iOS 后台持续监听、iPhone 16 Pro 真机证据；这些是部署/系统调度条件，不能由本机单测代替。
+
+## 3. 变更后执行顺序
+
+1. 运行 `LocalStateServerTests`，确认 14 项通过。
+2. 运行固定验收门；失败时记录真实错误文本，不放宽校验。
+3. `git diff --check`、`git status --short --branch`，按单一 PARITY ID 提交并推送。
+4. 回写 `Docs/DESKTOP_PARITY_REMEDIATION.md` 的状态、命令、真实输出与剩余边界。
+5. 只有拿到真实 API/iSH/后台/真机证据才把 `VERIFY` 改成 `DONE`。
+
+## 4. 已验证的上游入口
+
+```text
+packages/webhook/webhook/src/types.ts
+packages/webhook/webhook/src/index.ts
+packages/webhook/webhook/src/session.ts
+packages/webhook/webhook-github/src/body.ts
+packages/webhook/webhook-github/src/handler.ts
+packages/e2b/e2b/src/index.ts
+packages/e2b/fs-e2b/src/index.ts
+packages/e2b/subprocess-e2b/src/index.ts
+```
+
+上游 webhook runtime 的唯一内建动作是创建并提示一个 Session；本地默认规则保留已有 GitHub→Job 兼容行为，同时提供显式规则与可选唤醒，不把“收到 HTTP”误报为“桌面 Session runtime 已完全同构”。

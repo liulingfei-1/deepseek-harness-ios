@@ -157,6 +157,61 @@ final class LocalStateServerTests: XCTestCase {
         XCTAssertFalse(second)
     }
 
+    func testProviderNeutralWebhookRouteAndRuleRegistryPersist() async throws {
+        let payload: JSONValue = .object(["action": .string("created")])
+        let event = try XCTUnwrap(LocalWebhookParser.parse(
+            providerKind: "acme",
+            deliveryID: "acme-1",
+            eventName: "created",
+            payload: payload
+        ))
+        let rule = try LocalWebhookRule(
+            id: "acme-created",
+            providerKind: "acme",
+            eventName: "created",
+            prompt: "处理 {event} {delivery} {payload}",
+            maximumAttempts: 3,
+            wakeActiveSession: true
+        )
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("webhook-rules-\(UUID().uuidString)")
+        let url = directory.appendingPathComponent("rules.json")
+        let registry = LocalWebhookRuleRegistry(storageURL: url)
+        try await registry.upsert(rule)
+        let matching = await registry.matching(event)
+        XCTAssertEqual(matching, [rule])
+        let reloaded = LocalWebhookRuleRegistry(storageURL: url)
+        let listed = await reloaded.list()
+        XCTAssertEqual(listed, [rule])
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    func testGenericWebhookRouteUsesWebhookHeaders() {
+        nonisolated(unsafe) var received: LocalWebhookEvent?
+        let result = LocalStateServer.route(
+            request: "POST /webhook/acme HTTP/1.1\r\n"
+                + "X-Webhook-Delivery: acme-2\r\n"
+                + "X-Webhook-Event: created\r\n\r\n"
+                + #"{"ok":true}"#,
+            endpoints: [:],
+            webhookHandler: { received = $0 }
+        )
+        XCTAssertEqual(result.status, 202)
+        XCTAssertEqual(received?.providerKind, "acme")
+        XCTAssertEqual(received?.eventName, "created")
+    }
+
+    func testWebhookDeduplicatorCanRequeueFailedAdmission() async {
+        let deduplicator = LocalWebhookDeduplicator()
+        let first = await deduplicator.claim("retry-me")
+        XCTAssertTrue(first)
+        let duplicate = await deduplicator.claim("retry-me")
+        XCTAssertFalse(duplicate)
+        await deduplicator.requeue("retry-me")
+        let retried = await deduplicator.claim("retry-me")
+        XCTAssertTrue(retried)
+    }
+
     func testSnapshotStorePublishesConcurrentEndpointBodies() {
         let store = LocalStateSnapshotStore()
         store.update(

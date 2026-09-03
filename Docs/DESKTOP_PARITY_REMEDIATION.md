@@ -138,6 +138,22 @@
 - **设置/UI**：新增 Settings → GitHub Webhook，可保存/删除 Keychain secret、显示签名状态；listener 在 bootstrap 恢复该 secret。
 - **剩余动作**：将 webhook rule、失败重试和可选 Agent 唤醒接入设置；公网 ingress、隧道和后台持续监听仍需平台/真机证据。
 
+### PARITY-013 · provider-neutral rule registry 与 admission retry（2026-09-04）
+
+- **状态**：VERIFY
+- **上游证据**：最新 `webhook/src/types.ts` 定义 provider-neutral `VerifiedWebhookDelivery`/`WebhookRule`；`webhook/src/index.ts` 按 kind 匹配规则、异步执行、注销时 abort/drain；`webhook/src/session.ts` 将规则结果创建为带 webhook provenance 的 Session。
+- **移动端变更**：`LocalWebhookEvent` 增加 `providerKind`；`LocalStateServer` 新增 `POST /webhook/{provider}` 通用 envelope（GitHub 继续使用 `X-GitHub-*` 与 HMAC）；新增可持久化 `LocalWebhookRuleRegistry`，支持 provider/event（含 `*`）匹配、Job label、提示模板、1–5 次 admission retry、可选当前 Agent 唤醒；dedup 拆成 `claim/complete/requeue`，Job 无法 admission 时释放 claim；Settings 增加规则增删与重试/唤醒入口。
+- **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter LocalStateServerTests` → 14 tests passed，含 generic provider route、规则冷启动恢复、dedup requeue、真实 URLSession loopback POST、GitHub HMAC。
+- **剩余动作**：公网 ingress/tunnel、iOS 后台持续监听、真实 Agent Session 创建和 iPhone 16 Pro 事件证据；当前仍为前台 loopback + 本机 Job 的可验证替代。
+
+### PARITY-011 · provider capability snapshot cache（2026-09-04）
+
+- **状态**：VERIFY
+- **上游证据**：最新 `llm` runtime 暴露 `listModels`、`resolveModelInfo`、reasoning/context/modality capability，并要求每次调用绑定当前 adapter registration。
+- **移动端变更**：新增 `ProviderCapabilityCache` actor；每次 `AppModel.discoverModels` 成功后按 profile 写入可替换的 capability snapshot（模型目录、来源/版本、reasoning modes、刷新时间），设置/子 Agent 可读取当前快照；磁盘 TTL 与凭据分区继续由既有 `ModelDiscoveryCache` 负责。
+- **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter ProviderModelDiscoveryTests` → 15 tests passed，新增快照替换/删除测试。
+- **剩余动作**：OAuth 登录/刷新生命周期、provider-specific reasoning/context wire fixture、runtime reload 的真实多 provider 与设备证据；未完成部分保持 `VERIFY`。
+
 ### PARITY-006 · 子 Agent reasoning effort 参数（2026-09-03）
 
 - **状态**：VERIFY

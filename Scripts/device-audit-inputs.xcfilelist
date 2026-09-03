@@ -49,6 +49,7 @@ $(SRCROOT)/HarnessMobile/Core/Configuration/CompactionSummaryRoute.swift
 $(SRCROOT)/HarnessMobile/Core/Configuration/SessionTitleSettings.swift
 $(SRCROOT)/HarnessMobile/Core/Presets/AgentPresets.swift
 $(SRCROOT)/HarnessMobile/Core/Configuration/ModelDiscoveryCache.swift
+$(SRCROOT)/HarnessMobile/Core/Configuration/ProviderCapabilityCache.swift
 $(SRCROOT)/HarnessMobile/Core/Configuration/ModelProviderCatalog.swift
 $(SRCROOT)/HarnessMobile/Core/Configuration/ProviderProfile.swift
 $(SRCROOT)/HarnessMobile/Core/Configuration/AgentProviderBundle.swift
@@ -104,6 +105,7 @@ $(SRCROOT)/HarnessMobile/Core/Trace/SessionTurnOutline.swift
 $(SRCROOT)/HarnessMobile/Core/Trace/WorkflowRunTree.swift
 $(SRCROOT)/HarnessMobile/Core/Trace/SessionSnapshot.swift
 $(SRCROOT)/HarnessMobile/Core/LocalServer/LocalStateServer.swift
+$(SRCROOT)/HarnessMobile/Core/LocalServer/LocalWebhookRuleRegistry.swift
 $(SRCROOT)/HarnessMobile/Core/Subagent/ACPSubagentClient.swift
 $(SRCROOT)/HarnessMobile/Core/Trace/SessionTelemetry.swift
 $(SRCROOT)/HarnessMobile/Core/Trace/SessionQueryReadModel.swift

@@ -30,9 +30,9 @@
 | 008 | VERIFY | Exa/Perplexity provider 路由、Keychain origin、设置 UI 和删除/状态反馈已接线；Exa 映射与上游首个非空 highlight 语义一致 | 401/429/timeout、真实 citations、真机 Keychain/UI |
 | 009 | IOS-REPLACEMENT | Workflow 提供本机 team 语义替代 | 多成员长时并发/恢复真机证据 |
 | 010 | VERIFY | loopback `/health`、`/status`、`/sessions` 已启动并动态投影；`LocalStateHTTPClient` 已用真实 `URLSession` 验证 `/status` 与 `/sessions` GET | 端口冲突、生命周期、真机 |
-| 011 | TODO | 静态 provider catalog；缺动态 catalog/OAuth/reload | 先建立 capability cache，再逐 provider 接入 |
+| 011 | VERIFY | 已有静态 catalog、远程模型发现和新增 `ProviderCapabilityCache`；仍缺 OAuth/reload 的完整生命周期 | 逐 provider capability wire fixture、OAuth 授权/刷新与真机证据 |
 | 012 | TODO | 无 e2b/fs/subprocess provider | 先写上游 REST compatibility fixture，再决定本机替代或显式远程适配 |
-| 013 | VERIFY | GitHub envelope、loopback POST、持久去重、可选 HMAC、Settings secret 配置和 AppModel→本机 Job 投影已实现；修复 sink 初始化提前 claim 的问题 | rule/重试、可选 Agent 唤醒、后台/公网边界 |
+| 013 | VERIFY | provider-neutral envelope、loopback POST、持久规则 registry、claim/complete/requeue、admission retry、可选 Agent 唤醒、HMAC 和 AppModel→本机 Job 投影均已接线 | 后台持续监听、公网隧道、真实 Session 创建和真机证据 |
 | 014 | TODO | 无桌面浏览器/Windows 发行形态 | 形成 capability matrix，平台不适用项明确收口 |
 
 ## 3. 每个 ID 的执行模板
@@ -55,12 +55,12 @@
 ### P4：本机 server、webhook、team
 
 - **010 LocalStateServer**：保留 loopback-only；已补 `LocalStateHTTPClient` 真实 URLSession GET，并修复发送完成前取消连接的生命周期 bug；继续补 controller JSON schema、端口冲突和 App 前后台启停测试。现有 WKWebView 可承载前端，但 `frontend-static` 桌面 bundle 尚未接入。
-- **013 webhook**：按上游 `webhook` runtime 的 rule/dispatch 语义，把已验证 GitHub delivery 投影成 Agent/Job 请求；delivery ID 去重必须先于触发，失败可重试且不能重复确认。
+- **013 webhook**：按上游 `webhook` runtime 的 rule/dispatch 语义，把已验证 provider-neutral delivery 按持久规则投影成 Job，并可唤醒当前 Agent；delivery ID claim 必须先于触发，admission 失败 requeue，成功后 complete。
 - **009 team**：继续复用 `LocalWorkflowTool`/`WorkflowRunTree`；只有当有独立成员状态、durable claim 和恢复测试时才扩大实现。
 
 ### P5/P6：动态 provider、e2b、平台矩阵
 
-- **011**：新增 provider capability snapshot/cache、协议选择和 runtime reload；每个 provider 用 wire fixture 对比上游，OAuth 只在平台能完成完整授权生命周期时注册。
+- **011**：已新增 provider capability snapshot/cache 与 discoverModels 接线；后续补协议选择/runtime reload 和每 provider wire fixture，OAuth 只在平台能完成完整授权生命周期时注册。
 - **012**：先核对 `packages/e2b/e2b/src/index.ts`、`fs-e2b`、`subprocess-e2b` 与公开 REST 契约；无真实契约不得猜 endpoint。不能提供同机制时实现本机 iSH 语义替代并标 `IOS-REPLACEMENT`，远程后端另行记录配置和数据披露。
 - **014**：Browser/React client-half 已由现有 WKWebView 证明可承载，保留为待接入工程项；Windows PowerShell/win32/ACL 仍是平台不适用。原生 UI/API 替代与桌面同 runtime 必须分开记录。
 

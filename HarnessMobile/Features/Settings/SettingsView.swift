@@ -362,6 +362,14 @@ private struct LocalWebhookSettingsView: View {
     @State private var configured = false
     @State private var isSaving = false
     @State private var errorMessage: String?
+    @State private var rules: [LocalWebhookRule] = []
+    @State private var ruleID = ""
+    @State private var providerKind = "github"
+    @State private var eventName = "*"
+    @State private var jobLabel = ""
+    @State private var prompt = ""
+    @State private var maximumAttempts = 1
+    @State private var wakeActiveSession = false
 
     var body: some View {
         Form {
@@ -387,6 +395,41 @@ private struct LocalWebhookSettingsView: View {
             }
 
             Section {
+                if rules.isEmpty {
+                    Text("未配置时，所有事件使用默认本机 Job。")
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(rules) { rule in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(rule.id).font(.headline)
+                        Text("\(rule.providerKind) / \(rule.eventName) → \(rule.jobLabel)")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                    .swipeActions {
+                        Button(role: .destructive) {
+                            Task { try? await model.deleteLocalWebhookRule(id: rule.id); await reloadRules() }
+                        } label: { Label("删除", systemImage: "trash") }
+                    }
+                }
+                TextField("规则 ID", text: $ruleID)
+                    .textInputAutocapitalization(.never)
+                TextField("Provider（如 github）", text: $providerKind)
+                    .textInputAutocapitalization(.never)
+                TextField("事件（* 表示全部）", text: $eventName)
+                    .textInputAutocapitalization(.never)
+                TextField("Job 标签（可选）", text: $jobLabel)
+                TextField("唤醒提示（可选）", text: $prompt, axis: .vertical)
+                Stepper("失败重试：\(maximumAttempts) 次", value: $maximumAttempts, in: 1...5)
+                Toggle("事件后唤醒当前 Agent", isOn: $wakeActiveSession)
+                Button("保存规则") { saveRule() }
+                    .disabled(ruleID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            } header: {
+                Text("Webhook Rules")
+            } footer: {
+                Text("规则按 provider 与 event 匹配；{event}、{delivery}、{payload} 可用于唤醒提示。")
+            }
+
+            Section {
                 LabeledContent("本机地址", value: "127.0.0.1")
                 Text("iOS 不提供公网持续监听；需要外部入口时请使用用户自行配置的隧道或推送转发，并保留本机事件证据。")
                     .font(.footnote)
@@ -397,7 +440,7 @@ private struct LocalWebhookSettingsView: View {
         }
         .harnessCompactListChrome()
         .navigationTitle("GitHub Webhook")
-        .task { configured = await model.localWebhookSecretConfigured() }
+        .task { configured = await model.localWebhookSecretConfigured(); await reloadRules() }
         .alert("Webhook 设置失败", isPresented: Binding(
             get: { errorMessage != nil },
             set: { if !$0 { errorMessage = nil } }
@@ -432,6 +475,31 @@ private struct LocalWebhookSettingsView: View {
                 errorMessage = error.localizedDescription
             }
             isSaving = false
+        }
+    }
+
+    private func reloadRules() async {
+        rules = await model.localWebhookRules()
+    }
+
+    private func saveRule() {
+        Task {
+            do {
+                let rule = try LocalWebhookRule(
+                    id: ruleID,
+                    providerKind: providerKind,
+                    eventName: eventName,
+                    jobLabel: jobLabel.isEmpty ? nil : jobLabel,
+                    prompt: prompt.isEmpty ? nil : prompt,
+                    maximumAttempts: maximumAttempts,
+                    wakeActiveSession: wakeActiveSession
+                )
+                try await model.saveLocalWebhookRule(rule)
+                ruleID = ""; jobLabel = ""; prompt = ""; wakeActiveSession = false
+                await reloadRules()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 }

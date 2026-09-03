@@ -126,7 +126,7 @@ final class LocalStateServer: @unchecked Sendable {
             return (400, #"{"error":"unsupported request"}"#)
         }
         let pathString = String(tokens[1])
-        if tokens[0] == "POST", pathString == "/webhook/github" {
+        if tokens[0] == "POST", pathString.hasPrefix("/webhook/") {
             guard let separator = request.range(of: "\r\n\r\n") else {
                 return (400, #"{"error":"missing request body"}"#)
             }
@@ -139,17 +139,25 @@ final class LocalStateServer: @unchecked Sendable {
                     parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
             }
             let body = String(request[separator.upperBound...])
-            guard let deliveryID = headers["x-github-delivery"],
-                  let eventName = headers["x-github-event"],
+            let pathComponents = pathString.split(separator: "/")
+            guard pathComponents.count == 2 else {
+                return (404, #"{"error":"not found"}"#)
+            }
+            let providerKind = String(pathComponents[1]).lowercased()
+            guard let deliveryID = headers[providerKind == "github" ? "x-github-delivery" : "x-webhook-delivery"]
+                    ?? headers["x-github-delivery"],
+                  let eventName = headers[providerKind == "github" ? "x-github-event" : "x-webhook-event"]
+                    ?? headers["x-github-event"],
                   let payload = try? JSONDecoder().decode(JSONValue.self, from: Data(body.utf8)),
-                  let event = LocalWebhookParser.github(
+                  let event = LocalWebhookParser.parse(
+                      providerKind: providerKind,
                       deliveryID: deliveryID,
                       eventName: eventName,
                       payload: payload
                   ) else {
                 return (400, #"{"error":"invalid github webhook"}"#)
             }
-            if let webhookSecret,
+            if providerKind == "github", let webhookSecret,
                !LocalWebhookParser.verifyGitHubSignature(
                    payload: Data(body.utf8),
                    signature: headers["x-hub-signature-256"],
@@ -261,23 +269,57 @@ struct LocalStateHTTPClient: Sendable {
 /// Parsing is pure so a future tunnel/host can feed the same validated event
 /// into Jobs without coupling the app to a public-ingress service.
 struct LocalWebhookEvent: Codable, Sendable, Equatable {
+    let providerKind: String
     let deliveryID: String
     let eventName: String
     let payload: JSONValue
+
+    init(
+        providerKind: String = "github",
+        deliveryID: String,
+        eventName: String,
+        payload: JSONValue
+    ) {
+        self.providerKind = providerKind
+        self.deliveryID = deliveryID
+        self.eventName = eventName
+        self.payload = payload
+    }
 }
 
 enum LocalWebhookParser {
+    static func parse(
+        providerKind: String,
+        deliveryID: String,
+        eventName: String,
+        payload: JSONValue
+    ) -> LocalWebhookEvent? {
+        let provider = providerKind.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let id = deliveryID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = eventName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !provider.isEmpty, provider.utf8.count <= 64,
+              !id.isEmpty, id.utf8.count <= 256,
+              !name.isEmpty, name.utf8.count <= 128,
+              payload.objectValue != nil else { return nil }
+        return LocalWebhookEvent(
+            providerKind: provider,
+            deliveryID: id,
+            eventName: name,
+            payload: payload
+        )
+    }
+
     static func github(
         deliveryID: String,
         eventName: String,
         payload: JSONValue
     ) -> LocalWebhookEvent? {
-        let id = deliveryID.trimmingCharacters(in: .whitespacesAndNewlines)
-        let name = eventName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !id.isEmpty, id.utf8.count <= 256,
-              !name.isEmpty, name.utf8.count <= 128,
-              payload.objectValue != nil else { return nil }
-        return LocalWebhookEvent(deliveryID: id, eventName: name, payload: payload)
+        parse(
+            providerKind: "github",
+            deliveryID: deliveryID,
+            eventName: eventName,
+            payload: payload
+        )
     }
 
     static func verifyGitHubSignature(
@@ -314,7 +356,7 @@ actor LocalWebhookDeduplicator {
         }
     }
 
-    func accept(_ deliveryID: String) -> Bool {
+    func claim(_ deliveryID: String) -> Bool {
         guard !known.contains(deliveryID) else { return false }
         known.insert(deliveryID)
         accepted.append(deliveryID)
@@ -327,6 +369,20 @@ actor LocalWebhookDeduplicator {
         persist()
         return true
     }
+
+    /// Marks a claimed delivery as durably handled. Kept separate from claim
+    /// so a failed Job admission can safely be retried by the sender.
+    func complete(_: String) { persist() }
+
+    /// Releases a claim after admission failed; the next delivery may retry.
+    func requeue(_ deliveryID: String) {
+        guard known.remove(deliveryID) != nil else { return }
+        accepted.removeAll { $0 == deliveryID }
+        persist()
+    }
+
+    /// Backwards-compatible one-shot API for callers that do not need retry.
+    func accept(_ deliveryID: String) -> Bool { claim(deliveryID) }
 
     private func persist() {
         guard let storageURL,

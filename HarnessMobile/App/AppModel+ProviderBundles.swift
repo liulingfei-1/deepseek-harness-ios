@@ -124,7 +124,7 @@ extension AppModel {
             apiKey = try await self.apiKey(for: configuration)
         }
 
-        return try await modelCatalogDiscoverer.discoverModels(
+        let snapshot = try await modelCatalogDiscoverer.discoverModels(
             ModelDiscoveryRequest(
                 configuration: configuration,
                 apiKey: apiKey,
@@ -132,6 +132,13 @@ extension AppModel {
                 forceRefresh: forceRefresh
             )
         )
+        let profileID = configuration.profileID ?? configuration.providerID.rawValue
+        await providerCapabilityCache.update(profileID: profileID, snapshot: snapshot)
+        return snapshot
+    }
+
+    func providerCapabilitySnapshot(profileID: String) async -> ProviderCapabilitySnapshot? {
+        await providerCapabilityCache.snapshot(profileID: profileID)
     }
 
     /// Uses the same provider adapter/client as an agent request, but does not
