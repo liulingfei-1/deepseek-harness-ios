@@ -20,7 +20,7 @@
 
 | ID | 当前状态 | 生产事实 | 必须继续做的事 |
 |---|---|---|---|
-| 001 | VERIFY | DeepSeek request extension 已接入请求序列化 | 真实 provider/插件注册、重试和回放 |
+| 001 | VERIFY | DeepSeek request extension 已接入请求序列化；结构化 body/session/purpose、取消、并发 preparation、幂等 acceptance 和真实 URLProtocol 2xx wire fixture 已验证 | 真实 provider/插件注册、重试和回放 |
 | 002 | VERIFY | session-log suffix/watermark coordinator 已有单测 | AppModel/真实 endpoint、断网重启 |
 | 003 | VERIFY | append telemetry wrapper 已接线 | 设置、feedback release、真实 sink |
 | 004 | VERIFY | turn outline 已接入轨迹 rail 与分页 | 长会话、冷启动、VoiceOver、真机 |

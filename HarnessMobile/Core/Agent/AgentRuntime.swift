@@ -562,7 +562,8 @@ actor AgentRuntime {
                     in: conversation,
                     configuration: callConfiguration
                 ),
-                route: requestRoute
+                route: requestRoute,
+                sessionID: agentID.uuidString.lowercased()
             )
             // Mirror upstream compaction-basic at the canonical request
             // boundary. A successful replacement becomes the live conversation
@@ -788,7 +789,9 @@ actor AgentRuntime {
                                     messages: conversation,
                                     tools: request.tools,
                                     imagePayloads: request.imagePayloads,
-                                    route: request.route
+                                    route: request.route,
+                                    sessionID: request.sessionID,
+                                    purpose: request.purpose
                                 ),
                                 contextWindow: effectiveContextWindow,
                                 trigger: "context-overflow",
@@ -1119,7 +1122,9 @@ actor AgentRuntime {
             messages: [AgentMessage],
             tools: [ModelToolDefinition],
             imagePayloads: [ModelImagePayload],
-            route: ProviderRequestRoute
+            route: ProviderRequestRoute,
+            sessionID: String? = nil,
+            purpose: String? = nil
         ) -> ModelRequest {
             plan.modelRequest(
                 apiKey: apiKey,
@@ -1127,7 +1132,9 @@ actor AgentRuntime {
                 messages: messages,
                 tools: tools,
                 imagePayloads: imagePayloads,
-                route: route
+                route: route,
+                sessionID: sessionID,
+                purpose: purpose
             )
         }
     }
@@ -1282,7 +1289,9 @@ actor AgentRuntime {
                     messages: candidateMessages,
                     tools: request.tools,
                     imagePayloads: request.imagePayloads,
-                    route: request.route
+                    route: request.route,
+                    sessionID: request.sessionID,
+                    purpose: "compaction"
                 )
                 let candidateMeasurement = ConversationTokenMeter.measure(candidate)
                 guard candidateMeasurement.totalTokens < plan.measurement.totalTokens else {
@@ -1380,7 +1389,9 @@ actor AgentRuntime {
                 messages: candidateMessages,
                 tools: request.tools,
                 imagePayloads: request.imagePayloads,
-                route: request.route
+                route: request.route,
+                sessionID: request.sessionID,
+                purpose: "compaction"
             )
             let candidateMeasurement = ConversationTokenMeter.measure(candidate)
             guard candidateMeasurement.totalTokens < plan.measurement.totalTokens else {
@@ -1554,7 +1565,9 @@ actor AgentRuntime {
             // provider prefix. Tool deltas remain forbidden and are never run.
             tools: source.tools,
             imagePayloads: source.imagePayloads,
-            route: try await resolveRequestRoute(for: configuration)
+            route: try await resolveRequestRoute(for: configuration),
+            sessionID: source.sessionID,
+            purpose: "compaction"
         )
     }
 

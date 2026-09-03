@@ -52,6 +52,48 @@ final class DeepSeekLlmAPIExtensionRegistryTests: XCTestCase {
         registry.unregister(field: "field_a")
         XCTAssertNoThrow(try registry.register(field: "field_a", provider: .init(prepare: { _ in nil })))
     }
+
+    func testPrepareTransactionExposesStructuredRequestAndAcceptsOnce() async throws {
+        let registry = DeepSeekLlmAPIExtensionRegistry()
+        nonisolated(unsafe) var acceptCount = 0
+        try registry.register(field: "session_marker", provider: .init(
+            prepare: { context in
+                XCTAssertEqual(context.body["model"]?.stringValue, "deepseek-v4-pro")
+                XCTAssertEqual(context.sessionID, "session-1")
+                XCTAssertEqual(context.purpose, "compaction")
+                return .string("prepared")
+            },
+            onAccept: { acceptCount += 1 }
+        ))
+        let base = Data(#"{"model":"deepseek-v4-pro","messages":[]}"#.utf8)
+        let prepared = try await registry.prepareTransaction(
+            .init(baseBody: base, sessionID: "session-1", purpose: "compaction")
+        )
+        XCTAssertEqual(prepared.fields["session_marker"], .string("prepared"))
+        try await prepared.accept()
+        try await prepared.accept()
+        XCTAssertEqual(acceptCount, 1)
+    }
+
+    func testPreparationHonorsTaskCancellation() async throws {
+        let registry = DeepSeekLlmAPIExtensionRegistry()
+        try registry.register(field: "slow", provider: .init(
+            prepare: { _ in
+                try await Task.sleep(for: .seconds(2))
+                return .string("late")
+            }
+        ))
+        let task = Task {
+            try await registry.prepareTransaction(.init(baseBody: Data("{}".utf8), sessionID: nil, purpose: nil))
+        }
+        task.cancel()
+        do {
+            _ = try await task.value
+            XCTFail("cancelled preparation should not complete")
+        } catch is CancellationError {
+            // expected
+        }
+    }
 }
 
 /// Minimal async throw-assertion helper (XCTest lacks one natively).

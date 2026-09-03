@@ -57,6 +57,12 @@ struct ModelRequest: Sendable, Equatable {
     /// the DeepSeek extension registry immediately before dispatch and are
     /// never persisted in session state.
     let requestExtensions: [String: JSONValue]
+    /// Session identity and auxiliary purpose visible to DeepSeek request
+    /// extensions; neither is persisted in the wire-extension registry.
+    let sessionID: String?
+    /// Optional auxiliary request classification (`compaction` or
+    /// `session-title`), matching the desktop extension contract.
+    let purpose: String?
     /// Immutable profile/endpoint identity captured before this request starts.
     /// It contains no credential material and is never inferred from mutable UI
     /// state during adapter dispatch.
@@ -70,7 +76,9 @@ struct ModelRequest: Sendable, Equatable {
         tools: [ModelToolDefinition],
         imagePayloads: [ModelImagePayload] = [],
         route: ProviderRequestRoute? = nil,
-        requestExtensions: [String: JSONValue] = [:]
+        requestExtensions: [String: JSONValue] = [:],
+        sessionID: String? = nil,
+        purpose: String? = nil
     ) {
         self.configuration = configuration
         self.apiKey = apiKey
@@ -80,6 +88,8 @@ struct ModelRequest: Sendable, Equatable {
         self.imagePayloads = imagePayloads
         self.route = route
         self.requestExtensions = requestExtensions
+        self.sessionID = sessionID
+        self.purpose = purpose
     }
 }
 

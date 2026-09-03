@@ -120,7 +120,10 @@ final class DeepSeekFilesClient: @unchecked Sendable {
             messages: request.messages,
             tools: request.tools,
             imagePayloads: payloads,
-            route: request.route
+            route: request.route,
+            requestExtensions: request.requestExtensions,
+            sessionID: request.sessionID,
+            purpose: request.purpose
         )
     }
 

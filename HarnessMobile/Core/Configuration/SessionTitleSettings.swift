@@ -149,7 +149,8 @@ enum SessionTitleGenerator {
             apiKey: apiKey,
             systemPrompt: system,
             messages: [.user(input)],
-            tools: []
+            tools: [],
+            purpose: "session-title"
         )
         var output = ""
         var finish: ModelFinishReason?

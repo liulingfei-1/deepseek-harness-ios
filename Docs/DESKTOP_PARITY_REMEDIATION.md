@@ -18,6 +18,13 @@
 - **iPhone 16 Pro**：尚未用真实 DeepSeek API/插件注册扩展验证，保留 `VERIFY`。
 - **剩余动作**：在 AppModel/插件生命周期注册真实扩展 provider，并补 2xx accept callback、session ID/purpose 传递和真实请求 fixture。
 
+### PARITY-001 · extension acceptance/cancellation contract（2026-09-04）
+
+- **上游复核**：通过 `gh api` 读取上游 `packages/llm/deepseek-llm-api-extensions/src/index.ts` 与 `src/types.ts`（master `76fda729799fe9b3848dbe2c211d4b231032b81e`），确认结构化 body、`sessionId`、`purpose`、取消信号、2xx 后 `accept()` 和重复调用共享同一 settlement。
+- **移动端变更**：`DeepSeekLlmAPIExtensionRegistry` 现在并发准备扩展字段，响应任务取消，保留 request-local `body/sessionID/purpose`，将 acceptance callback 绑定到一次性 actor transaction，并把 acceptance 错误传播给流式客户端；`AgentRuntime`、compaction、session-title 和 `DeepSeekFilesClient` 保留/传入对应 request metadata。
+- **专项验证**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-parity-p1 --filter 'DeepSeekLlmAPIExtensionRegistryTests|DeepSeekWireTests.testDeepSeekExtensionsArePreparedForWireAndAcceptedOnceAfter2xx'` → 7 tests passed；真实注入式 `URLProtocol` 捕获顶层扩展字段并确认 2xx acceptance 只执行一次。
+- **状态**：VERIFY。尚未用真实 DeepSeek API、插件注册生命周期或 iPhone 16 Pro 完成端到端验收，不能标记 DONE。
+
 ### PARITY-003 · Session telemetry append 接线（2026-09-03）
 
 - **状态**：VERIFY

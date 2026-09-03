@@ -23,7 +23,7 @@ git diff --check
 
 | ID | 上游事实（已用 GitHub API 复核） | 本地生产路径 | 当前状态 | 下一步与完成证据 |
 |---|---|---|---|---|
-| PARITY-001 | DeepSeek request extension 注册与 provider wire serializer | `DeepSeekLlmAPIExtensionRegistry` → request serializer | VERIFY | 真实 provider、重试、回放 metadata；补 wire fixture 后重跑固定验收门 |
+| PARITY-001 | DeepSeek request extension 注册与 provider wire serializer | `DeepSeekLlmAPIExtensionRegistry` → request serializer | VERIFY | 已补结构化 body/session/purpose、并发 preparation、取消、幂等 acceptance 与真实 URLProtocol 2xx wire fixture；仍需真实 provider/插件注册、重试回放和真机证据 |
 | PARITY-002 | `session-log-deepseek` delivery-accepted + suffix/watermark | Trace/session persistence | VERIFY | 断网重启、真实 endpoint；watermark accepted cursor 证据 |
 | PARITY-003 | telemetry ledger + OTLP sink | `SessionTelemetry`/`SessionTelemetryOtelSink` | VERIFY | 真实 feedback sink 与设置 UI；默认关闭保持可见 |
 | PARITY-004 | turn outline/trajectory rail | `SessionTurnOutline` + Chat rail | VERIFY | 长会话、分页、VoiceOver、真机 |

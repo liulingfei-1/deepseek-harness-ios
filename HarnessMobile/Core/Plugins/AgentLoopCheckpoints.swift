@@ -114,7 +114,9 @@ struct CordisModelRequestPlan: Sendable, Equatable {
         messages: [AgentMessage],
         tools: [ModelToolDefinition],
         imagePayloads: [ModelImagePayload] = [],
-        route: ProviderRequestRoute? = nil
+        route: ProviderRequestRoute? = nil,
+        sessionID: String? = nil,
+        purpose: String? = nil
     ) -> ModelRequest {
         ModelRequest(
             configuration: configuration,
@@ -123,7 +125,9 @@ struct CordisModelRequestPlan: Sendable, Equatable {
             messages: messages,
             tools: tools,
             imagePayloads: imagePayloads,
-            route: route
+            route: route,
+            sessionID: sessionID,
+            purpose: purpose
         )
     }
 }

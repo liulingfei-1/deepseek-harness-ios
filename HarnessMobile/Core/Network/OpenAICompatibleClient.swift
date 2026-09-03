@@ -208,7 +208,9 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
             systemPrompt: request.systemPrompt,
             messages: request.messages,
             tools: request.tools,
-            imagePayloads: request.imagePayloads
+            imagePayloads: request.imagePayloads,
+            sessionID: request.sessionID,
+            purpose: request.purpose
         )
         let adapter = try ModelProviderAdapterRegistry.adapter(for: configuration.providerID)
         switch adapter.streamingDialect {
@@ -217,9 +219,10 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
             let extended = try await applyingDeepSeekExtensions(to: prepared)
             do {
                 try await performOpenAI(
-                    extended,
+                    extended.request,
                     adapter: adapter,
-                    continuation: continuation
+                    continuation: continuation,
+                    onAccepted: extended.accept
                 )
             } catch {
                 guard Self.shouldRetryInlineImages(after: error, request: prepared) else {
@@ -229,9 +232,10 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
                     await filesClient.invalidate(payload, request: validatedRequest)
                 }
                 try await performOpenAI(
-                    Self.inlineImageRequest(extended),
+                    Self.inlineImageRequest(extended.request),
                     adapter: adapter,
-                    continuation: continuation
+                    continuation: continuation,
+                    onAccepted: extended.accept
                 )
             }
         case .openAIChatCompletions:
@@ -254,8 +258,15 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
     /// merged immutable snapshot. Extensions are only meaningful on the
     /// official DeepSeek route; generic OpenAI-compatible traffic remains
     /// byte-for-byte governed by its existing compatibility profile.
-    private func applyingDeepSeekExtensions(to request: ModelRequest) async throws -> ModelRequest {
-        guard request.configuration.providerID == .deepSeekOfficial else { return request }
+    private struct PreparedDeepSeekRequest: Sendable {
+        let request: ModelRequest
+        let accept: (@Sendable () async throws -> Void)?
+    }
+
+    private func applyingDeepSeekExtensions(to request: ModelRequest) async throws -> PreparedDeepSeekRequest {
+        guard request.configuration.providerID == .deepSeekOfficial else {
+            return PreparedDeepSeekRequest(request: request, accept: nil)
+        }
         let baseRequest = ModelRequest(
             configuration: request.configuration,
             apiKey: request.apiKey,
@@ -263,15 +274,19 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
             messages: request.messages,
             tools: request.tools,
             imagePayloads: request.imagePayloads,
-            route: request.route
+            route: request.route,
+            sessionID: request.sessionID,
+            purpose: request.purpose
         )
         let adapter = try ModelProviderAdapterRegistry.adapter(for: request.configuration.providerID)
         let baseBody = try adapter.makeStreamingRequest(baseRequest).httpBody ?? Data()
-        let fields = try await deepSeekExtensionRegistry.prepare(
-            .init(baseBody: baseBody, sessionID: nil, purpose: nil)
+        let prepared = try await deepSeekExtensionRegistry.prepareTransaction(
+            .init(baseBody: baseBody, sessionID: request.sessionID, purpose: request.purpose)
         )
-        guard !fields.isEmpty else { return request }
-        return ModelRequest(
+        guard !prepared.fields.isEmpty else {
+            return PreparedDeepSeekRequest(request: request, accept: nil)
+        }
+        let extended = ModelRequest(
             configuration: request.configuration,
             apiKey: request.apiKey,
             systemPrompt: request.systemPrompt,
@@ -279,8 +294,11 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
             tools: request.tools,
             imagePayloads: request.imagePayloads,
             route: request.route,
-            requestExtensions: fields
+            requestExtensions: prepared.fields,
+            sessionID: request.sessionID,
+            purpose: request.purpose
         )
+        return PreparedDeepSeekRequest(request: extended, accept: prepared.accept)
     }
 
     static func shouldRetryInlineImages(after error: Error, request: ModelRequest) -> Bool {
@@ -302,14 +320,19 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
             tools: request.tools,
             imagePayloads: request.imagePayloads.map {
                 ModelImagePayload(id: $0.id, mimeType: $0.mimeType, data: $0.data)
-            }
+            },
+            route: request.route,
+            requestExtensions: request.requestExtensions,
+            sessionID: request.sessionID,
+            purpose: request.purpose
         )
     }
 
     private func performOpenAI(
         _ request: ModelRequest,
         adapter: any ModelProviderAdapter,
-        continuation: AsyncThrowingStream<LLMStreamEvent, Error>.Continuation
+        continuation: AsyncThrowingStream<LLMStreamEvent, Error>.Continuation,
+        onAccepted: (@Sendable () async throws -> Void)? = nil
     ) async throws {
         let urlRequest = try adapter.makeStreamingRequest(request)
         guard let encodedBody = urlRequest.httpBody else {
@@ -329,6 +352,12 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
                 bytes: bytes,
                 adapter: adapter
             )
+        }
+        do {
+            try await onAccepted?()
+        } catch {
+            bytes.task.cancel()
+            throw error
         }
         guard let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type"),
               contentType

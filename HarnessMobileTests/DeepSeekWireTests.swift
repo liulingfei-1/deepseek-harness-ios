@@ -7,6 +7,78 @@ import XCTest
 #endif
 
 final class DeepSeekWireTests: XCTestCase {
+    override func tearDown() {
+        DeepSeekStreamingURLProtocolStub.handler = nil
+        super.tearDown()
+    }
+
+    func testDeepSeekExtensionsArePreparedForWireAndAcceptedOnceAfter2xx() async throws {
+        let configuration = try ProviderProfile.catalogDefault(for: .deepSeekOfficial)
+            .configuration(model: "deepseek-test").validated()
+        let registry = DeepSeekLlmAPIExtensionRegistry()
+        nonisolated(unsafe) var accepted = 0
+        nonisolated(unsafe) var bodies: [Data] = []
+        DeepSeekStreamingURLProtocolStub.handler = { request in
+            if let body = request.httpBody {
+                bodies.append(body)
+            } else if let stream = request.httpBodyStream {
+                stream.open()
+                var data = Data()
+                let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: 4096)
+                defer { buffer.deallocate() }
+                while stream.hasBytesAvailable {
+                    let count = stream.read(buffer, maxLength: 4096)
+                    if count <= 0 { break }
+                    data.append(buffer, count: count)
+                }
+                stream.close()
+                bodies.append(data)
+            }
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "text/event-stream"]
+            )!
+            let payload = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\ndata: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+            return (response, Data(payload.utf8))
+        }
+        try registry.register(field: "test_extension", provider: .init(
+            prepare: { context in
+                XCTAssertEqual(context.body["model"]?.stringValue, "deepseek-test")
+                XCTAssertEqual(context.sessionID, "session-1")
+                XCTAssertNil(context.purpose)
+                return .object(["ready": .bool(true)])
+            },
+            onAccept: { accepted += 1 }
+        ))
+        let sessionConfiguration = OpenAICompatibleClient.makeSessionConfiguration()
+        sessionConfiguration.protocolClasses = [DeepSeekStreamingURLProtocolStub.self]
+        let client = OpenAICompatibleClient(
+            filesClient: DeepSeekFilesClient(),
+            sessionConfiguration: sessionConfiguration,
+            deepSeekExtensionRegistry: registry
+        )
+        let request = ModelRequest(
+            configuration: configuration,
+            apiKey: "test-only",
+            systemPrompt: "system",
+            messages: [.user("hello")],
+            tools: [],
+            sessionID: "session-1",
+            purpose: nil
+        )
+        var text = ""
+        for try await event in client.stream(request) {
+            if case let .text(delta) = event { text += delta }
+        }
+        XCTAssertEqual(text, "ok")
+        XCTAssertEqual(accepted, 1)
+        let body = try XCTUnwrap(bodies.first)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual((object["test_extension"] as? [String: Any])?["ready"] as? Bool, true)
+        XCTAssertEqual(bodies.count, 1)
+    }
+
     func testDeepSeekRequestOmitsAppOutputCapAndLetsProviderResolveIt() throws {
         let configuration = try ProviderProfile.catalogDefault(
             for: .deepSeekOfficial
@@ -647,4 +719,28 @@ final class DeepSeekWireTests: XCTestCase {
         let legacyData = try JSONSerialization.data(withJSONObject: legacy)
         XCTAssertTrue(try JSONDecoder().decode(AgentMessage.self, from: legacyData).fileAttachments.isEmpty)
     }
+}
+
+private final class DeepSeekStreamingURLProtocolStub: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let handler = Self.handler else {
+            client?.urlProtocol(self, didFailWithError: URLError(.resourceUnavailable))
+            return
+        }
+        do {
+            let (response, data) = try handler(request)
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
 }
