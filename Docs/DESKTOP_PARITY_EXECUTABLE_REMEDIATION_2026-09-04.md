@@ -63,6 +63,13 @@ git diff --check
 - [x] 删除 provider profile 或清空配置时同步删除对应快照；新增跨实例恢复/删除测试。
 - [ ] OAuth 授权/刷新、provider-specific reasoning/context wire fixture、runtime reload 和真实设备证据。
 
+## 5. PARITY-010 本批次逐步修改清单
+
+- [x] 增加可机器读取的 `LocalStateAPISchema`（版本、loopback transport、session/settings/workspace controller 方法表）。
+- [x] AppModel 注册 `/api/schema` 与 `/api/session`；后者复用现有动态会话投影，不复制状态源。
+- [x] 纯路由测试覆盖 schema 解码、controller 方法和 session alias；既有真实 URLSession loopback 测试继续通过。
+- [ ] 完整 RPC POST envelope、写入 controller、端口冲突/前后台和 iPhone 16 Pro 证据。
+
 ## 4. 已验证的上游入口
 
 ```text

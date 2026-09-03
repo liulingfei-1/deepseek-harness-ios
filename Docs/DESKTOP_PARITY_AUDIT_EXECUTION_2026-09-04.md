@@ -29,7 +29,7 @@
 | 007 | VERIFY | Claude/Codex command hook runner 已接入；本批次补齐子 Agent生命周期事件 | 真机 iSH/ACP、超时/取消、诊断轨迹 |
 | 008 | VERIFY | Exa/Perplexity provider 路由、Keychain origin、设置 UI 和删除/状态反馈已接线；Exa 映射与上游首个非空 highlight 语义一致 | 401/429/timeout、真实 citations、真机 Keychain/UI |
 | 009 | IOS-REPLACEMENT | Workflow 提供本机 team 语义替代 | 多成员长时并发/恢复真机证据 |
-| 010 | VERIFY | loopback `/health`、`/status`、`/sessions` 已启动并动态投影；`LocalStateHTTPClient` 已用真实 `URLSession` 验证 `/status` 与 `/sessions` GET | 端口冲突、生命周期、真机 |
+| 010 | VERIFY | loopback `/health`、`/status`、`/sessions` 已启动并动态投影；新增 `/api/schema` 与 `/api/session` 发现路由，`LocalStateHTTPClient` 已用真实 `URLSession` 验证状态端点 | RPC 写入、端口冲突、生命周期、真机 |
 | 011 | VERIFY | 已有静态 catalog、远程模型发现和新增 `ProviderCapabilityCache`；现已补 Application Support 冷启动快照与 profile 删除清理，仍缺 OAuth/reload 的完整生命周期 | 逐 provider capability wire fixture、OAuth 授权/刷新与真机证据 |
 | 012 | TODO | 无 e2b/fs/subprocess provider | 先写上游 REST compatibility fixture，再决定本机替代或显式远程适配 |
 | 013 | VERIFY | provider-neutral envelope、loopback POST、持久规则 registry、claim/complete/requeue、admission retry、可选 Agent 唤醒、HMAC 和 AppModel→本机 Job 投影均已接线 | 后台持续监听、公网隧道、真实 Session 创建和真机证据 |
@@ -54,7 +54,7 @@
 
 ### P4：本机 server、webhook、team
 
-- **010 LocalStateServer**：保留 loopback-only；已补 `LocalStateHTTPClient` 真实 URLSession GET，并修复发送完成前取消连接的生命周期 bug；继续补 controller JSON schema、端口冲突和 App 前后台启停测试。现有 WKWebView 可承载前端，但 `frontend-static` 桌面 bundle 尚未接入。
+- **010 LocalStateServer**：保留 loopback-only；已补 `LocalStateHTTPClient` 真实 URLSession GET、controller JSON schema（`/api/schema`）和 `/api/session` alias，并修复发送完成前取消连接的生命周期 bug；继续补完整 RPC 写入、端口冲突和 App 前后台启停测试。现有 WKWebView 可承载前端，但 `frontend-static` 桌面 bundle 尚未接入。
 - **013 webhook**：按上游 `webhook` runtime 的 rule/dispatch 语义，把已验证 provider-neutral delivery 按持久规则投影成 Job，并可唤醒当前 Agent；delivery ID claim 必须先于触发，admission 失败 requeue，成功后 complete。
 - **009 team**：继续复用 `LocalWorkflowTool`/`WorkflowRunTree`；只有当有独立成员状态、durable claim 和恢复测试时才扩大实现。
 

@@ -2,6 +2,46 @@ import Foundation
 import Network
 import CryptoKit
 
+struct LocalStateAPIController: Codable, Sendable, Equatable {
+    let name: String
+    let methods: [String]
+}
+
+struct LocalStateAPISchema: Codable, Sendable, Equatable {
+    static let currentVersion = 1
+    let version: Int
+    let transport: String
+    let controllers: [LocalStateAPIController]
+
+    static let current = LocalStateAPISchema(
+        version: currentVersion,
+        transport: "loopback-http",
+        controllers: [
+            LocalStateAPIController(
+                name: "session",
+                methods: ["list", "status"]
+            ),
+            LocalStateAPIController(
+                name: "settings",
+                methods: ["schema"]
+            ),
+            LocalStateAPIController(
+                name: "workspace",
+                methods: ["schema"]
+            )
+        ]
+    )
+
+    static func json() -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        guard let data = try? encoder.encode(current) else {
+            return #"{"version":1,"transport":"loopback-http","controllers":[]}"#
+        }
+        return String(decoding: data, as: UTF8.self)
+    }
+}
+
 /// Synchronous projection shared by the main-actor model and Network queue.
 /// The lock keeps endpoint handlers independent from actor isolation.
 final class LocalStateSnapshotStore: @unchecked Sendable {

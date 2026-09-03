@@ -719,7 +719,9 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         }
         localStateServer = LocalStateServer(endpoints: [
             .init(path: "/status", handler: { [localStateSnapshotStore] in localStateSnapshotStore.status() }),
-            .init(path: "/sessions", handler: { [localStateSnapshotStore] in localStateSnapshotStore.sessions() })
+            .init(path: "/sessions", handler: { [localStateSnapshotStore] in localStateSnapshotStore.sessions() }),
+            .init(path: "/api/schema", handler: { LocalStateAPISchema.json() }),
+            .init(path: "/api/session", handler: { [localStateSnapshotStore] in localStateSnapshotStore.sessions() })
         ])
         localStateServer?.start()
         localStateServer?.setWebhookHandler { [weak self] event in

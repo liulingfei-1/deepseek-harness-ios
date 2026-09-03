@@ -35,6 +35,33 @@ final class LocalStateServerTests: XCTestCase {
         XCTAssertTrue(status.body.contains("turns"))
     }
 
+    func testAPISchemaAndSessionAliasExposeControllerSurface() throws {
+        let schema = LocalStateServer.route(
+            request: "GET /api/schema HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+            endpoints: [
+                "/api/schema": .init(path: "/api/schema", handler: { LocalStateAPISchema.json() }),
+                "/api/session": .init(path: "/api/session", handler: { #"{"sessions":[{"id":"one"}]}"# })
+            ]
+        )
+        XCTAssertEqual(schema.status, 200)
+        let decoded = try JSONDecoder().decode(
+            LocalStateAPISchema.self,
+            from: Data(schema.body.utf8)
+        )
+        XCTAssertEqual(decoded.version, LocalStateAPISchema.currentVersion)
+        XCTAssertEqual(decoded.transport, "loopback-http")
+        XCTAssertTrue(decoded.controllers.contains { $0.name == "session" && $0.methods.contains("list") })
+
+        let alias = LocalStateServer.route(
+            request: "GET /api/session HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+            endpoints: [
+                "/api/session": .init(path: "/api/session", handler: { #"{"sessions":[{"id":"one"}]}"# })
+            ]
+        )
+        XCTAssertEqual(alias.status, 200)
+        XCTAssertTrue(alias.body.contains("one"))
+    }
+
     func testRouteReturns404ForUnknownPath() {
         let result = LocalStateServer.route(
             request: "GET /nope HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",

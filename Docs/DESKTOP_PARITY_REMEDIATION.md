@@ -75,6 +75,14 @@
 - **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-webclient --filter LocalStateServerTests` → 10 tests passed（含真实 `URLSession` live GET `/status` 与 `/sessions`）；Simulator/真机动态 controller 与端口冲突仍待验证。
 - **剩余动作**：补端口冲突/前后台恢复及 iPhone 16 Pro HTTP 证据。
 
+### PARITY-010 · controller schema 与 `/api` 发现路由（2026-09-04）
+
+- **状态**：VERIFY
+- **上游证据**：桌面 `client/connection/src/api-path.ts` 将 `/api` 作为统一 API 前缀；controller 按 session/settings/workspace 分域注册。
+- **移动端变更**：新增可机器读取的 `LocalStateAPISchema`（版本、loopback transport、真实已接线方法表）；AppModel 注册 `/api/schema` 和复用会话快照的 `/api/session`，避免复制状态真源。
+- **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter LocalStateServerTests` → 15 tests passed，覆盖 schema JSON 解码、controller 方法和 session alias；随后固定验收门继续执行。
+- **剩余动作**：完整 RPC POST envelope、settings/workspace 写入 controller、端口冲突/前后台和 iPhone 16 Pro 证据；未接线的写操作保持未注册。
+
 ### PARITY-014 · 平台 capability matrix 事实同步（2026-09-04）
 
 - **状态**：VERIFY
