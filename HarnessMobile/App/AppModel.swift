@@ -3718,7 +3718,8 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
     func installISHMarketplacePlugin(
         source: ISHMarketplacePluginSource,
         replace: Bool = false,
-        compilerGuidance: String? = nil
+        compilerGuidance: String? = nil,
+        preference: ISHMarketplaceInstallPreference = .hostLoad
     ) async -> Bool {
         let request = PluginInstallRequest(
             source: .marketplace(source),
@@ -3737,7 +3738,8 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                     guard let plugin = await self.installISHMarketplacePluginResultUncoordinated(
                         source: source,
                         replace: replace,
-                        compilerGuidance: compilerGuidance
+                        compilerGuidance: compilerGuidance,
+                        preference: preference
                     ) else {
                         throw PluginInstallCoordinatorError.operationFailed(
                             self.ishPluginMarketplaceFailure?.message
@@ -3761,7 +3763,8 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
     private func installISHMarketplacePluginResultUncoordinated(
         source: ISHMarketplacePluginSource,
         replace: Bool = false,
-        compilerGuidance: String? = nil
+        compilerGuidance: String? = nil,
+        preference: ISHMarketplaceInstallPreference = .hostLoad
     ) async -> ISHMarketplacePlugin? {
         let retry = ISHPluginMarketplaceRetry.install(
             source: source,
@@ -3798,7 +3801,10 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                 detail: "源码已下载到手机隔离缓存，未发送 API 密钥。"
             )
 
-            if let candidate = prepared.nativeCandidate {
+            // Desktop parity (D-010): installs default to loading the package
+            // into the local host runtime, matching the desktop. The native
+            // manifest compile is an explicit opt-in preference only.
+            if preference == .nativeCompile, let candidate = prepared.nativeCandidate {
                 let sourceBytes = candidate.files.reduce(into: 0) {
                     $0 += $1.content.utf8.count
                 }

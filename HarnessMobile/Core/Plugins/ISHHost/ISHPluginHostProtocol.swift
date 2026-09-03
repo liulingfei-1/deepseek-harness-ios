@@ -647,6 +647,14 @@ struct ISHMarketplaceCatalog: Codable, Sendable, Equatable {
     let items: [ISHMarketplaceCatalogItem]
 }
 
+/// Desktop parity (D-010): installs default to loading the package into the
+/// local host runtime (the desktop behavior); native manifest compilation is
+/// an explicit opt-in that some catalog entries may still prefer.
+enum ISHMarketplaceInstallPreference: String, Codable, Sendable, Equatable {
+    case hostLoad = "host-load"
+    case nativeCompile = "native-compile"
+}
+
 /// Installation is native-first for every catalog entry. The value is a
 /// conservative catalog hint; the source snapshot and signed Swift validator
 /// remain authoritative at install time.
