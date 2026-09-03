@@ -116,6 +116,9 @@ scan_files() {
       # In-process URLProtocol fixture for provider discovery status/body/size
       # contracts. Production provider networking remains in Core/Network.
       outside-network:*/HarnessMobileTests/ProviderModelDiscoveryTests.swift) continue ;;
+      # In-process URLProtocol fixture for DeepSeek extension wire/acceptance
+      # contracts. It never opens a production network path.
+      outside-network:*/HarnessMobileTests/DeepSeekWireTests.swift) continue ;;
       outside-network:*/HarnessMobileTests/HarnessLLMSessionRegistryTests.swift) continue ;;
       outside-network:*/HarnessMobileTests/SessionTrajectoryRepositoryTests.swift) continue ;;
       outside-network:*/HarnessMobileTests/MCPClientTests.swift) continue ;;
