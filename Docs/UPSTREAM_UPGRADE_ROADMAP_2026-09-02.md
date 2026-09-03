@@ -172,7 +172,13 @@
 | `session-log-export`（ZIP 会话树） | 🟡 形态差异：移动端用系统分享导出（`ConversationExportBuilder` + ShareHandoff），无 ZIP 下载路由 | — |
 | `test-support/session-snapshot`（快照回放基建） | 🟡 IOS-REPLACEMENT：移动端以 `CompatibilityFixtures/*.json` + 专项 fixture 测试承载同等"证据式"契约测试 | — |
 | `core/scope`、`boot/cmdline`、`subprocess`、`sandbox-windows-acl`、`shell pwsh*`、`context/tmux-context` | ❌ 平台不适用 | — |
-| CordisRuntime 换代 / `api` 控制器拆分 / `client` 49 包 / `host` 宿主 / `sdk` / `e2b` / `webhook` / `webworker` / `experimental` | ❌ 维持边界判定（AGENTS.md + 平台形态），见 `UPSTREAM_GAP_FULL_2026-09-02.md` 第 3 节 | — |
+| **四 ⏸ 大项落地（2026-09-03）** | | |
+| `session-telemetry` + `session-telemetry-otel` | ✅ 捕获 seam（ledger/ops 通道、严重度预映射、fail-closed 脱敏瀑布）+ OTLP/JSON OTel 后端（FULL/FEEDBACK_ONLY/DISABLED 三模式，HTTP transport 注入式） | `d1816ff` |
+| `session-query-sqlite` | ✅ 已对齐（移动端 `SessionQueryReadModel` 即 SQLite FTS5 派生索引，实时会话内存索引+持久会话派生库同构） | — |
+| `storage-sqlite` | ✅ IOS-REPLACEMENT（宿主侧存储面移动端为 JSON/自有持久化；查询面已 sqlite） | — |
+| `api` 控制器拆分 | ✅ 协议边界（SessionControlling/SettingsControlling/WorkspaceControlling 与实现签名精确匹配，AppModel 遵循，测试钉住） | `476339f3` |
+| CordisRuntime 换代（host-runner） | ✅ IOS-REPLACEMENT 完整：`CordisPluginRuntime` actor 已实现上游 registry/lifecycle 全语义——动态注册表+staged 原子替换（=DynamicCordis registry/Run）、服务槽（=service inject）、事件/bail/拦截（=handlers）、unload 生命周期、per-scope 安装；审批请求通道在工具审批层（ToolApprovalRequest） | — |
+| CordisRuntime 换代 / `api` 控制器拆分 / `client` 49 包 / `host` 宿主 / `sdk` / `e2b` / `webhook` / `webworker` / `experimental` | ❌ 其余维持边界判定（AGENTS.md + 平台形态），见 `UPSTREAM_GAP_FULL_2026-09-02.md` 第 3 节 | — |
 
 ### 全量 UI 回归判定（2026-09-03 02:30-03:05）
 
