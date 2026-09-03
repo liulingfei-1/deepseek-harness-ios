@@ -71,6 +71,15 @@ enum ConversationTokenMeter {
         if let toolCallID = message.toolCallID, !toolCallID.isEmpty {
             tokens += estimateText(toolCallID) + blockOverhead
         }
+        // Image references carry a route-owned request price; under the fixed
+        // heuristic they retain a conservative structural price (mirrors
+        // upstream dsh-token-meter). Previously they were not counted at all,
+        // which let vision-heavy requests slip past the pressure meter.
+        for attachment in message.imageAttachments {
+            tokens += TokenPricing.structuralPrice(
+                .init(label: "\(attachment.mimeType)/\(attachment.byteCount)B")
+            )
+        }
         return tokens
     }
 
