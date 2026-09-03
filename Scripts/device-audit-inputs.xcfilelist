@@ -54,6 +54,7 @@ $(SRCROOT)/HarnessMobile/Core/Configuration/ProviderProfile.swift
 $(SRCROOT)/HarnessMobile/Core/Configuration/AgentProviderBundle.swift
 $(SRCROOT)/HarnessMobile/Core/Configuration/AgentProviderBundleInstaller.swift
 $(SRCROOT)/HarnessMobile/Core/Configuration/SettingsStore.swift
+$(SRCROOT)/HarnessMobile/Core/Controllers/ControllerProtocols.swift
 $(SRCROOT)/HarnessMobile/Core/Configuration/AnonymousUserID.swift
 $(SRCROOT)/HarnessMobile/Core/Configuration/TimeContextSettings.swift
 $(SRCROOT)/HarnessMobile/Core/Export/ConversationExportBuilder.swift
@@ -131,6 +132,7 @@ $(SRCROOT)/HarnessMobile/Core/Tools/DeliverableTools.swift
 $(SRCROOT)/HarnessMobile/Core/Tools/ToolResultOutputPolicy.swift
 $(SRCROOT)/HarnessMobileTests/ToolResultOutputPolicyTests.swift
 $(SRCROOT)/HarnessMobileTests/ConversationMessageWindowTests.swift
+$(SRCROOT)/HarnessMobileTests/ControllerSplitTests.swift
 $(SRCROOT)/HarnessMobileTests/StrReplaceEditorToolTests.swift
 $(SRCROOT)/HarnessMobile/Core/Tools/WorkspaceSearchTools.swift
 $(SRCROOT)/HarnessMobile/Core/Tools/ISH/ISHRootfsInstaller.swift

@@ -150,7 +150,7 @@ struct NativePluginCompilationTrace: Identifiable, Sendable, Equatable {
 
 @MainActor
 @Observable
-final class AppModel {
+final class AppModel: ObservableObject, SessionControlling, SettingsControlling, WorkspaceControlling {
     private static let maximumConcurrentRootRuns = 2
 
     private struct RunExecutionSnapshot: Sendable {
