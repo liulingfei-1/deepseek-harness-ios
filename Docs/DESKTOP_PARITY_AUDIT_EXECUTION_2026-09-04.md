@@ -27,7 +27,7 @@
 | 005 | VERIFY | ACP NDJSON iSH transport、可配置 provider catalog 与 `subagent`/Jobs 路径已接线 | 真实 ACP entrypoint、持久化 provider 选择、cancel/exit/reconnect |
 | 006 | VERIFY | reasoning/provider 参数与 listing tool 已有 | 动态 capability、显式 provider、真实多 provider |
 | 007 | VERIFY | Claude/Codex command hook runner 已接入；本批次补齐子 Agent生命周期事件 | 真机 iSH/ACP、超时/取消、诊断轨迹 |
-| 008 | VERIFY | Exa/Perplexity provider 路由与 Keychain origin 已接线 | 设置 UI、401/429/timeout、真实 citations |
+| 008 | VERIFY | Exa/Perplexity provider 路由、Keychain origin、设置 UI 和删除/状态反馈已接线；Exa 映射与上游首个非空 highlight 语义一致 | 401/429/timeout、真实 citations、真机 Keychain/UI |
 | 009 | IOS-REPLACEMENT | Workflow 提供本机 team 语义替代 | 多成员长时并发/恢复真机证据 |
 | 010 | VERIFY | loopback `/health`、`/status`、`/sessions` 已启动并动态投影；`LocalStateHTTPClient` live GET 已验证 | `/sessions` live、端口冲突、生命周期、真机 |
 | 011 | TODO | 静态 provider catalog；缺动态 catalog/OAuth/reload | 先建立 capability cache，再逐 provider 接入 |

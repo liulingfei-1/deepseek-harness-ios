@@ -52,11 +52,11 @@
 
 - **状态**：VERIFY
 - **上游证据**：`web-search-exa` 与 `web-search-perplexity` provider 的请求/结果映射；现有 `ExaSearchProviderTests` 3 项、`PerplexitySearchProviderTests` 3 项通过。
-- **移动端变更**：`AppModel+NativePluginLifecycle` 新增统一 `configuredWebSearchProvider` 路由；默认保留官方 DeepSeek 原生搜索，用户通过 `setWebSearchProvider("exa"|"perplexity")` 选择可选 provider，API key 按各自 HTTPS origin 写入 Keychain（`saveSearchProviderAPIKey`），结果继续通过同一 `web_search` tool 回灌 citations。
-- **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter 'ExaSearchProviderTests|PerplexitySearchProviderTests'` → 6 tests passed。
-- **Simulator**：Xcode arm64 Simulator build 成功（`/tmp/hm-xcode7`）；provider 选择 UI/真实调用尚未执行。
+- **移动端变更**：`AppModel+NativePluginLifecycle` 新增统一 `configuredWebSearchProvider` 路由；默认保留官方 DeepSeek 原生搜索，用户通过设置页 `setWebSearchProvider("exa"|"perplexity")` 选择可选 provider，API key 按各自 HTTPS origin 写入/删除 Keychain（`saveSearchProviderAPIKey`、`deleteSearchProviderAPIKey`），并显示状态。Exa 映射修正为丢弃无 URL 或无非空 highlight 的结果、取首个非空 highlight，与上游 `mapExaResult` 一致；结果继续通过同一 `web_search` tool 回灌 citations。
+- **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter ExaSearchProviderTests` → 3 tests passed；Perplexity mapper 3 tests 已在此前基线通过。
+- **Simulator**：Xcode arm64 Simulator build 成功（`/tmp/hm-xcode-parity`）；设置入口和 SecureField 已编译进应用目标。
 - **iPhone 16 Pro**：未配置真实 Exa/Perplexity key，也未做限流/错误/引用端到端验证，保留 `VERIFY`。
-- **剩余动作**：在设置 UI 暴露 provider 选择和 key 输入，补真实 API fixture、401/429/超时错误态和真机引用渲染证据。
+- **剩余动作**：补真实 API fixture、401/429/超时错误态和真机 Keychain/引用渲染证据；Perplexity 生成内容字段需扩展移动端工具契约后再接入。
 
 ### PARITY-010 · LocalStateServer 生产生命周期（2026-09-04）
 

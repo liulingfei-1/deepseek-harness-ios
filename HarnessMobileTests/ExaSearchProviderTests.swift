@@ -25,20 +25,26 @@ final class ExaSearchProviderTests: XCTestCase {
             ])
         ])
         let sources = ExaSearchProvider.sources(from: response)
-        XCTAssertEqual(sources.count, 2)
-        XCTAssertEqual(sources[0].snippet, "first highlight second")
-        XCTAssertEqual(sources[1].snippet, "")
+        XCTAssertEqual(sources.count, 1)
+        XCTAssertEqual(sources[0].snippet, "first highlight")
+        XCTAssertEqual(sources[0].url, "https://example.com/a")
     }
 
-    func testEntriesWithoutURLAreDropped() {
+    func testEntriesWithoutURLOrHighlightAreDropped() {
         let response: JSONValue = .object([
             "results": .array([
                 .object(["title": .string("no url")]),
-                .object(["url": .string("https://example.com/ok"), "title": .string("OK")])
+                .object(["url": .string("https://example.com/no-highlight"), "title": .string("No highlight")]),
+                .object([
+                    "url": .string("https://example.com/ok"),
+                    "title": .string("OK"),
+                    "highlights": .array([.string("  "), .string("usable highlight")])
+                ])
             ])
         ])
         let sources = ExaSearchProvider.sources(from: response)
         XCTAssertEqual(sources.map(\.url), ["https://example.com/ok"])
+        XCTAssertEqual(sources[0].snippet, "usable highlight")
     }
 
     func testNonArrayResultsYieldEmpty() {

@@ -51,16 +51,15 @@ struct ExaSearchProvider: WebSearchProvider {
     }
 
 
-    /// Maps a `POST /search` response. Entries without a usable url are
-    /// dropped; highlights join as the snippet (first sentence wins).
+    /// Maps a `POST /search` response. Entries without a usable URL or a
+    /// non-blank highlight are dropped, matching upstream `mapExaResult`.
     static func sources(from response: JSONValue) -> [WebSearchProviderSource] {
         guard case let .array(results)? = response.objectValue?["results"] else { return [] }
         return results.compactMap { result in
             guard let url = result.objectValue?["url"]?.stringValue, !url.isEmpty else { return nil }
-            var snippet = ""
-            if case let .array(highlights)? = result.objectValue?["highlights"] {
-                snippet = highlights.compactMap(\.stringValue).joined(separator: " ")
-            }
+            guard case let .array(highlights)? = result.objectValue?["highlights"],
+                  let snippet = highlights.compactMap(\.stringValue).first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+            else { return nil }
             return WebSearchProviderSource(
                 title: result.objectValue?["title"]?.stringValue ?? "",
                 url: url,

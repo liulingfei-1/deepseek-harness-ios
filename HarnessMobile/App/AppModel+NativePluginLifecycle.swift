@@ -125,6 +125,36 @@ extension AppModel {
         try await saveCredential(key, forOrigin: origin)
     }
 
+    func deleteSearchProviderAPIKey(providerID: String) async throws {
+        let origin: String
+        switch providerID {
+        case ExaSearchProvider.identifierValue:
+            origin = ExaSearchProvider.defaultBaseURL
+        case PerplexitySearchProvider.identifierValue:
+            origin = PerplexitySearchProvider.defaultBaseURL
+        default:
+            throw CredentialStoreError.invalidOrigin
+        }
+        try await deleteCredential(forOrigin: origin)
+    }
+
+    func searchProviderCredentialStatus(for providerID: String) async -> ProviderCredentialStatus {
+        let origin: String
+        switch providerID {
+        case ExaSearchProvider.identifierValue:
+            origin = ExaSearchProvider.defaultBaseURL
+        case PerplexitySearchProvider.identifierValue:
+            origin = PerplexitySearchProvider.defaultBaseURL
+        default:
+            return .unknown
+        }
+        do {
+            return try await readCredential(forOrigin: origin) == nil ? .missing : .configured
+        } catch {
+            return .unknown
+        }
+    }
+
     func setWebSearchProvider(_ providerID: String?) {
         if let providerID {
             UserDefaults.standard.set(providerID, forKey: "harness.web-search-provider")

@@ -27,6 +27,28 @@ final class AppModelProviderProfileTests: XCTestCase {
         try await fixture.credentialStore.deleteAllAPIKeys()
     }
 
+    func testSearchProviderCredentialLifecycleUsesCanonicalOrigin() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanFilesAndDefaults() }
+        let model = fixture.makeModel()
+        let defaults = UserDefaults.standard
+        let previous = defaults.string(forKey: "harness.web-search-provider")
+        defer {
+            if let previous { defaults.set(previous, forKey: "harness.web-search-provider") }
+            else { defaults.removeObject(forKey: "harness.web-search-provider") }
+        }
+
+        model.setWebSearchProvider(ExaSearchProvider.identifierValue)
+        try await model.saveSearchProviderAPIKey("exa-fixture-secret", providerID: ExaSearchProvider.identifierValue)
+        let configuredStatus = await model.searchProviderCredentialStatus(for: ExaSearchProvider.identifierValue)
+        XCTAssertEqual(configuredStatus, .configured)
+        XCTAssertNotNil(model.configuredWebSearchProvider())
+
+        try await model.deleteSearchProviderAPIKey(providerID: ExaSearchProvider.identifierValue)
+        let missingStatus = await model.searchProviderCredentialStatus(for: ExaSearchProvider.identifierValue)
+        XCTAssertEqual(missingStatus, .missing)
+    }
+
     func testBootstrapMigratesLegacyCredentialIntoProfileReference() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanFilesAndDefaults() }

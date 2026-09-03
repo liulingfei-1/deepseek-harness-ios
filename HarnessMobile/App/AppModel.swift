@@ -8471,6 +8471,10 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         try await credentialStore.saveAPIKey(key, for: origin)
     }
 
+    func deleteCredential(forOrigin origin: String) async throws {
+        try await credentialStore.deleteAPIKey(for: origin)
+    }
+
     /// Resolves the current profile identity only while a request is being
     /// assembled. The returned value is immutable and contains no credential.
     func providerRequestRoute(

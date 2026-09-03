@@ -44,6 +44,15 @@ struct SettingsView: View {
 
             Section {
                 NavigationLink {
+                    WebSearchSettingsView()
+                } label: {
+                    SettingsLinkLabel(title: "联网搜索", systemImage: "magnifyingglass", tint: .cyan)
+                }
+                .accessibilityIdentifier("settings-web-search")
+            } header: { Label("搜索", systemImage: "magnifyingglass") }
+
+            Section {
+                NavigationLink {
                     AgentProviderBundlesView()
                 } label: {
                     SettingsLinkLabel(title: "Agent 编排 Bundle", systemImage: "arrow.triangle.branch", tint: .indigo)
@@ -210,6 +219,131 @@ private struct SettingsLinkLabel: View {
             Spacer(minLength: 8)
         }
         .contentShape(Rectangle())
+    }
+}
+
+private struct WebSearchSettingsView: View {
+    @Environment(AppModel.self) private var model
+    @State private var selectedProvider = "none"
+    @State private var apiKey = ""
+    @State private var credentialStatus: ProviderCredentialStatus = .unknown
+    @State private var errorMessage: String?
+    @State private var isSaving = false
+
+    private let providers = [
+        (id: "none", name: "关闭搜索", detail: "不注册联网搜索工具"),
+        (id: DeepSeekSearchProvider.identifierValue, name: "DeepSeek", detail: "使用当前模型服务商的搜索能力"),
+        (id: ExaSearchProvider.identifierValue, name: "Exa", detail: "Exa Search API"),
+        (id: PerplexitySearchProvider.identifierValue, name: "Perplexity", detail: "Perplexity Sonar API")
+    ]
+
+    var body: some View {
+        Form {
+            Section {
+                Picker("搜索服务商", selection: $selectedProvider) {
+                    ForEach(providers, id: \.id) { provider in
+                        VStack(alignment: .leading) {
+                            Text(provider.name)
+                            Text(provider.detail).font(.caption).foregroundStyle(.secondary)
+                        }
+                        .disabled(provider.id == DeepSeekSearchProvider.identifierValue && model.effectiveConfiguration.providerID != .deepSeekOfficial)
+                        .tag(provider.id)
+                    }
+                }
+                .accessibilityIdentifier("web-search-provider-picker")
+                .onChange(of: selectedProvider) { _, newValue in
+                    model.setWebSearchProvider(newValue == "none" ? nil : newValue)
+                    Task { await refreshCredentialStatus(for: newValue) }
+                }
+            } header: {
+                Text("联网搜索")
+            } footer: {
+                Text("搜索结果会携带服务商返回的 URL、标题和摘要。DeepSeek 仅在当前模型服务商为官方 DeepSeek 时可用。")
+            }
+
+            if selectedProvider == ExaSearchProvider.identifierValue || selectedProvider == PerplexitySearchProvider.identifierValue {
+                Section {
+                    SecureField("API Key", text: $apiKey)
+                        .textContentType(.password)
+                        .accessibilityIdentifier("web-search-api-key")
+                    LabeledContent("凭据状态", value: credentialStatusLabel)
+                    HStack {
+                        Button("保存") { saveKey() }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
+                        if credentialStatus == .configured {
+                            Button("删除 Key", role: .destructive) { deleteKey() }
+                                .disabled(isSaving)
+                        }
+                        if isSaving { ProgressView().controlSize(.small) }
+                    }
+                } header: {
+                    Text("\(selectedProvider.capitalized) 凭据")
+                } footer: {
+                    Text("Key 仅保存到本机 Keychain；未配置 Key 时搜索工具会返回明确错误。")
+                }
+            }
+        }
+        .harnessCompactListChrome()
+        .navigationTitle("联网搜索")
+        .task {
+            let saved = UserDefaults.standard.string(forKey: "harness.web-search-provider")
+            selectedProvider = saved ?? (model.effectiveConfiguration.providerID == .deepSeekOfficial ? DeepSeekSearchProvider.identifierValue : "none")
+            await refreshCredentialStatus(for: selectedProvider)
+        }
+        .alert("搜索设置失败", isPresented: Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        )) {
+            Button("好") { errorMessage = nil }
+        } message: {
+            Text(errorMessage ?? "")
+        }
+    }
+
+    private var credentialStatusLabel: String {
+        switch credentialStatus {
+        case .unknown: "检查中"
+        case .configured: "已配置"
+        case .missing: "缺少 Key"
+        case .originMismatch: "来源不匹配"
+        }
+    }
+
+    private func refreshCredentialStatus(for providerID: String) async {
+        guard providerID == ExaSearchProvider.identifierValue || providerID == PerplexitySearchProvider.identifierValue else {
+            credentialStatus = .unknown
+            return
+        }
+        credentialStatus = await model.searchProviderCredentialStatus(for: providerID)
+    }
+
+    private func saveKey() {
+        isSaving = true
+        Task {
+            do {
+                try await model.saveSearchProviderAPIKey(apiKey, providerID: selectedProvider)
+                model.setWebSearchProvider(selectedProvider)
+                apiKey = ""
+                await refreshCredentialStatus(for: selectedProvider)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            isSaving = false
+        }
+    }
+
+    private func deleteKey() {
+        isSaving = true
+        Task {
+            do {
+                try await model.deleteSearchProviderAPIKey(providerID: selectedProvider)
+                credentialStatus = .missing
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            isSaving = false
+        }
     }
 }
 
