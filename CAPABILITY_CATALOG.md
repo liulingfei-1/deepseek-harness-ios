@@ -24,7 +24,10 @@
 | 工作区 | 私有文件、导入、读写、搜索、编辑、导出和引用 | VERIFY | `Core/Storage/`、Workspace tests |
 | 原生工具 | OCR、位置、运动、通知、认证、通讯录、日历、语音等 | PARTIAL | 移动能力矩阵、生产工具目录 |
 | iSH | Alpine guest、shell、文件、网络开关、Host Node | VERIFY | `Core/Tools/ISH/`、Host smoke、真机证据 |
-| 插件 | 原生清单、Cordis Host-half、市场、设置、生命周期与回滚 | VERIFY | `Core/Plugins/`、Plugin tests |
+| 插件 | Host 运行时动态 define/run（cordis_* 7 工具）、任意 Cordis/npm JS 包、市场（默认 hostLoad 装载）、native 清单（可选后端）、设置与回滚 | VERIFY | `Core/Plugins/`、Host smoke、Plugin tests（D-010/D-011） |
+| 本地 server | 127.0.0.1 只读状态端点（/health、注入式 /status） | VERIFY | `Core/LocalServer/LocalStateServer.swift`、server tests |
+| 定时提醒 UI | 会话级 schedule 目录/管理（对应桌面 ui-schedule） | VERIFY | `Features/Chat/HarnessSchedulePanel.swift` |
+| 远程执行后端 | e2b 沙箱 / webhook 入站 / ACP 远端（用户显式配置后可用，D-011） | TODO | 决策 D-011、PLATFORM_FEASIBILITY_REAUDIT |
 | 轨迹/诊断 | run/turn/step、工具、插件链、使用量、脱敏导出 | VERIFY | `Core/Trace/`、Trace tests |
 | 后台 | Continued Processing、有限 lease、journal、Live Activity、通知 | VERIFY | `Core/Background/`、真机切屏验收 |
 | 浏览器 | 本机 WebKit tab、读取、点击和下载边界 | PARTIAL | 机器清单、Browser tests |
