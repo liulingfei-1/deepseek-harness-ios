@@ -40,6 +40,34 @@ final class ProviderModelDiscoveryTests: XCTestCase {
         XCTAssertNil(removed)
     }
 
+    func testProviderCapabilityCacheRestoresAcrossInstancesAndPersistsRemoval() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("provider-capabilities-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let storageURL = directory.appendingPathComponent("snapshots.json")
+        let snapshot = ModelCatalogSnapshot(
+            providerID: .anthropic,
+            source: .builtIn,
+            catalogVersion: "catalog-v1",
+            fetchedAt: Date(timeIntervalSince1970: 10),
+            models: [ProviderModel(id: "claude-sonnet-4-5", inputModalities: [.text, .image])]
+        )
+
+        let first = ProviderCapabilityCache(storageURL: storageURL)
+        await first.update(profileID: "profile-anthropic", snapshot: snapshot)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: storageURL.path))
+
+        let reloaded = ProviderCapabilityCache(storageURL: storageURL)
+        let restored = await reloaded.snapshot(profileID: "profile-anthropic")
+        XCTAssertEqual(restored?.catalog.models, snapshot.models)
+        XCTAssertEqual(restored?.catalog.source, .builtIn)
+
+        await reloaded.remove(profileID: "profile-anthropic")
+        let removed = ProviderCapabilityCache(storageURL: storageURL)
+        let removedSnapshot = await removed.snapshot(profileID: "profile-anthropic")
+        XCTAssertNil(removedSnapshot)
+    }
+
     func testProviderCatalogIsVersionedAndKeepsDesktopDeepSeekDefaults() {
         XCTAssertEqual(ModelProviderCatalog.schemaVersion, 1)
         XCTAssertFalse(ModelProviderCatalog.version.isEmpty)

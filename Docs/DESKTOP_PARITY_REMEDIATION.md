@@ -150,8 +150,8 @@
 
 - **状态**：VERIFY
 - **上游证据**：最新 `llm` runtime 暴露 `listModels`、`resolveModelInfo`、reasoning/context/modality capability，并要求每次调用绑定当前 adapter registration。
-- **移动端变更**：新增 `ProviderCapabilityCache` actor；每次 `AppModel.discoverModels` 成功后按 profile 写入可替换的 capability snapshot（模型目录、来源/版本、reasoning modes、刷新时间），设置/子 Agent 可读取当前快照；磁盘 TTL 与凭据分区继续由既有 `ModelDiscoveryCache` 负责。
-- **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter ProviderModelDiscoveryTests` → 15 tests passed，新增快照替换/删除测试。
+- **移动端变更**：新增 `ProviderCapabilityCache` actor；每次 `AppModel.discoverModels` 成功后按 profile 写入可替换的 capability snapshot（模型目录、来源/版本、reasoning modes、刷新时间），并以 ISO-8601 JSON 持久化到 Application Support，冷启动自动恢复；删除 provider profile 或清空配置时同步清理快照。磁盘 TTL 与凭据分区继续由既有 `ModelDiscoveryCache` 负责。
+- **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter ProviderModelDiscoveryTests` → 16 tests passed，新增跨实例恢复/删除测试。
 - **剩余动作**：OAuth 登录/刷新生命周期、provider-specific reasoning/context wire fixture、runtime reload 的真实多 provider 与设备证据；未完成部分保持 `VERIFY`。
 
 ### PARITY-006 · 子 Agent reasoning effort 参数（2026-09-03）

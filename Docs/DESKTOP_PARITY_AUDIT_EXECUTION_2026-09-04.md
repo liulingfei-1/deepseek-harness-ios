@@ -30,7 +30,7 @@
 | 008 | VERIFY | Exa/Perplexity provider 路由、Keychain origin、设置 UI 和删除/状态反馈已接线；Exa 映射与上游首个非空 highlight 语义一致 | 401/429/timeout、真实 citations、真机 Keychain/UI |
 | 009 | IOS-REPLACEMENT | Workflow 提供本机 team 语义替代 | 多成员长时并发/恢复真机证据 |
 | 010 | VERIFY | loopback `/health`、`/status`、`/sessions` 已启动并动态投影；`LocalStateHTTPClient` 已用真实 `URLSession` 验证 `/status` 与 `/sessions` GET | 端口冲突、生命周期、真机 |
-| 011 | VERIFY | 已有静态 catalog、远程模型发现和新增 `ProviderCapabilityCache`；仍缺 OAuth/reload 的完整生命周期 | 逐 provider capability wire fixture、OAuth 授权/刷新与真机证据 |
+| 011 | VERIFY | 已有静态 catalog、远程模型发现和新增 `ProviderCapabilityCache`；现已补 Application Support 冷启动快照与 profile 删除清理，仍缺 OAuth/reload 的完整生命周期 | 逐 provider capability wire fixture、OAuth 授权/刷新与真机证据 |
 | 012 | TODO | 无 e2b/fs/subprocess provider | 先写上游 REST compatibility fixture，再决定本机替代或显式远程适配 |
 | 013 | VERIFY | provider-neutral envelope、loopback POST、持久规则 registry、claim/complete/requeue、admission retry、可选 Agent 唤醒、HMAC 和 AppModel→本机 Job 投影均已接线 | 后台持续监听、公网隧道、真实 Session 创建和真机证据 |
 | 014 | TODO | 无桌面浏览器/Windows 发行形态 | 形成 capability matrix，平台不适用项明确收口 |
@@ -60,7 +60,7 @@
 
 ### P5/P6：动态 provider、e2b、平台矩阵
 
-- **011**：已新增 provider capability snapshot/cache 与 discoverModels 接线；后续补协议选择/runtime reload 和每 provider wire fixture，OAuth 只在平台能完成完整授权生命周期时注册。
+- **011**：已新增 provider capability snapshot/cache 与 discoverModels 接线，本批次补齐 Application Support 冷启动持久化及 profile 删除清理；后续补协议选择/runtime reload 和每 provider wire fixture，OAuth 只在平台能完成完整授权生命周期时注册。
 - **012**：先核对 `packages/e2b/e2b/src/index.ts`、`fs-e2b`、`subprocess-e2b` 与公开 REST 契约；无真实契约不得猜 endpoint。不能提供同机制时实现本机 iSH 语义替代并标 `IOS-REPLACEMENT`，远程后端另行记录配置和数据披露。
 - **014**：Browser/React client-half 已由现有 WKWebView 证明可承载，保留为待接入工程项；Windows PowerShell/win32/ACL 仍是平台不适用。原生 UI/API 替代与桌面同 runtime 必须分开记录。
 

@@ -1251,6 +1251,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         }
         providerDirectory = nextDirectory
         advanceProviderRouteGeneration(for: id)
+        await providerCapabilityCache.remove(profileID: id)
         compactionSummaryRoute = nextCompactionSummaryRoute
         sessionTitleSettings = nextSessionTitleSettings
         credentialStatuses[id] = nil
@@ -1919,6 +1920,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
             try await credentialStore.deleteAllAPIKeys()
             settingsStore.clear()
             providerDirectory = .initial()
+            await providerCapabilityCache.removeAll()
             credentialStatuses = [:]
             pendingLegacyConfiguration = nil
             isConfigured = false
