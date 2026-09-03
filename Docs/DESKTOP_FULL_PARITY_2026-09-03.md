@@ -41,8 +41,8 @@
 | P1 host 侧 | ✅ 已验证 | Mac node 真实栈 assemble = 7 工具；`ISHPluginHostNodeSmoke` exit=0（含 contributions 7 工具 + cordis_inspect_list/query 真实调用断言，已有） |
 | P1 移动端同步 | 🔶 代码完整 | `synchronizeISHPluginHost → contributions → bridge definition → registerTool` 链路存在；模拟器端到端 = VERIFY |
 | P2 默认路由 | ✅ 模型层+UI | `0300d228`（install 默认 hostLoad、native 显式 opt-in）+ 本提交（UI 文案/策略语义）；市场 UI 测试绿 |
-| P3 npm 生态 | ⏳ | 需 install.sh 扩展 |
-| P4 UI 面 | ⏳ | 贡献/库存管理 |
+| P3 npm 生态 | ✅ 已实现 | `marketplace.reconcileRuntime` npm install（registry 镜像 + `healHostPackages` 宿主包复用 + addon **平台限制错误**（D-010 语义，非安全拒绝）+ 依赖树上限）；安装即 `npm pack`→runtime。无需新增 |
+| P4 UI 面 | ✅ 已对齐 | 市场装载 + 已安装启/停/卸管理 + 模型 cordis_* 7 工具动态管理 = 桌面工具型管理同构；运行状态可视化为可选增强 |
 
 ### A1 模型插件工具面：7 工具直通（P1）
 - 目标：模型看到 `cordis_inspect_list / cordis_inspect_query / cordis_inspect_self / cordis_define / cordis_run / cordis_stop / cordis_undefine`（与桌面一致），不经 native 编译前置。
