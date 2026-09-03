@@ -1,6 +1,33 @@
 import Foundation
 import Network
 
+/// Synchronous projection shared by the main-actor model and Network queue.
+/// The lock keeps endpoint handlers independent from actor isolation.
+final class LocalStateSnapshotStore: @unchecked Sendable {
+    private let lock = NSLock()
+    private var statusBody = #"{"status":"ok","source":"harness-mobile"}"#
+    private var sessionsBody = #"{"sessions":[]}"#
+
+    func update(statusBody: String, sessionsBody: String) {
+        lock.lock()
+        self.statusBody = statusBody
+        self.sessionsBody = sessionsBody
+        lock.unlock()
+    }
+
+    func status() -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        return statusBody
+    }
+
+    func sessions() -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        return sessionsBody
+    }
+}
+
 /// A loopback-only HTTP state server (desktop `webserver`/`frontend-static`
 /// parity). Listens on 127.0.0.1 with an ephemeral port and answers a small
 /// set of GET endpoints; it never binds a remote interface, never reads

@@ -95,4 +95,14 @@ final class LocalStateServerTests: XCTestCase {
         XCTAssertTrue(first)
         XCTAssertFalse(second)
     }
+
+    func testSnapshotStorePublishesConcurrentEndpointBodies() {
+        let store = LocalStateSnapshotStore()
+        store.update(
+            statusBody: #"{"status":"ok","sessionCount":2}"#,
+            sessionsBody: #"{"sessions":[{"id":"one"}]}"#
+        )
+        XCTAssertTrue(store.status().contains(#""sessionCount":2"#))
+        XCTAssertTrue(store.sessions().contains(#""id":"one"#))
+    }
 }

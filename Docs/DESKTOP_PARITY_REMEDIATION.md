@@ -63,8 +63,8 @@
 - **状态**：VERIFY
 - **上游证据**：桌面 `webserver` 的本机状态路由；移动端 `LocalStateServer.route` 与 loopback listener 测试 4 项通过。
 - **移动端变更**：`AppModel` 初始化时启动 loopback-only `LocalStateServer`，注册 `/health`、`/status` 和 `/sessions` 路由；服务随 AppModel 生命周期持有，未引入远程绑定或执行转发。
-- **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-parity-p4 --filter LocalStateServerTests` → 4 tests passed；Xcode arm64 Simulator build `/tmp/hm-xcode9` 成功。
-- **Simulator**：应用目标构建成功；尚未通过真实 HTTP client 访问路由。
+- **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter LocalStateServerTests` → 6 tests passed；Xcode arm64 Simulator build `/tmp/hm-xcode-webhook` 成功。
+- **Simulator**：应用目标构建成功。`/status` 和 `/sessions` 已从 `AppModel` 的会话/运行投影更新线程安全快照，尚未通过真实 HTTP client 访问路由。
 - **iPhone 16 Pro**：尚未验证端口冲突、前后台重启和实际控制器数据，保留 `VERIFY`。
 - **剩余动作**：将 session/settings/workspace controller 的动态 JSON 接入 loopback 路由，并补真机 HTTP/生命周期证据；桌面 frontend-static 仍需原生替代。
 

@@ -225,7 +225,7 @@ git diff --check
 | PARITY-005 ACP transport | VERIFY | 新增 `ISHACPLineTransport` 复用 iSH Node transport，支持 NDJSON 分帧/首包排队/退出处理；5 个 ACP wire tests 通过；真实 iSH agent、Jobs 注册与真机仍待验证 |
 | PARITY-008 Exa/Perplexity | VERIFY | AppModel 统一路由、Keychain origin 存取和显式 provider 选择已接入；6 个 provider mapping tests 通过；设置 UI、真实 API 与真机引用仍待验证 |
 | PARITY-009 agent team | IOS-REPLACEMENT | 现有 workflow tool 提供本机编排、并行/流水线、成员生命周期与可恢复轨迹树；桌面后台 team daemon 机制不适用于 iOS，保留前台语义等价实现 |
-| PARITY-010 LocalStateServer | VERIFY | AppModel 启动 loopback server 并注册 health/status/sessions；4 个路由测试、Xcode arm64 Simulator build 通过；动态 controller 与真机 HTTP 仍待验证 |
+| PARITY-010 LocalStateServer | VERIFY | AppModel 启动 loopback server 并注册 health/status/sessions；新增线程安全快照盒与会话/运行投影更新，6 个路由/快照测试通过；真机 HTTP 仍待验证 |
 | PARITY-011/012/014 | TODO | 已完成源码/上游定位并写入本计划，尚未宣称实现 |
 | PARITY-013 webhook | VERIFY | GitHub delivery/event/payload envelope 解析与进程内有界去重已实现；5 个 LocalStateServer 测试通过；POST listener、签名验证、持久化 delivery state 和 Agent/Job 触发待实现 |
 

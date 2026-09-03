@@ -546,6 +546,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
     @ObservationIgnored let runtimeTelemetryStore = RuntimeTelemetryStore()
     @ObservationIgnored private let runtimeHangWatchdog: RuntimeHangWatchdog
     @ObservationIgnored private let runtimeMetricKitSubscriber: RuntimeMetricKitSubscriber
+    @ObservationIgnored private let localStateSnapshotStore = LocalStateSnapshotStore()
     @ObservationIgnored private var localStateServer: LocalStateServer?
     @ObservationIgnored private let backgroundResumeCoordinator = SessionBackgroundResumeCoordinator()
     @ObservationIgnored let terminalProvider: any ISHTerminalProviding
@@ -707,8 +708,8 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
             self?.refreshBackgroundSystemProjection()
         }
         localStateServer = LocalStateServer(endpoints: [
-            .init(path: "/status", handler: { #"{"status":"ok","source":"harness-mobile"}"# }),
-            .init(path: "/sessions", handler: { #"{"sessions":[]}"# })
+            .init(path: "/status", handler: { [localStateSnapshotStore] in localStateSnapshotStore.status() }),
+            .init(path: "/sessions", handler: { [localStateSnapshotStore] in localStateSnapshotStore.sessions() })
         ])
         localStateServer?.start()
     }
@@ -831,6 +832,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         stagedShareAdmission = nil
         await refreshPluginInventory()
         isReady = true
+        refreshLocalStateProjection()
         await runtimeTelemetryStore.markBootstrapCompleted()
         await refreshAppIntentRunningSessionProjection()
         if let activeSessionID {
@@ -8133,6 +8135,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
             controlState = ConversationControlState()
             hasResumableRun = false
         }
+        refreshLocalStateProjection()
     }
 
     private func apply(session: ConversationSession) {
@@ -8166,6 +8169,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         sessionRunSnapshots = Dictionary(
             uniqueKeysWithValues: aggregate.runs.map { ($0.identity.sessionID, $0) }
         )
+        refreshLocalStateProjection()
         refreshWidgetProjection()
         await refreshAppIntentRunningSessionProjection()
     }
@@ -8198,9 +8202,39 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
             _ = try await sessionQueryReadModel.rebuild(persistence: trajectoryRepository)
             sessions = try await sessionStore.listSessions()
                 .sorted { $0.updatedAt > $1.updatedAt }
+            refreshLocalStateProjection()
         } catch {
             presentError(error)
         }
+    }
+
+    private func refreshLocalStateProjection() {
+        let status: [String: Any] = [
+            "status": "ok",
+            "source": "harness-mobile",
+            "ready": isReady,
+            "activeSessionID": activeSessionID?.uuidString.lowercased() as Any,
+            "running": isRunning,
+            "sessionCount": sessions.count
+        ]
+        let sessionRows = sessions.map { session in
+            [
+                "id": session.id.uuidString.lowercased(),
+                "title": session.title,
+                "messageCount": session.messageCount,
+                "updatedAt": ISO8601DateFormatter().string(from: session.updatedAt),
+                "archived": session.isArchived,
+                "queuedInputCount": session.queuedInputCount,
+                "resumable": session.isResumable
+            ] as [String: Any]
+        }
+        guard JSONSerialization.isValidJSONObject(status),
+              JSONSerialization.isValidJSONObject(["sessions": sessionRows]),
+              let statusData = try? JSONSerialization.data(withJSONObject: status),
+              let sessionsData = try? JSONSerialization.data(withJSONObject: ["sessions": sessionRows]),
+              let statusBody = String(data: statusData, encoding: .utf8),
+              let sessionsBody = String(data: sessionsData, encoding: .utf8) else { return }
+        localStateSnapshotStore.update(statusBody: statusBody, sessionsBody: sessionsBody)
     }
 
     private func migrateLegacyProviderConfigurationIfNeeded() async throws {
