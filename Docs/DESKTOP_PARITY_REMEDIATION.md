@@ -117,6 +117,15 @@
 - **Simulator/iPhone**：本批次将重跑 Simulator build；未做真机 iSH 命令执行和配置文件端到端验证，保留 `VERIFY`。
 - **剩余动作**：补 SubagentStart/SubagentStop 事件、真机 iSH/ACP 命令执行、超时/取消和诊断轨迹证据。
 
+### PARITY-007 · SubagentStart/SubagentStop 生命周期接线（2026-09-04）
+
+- **状态**：VERIFY
+- **上游核对**：最新 `hooks-claude-code/src/config.ts` 明确支持 `SubagentStart` 与 `SubagentStop`；Codex 仍保持五事件子集。
+- **移动端变更**：`AppModel.executeLocalSubagent` 在同一 activation 的 child 启动前调用 `SubagentStart`，将 parent/child/run、label、model、provider bundle 和 continuation 投影为 JSON；正常完成、失败和取消路径调用 `SubagentStop`。Stop hook 失败只写诊断，不改写子 Agent 结果；Start hook 阻断则不启动 child。
+- **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-subagent-hooks --filter HookProtocolTests` → 6 tests passed；AppModel 全量回归与真实 iSH hook 仍待执行。
+- **Simulator/iPhone**：尚未重跑本批次 Xcode arm64 Simulator，也未在 iPhone 16 Pro 验证真实 hook 命令、超时、取消和 ACP 进程退出，保持 `VERIFY`。
+- **剩余动作**：为 provider-bundle 早失败路径补 Stop 事件断言；补真机 iSH/ACP lifecycle 和诊断轨迹证据。
+
 > 更新：2026-08-29。本文只保留当前仍需行动或验收的事项。已经通过自动化门的历史修补不再作为待办重复列出；完整历史证据由 git 提交、测试报告和本文件的归档索引追溯。
 
 ## 当前结论

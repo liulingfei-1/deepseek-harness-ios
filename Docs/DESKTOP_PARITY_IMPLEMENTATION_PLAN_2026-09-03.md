@@ -220,7 +220,7 @@ git diff --check
 | PARITY-002 session-log | VERIFY | 新增 `SessionLogDeliveryCoordinator`：durable watermark、`dsh_session_log` suffix body、accepted cursor 与重复抑制；专项测试通过；尚未接入 AppModel/真实 endpoint |
 | PARITY-003 telemetry | VERIFY | `TelemetrySessionPersistence` 接入 AppModel append；5 项 telemetry tests 通过；全量 897 tests/5 skipped/0 failures；模式设置、feedback release、真机 OTLP 待验证 |
 | PARITY-006 子 Agent reasoning | VERIFY | schema 与 LocalSubagentRequest 支持 reasoning_effort，并应用到 child configuration；新增 `list_subagent_models`；HarnessJobs 专项通过；provider listing/真实多 provider 仍待实现 |
-| PARITY-007 hooks | VERIFY | `AgentRuntime` 已接入 SessionStart/UserPromptSubmit/PreToolUse/PostToolUse/Stop，AppModel 从工作区加载 Codex/Claude 配置并用 iSH executor；两项 lifecycle/runner 专项测试通过；真机 iSH 命令执行仍待验证 |
+| PARITY-007 hooks | VERIFY | `AgentRuntime` 已接入 SessionStart/UserPromptSubmit/PreToolUse/PostToolUse/Stop；AppModel 另在子 Agent activation 接入 Claude `SubagentStart/SubagentStop`，Start 可阻断、Stop 失败写诊断；全量 905 tests/5 skipped/0 failures，真机 iSH 命令执行仍待验证 |
 | PARITY-004 turn outline UI | VERIFY | 全日志 outline 折叠接入 AppModel；Trajectory rail 支持预览、按 seq 分页加载和滚动定位；4 项 outline tests 通过；Simulator 被既有 Device-only tool audit 的 URLRequest 误报阻断，真机 UI 未验收 |
 | PARITY-005 ACP transport | VERIFY | 新增 `ISHACPLineTransport` 复用 iSH Node transport，支持 NDJSON 分帧/首包排队/退出处理；5 个 ACP wire tests 通过；真实 iSH agent、Jobs 注册与真机仍待验证 |
 | PARITY-008 Exa/Perplexity | VERIFY | AppModel 统一路由、Keychain origin 存取和显式 provider 选择已接入；6 个 provider mapping tests 通过；设置 UI、真实 API 与真机引用仍待验证 |

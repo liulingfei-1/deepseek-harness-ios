@@ -4738,6 +4738,31 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         }
         let activationID = UUID()
         let childSessionID = childID.uuidString.lowercased()
+        func stopHook(_ status: String) async {
+            await runSubagentHookIgnoringFailure(
+                point: .subagentStop,
+                payload: .object([
+                    "agentId": .string(childSessionID),
+                    "runId": .string(activationID.uuidString.lowercased()),
+                    "parentSession": .string(parentSessionID.lowercased()),
+                    "childSession": .string(childSessionID),
+                    "status": .string(status)
+                ])
+            )
+        }
+        try await runSubagentHook(
+            point: .subagentStart,
+            payload: .object([
+                "agentId": .string(childSessionID),
+                "runId": .string(activationID.uuidString.lowercased()),
+                "parentSession": .string(parentSessionID.lowercased()),
+                "childSession": .string(childSessionID),
+                "label": .string(request.label),
+                "model": request.model.map(JSONValue.string) ?? .null,
+                "providerBundle": request.providerBundleID.map { .string($0.rawValue) } ?? .null,
+                "continuation": .bool(request.isContinuation)
+            ])
+        )
         await traceStore.register(runID: activationID, sessionID: childID)
         var structuredOutputEventRecorded = false
 
@@ -4803,6 +4828,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
 
         if let bundleID = request.providerBundleID {
             guard let bundle = providerBundle(bundleID), bundle.enabled else {
+                await stopHook("failed")
                 throw LocalToolError.pluginDenied("Profile Bundle " + bundleID.rawValue + " 尚未启用，请先在设置中安装。")
             }
             do {
@@ -4839,6 +4865,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                     )
                 }
                 await recordProviderBundleFailure(error)
+                await stopHook(error is CancellationError ? "cancelled" : "failed")
                 throw error
             }
         }
@@ -4858,8 +4885,14 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         if let reasoningEffort = request.reasoningEffort {
             configuration.reasoningMode = reasoningEffort
         }
-        configuration = try configuration.validated()
+        do {
+            configuration = try configuration.validated()
+        } catch {
+            await stopHook("failed")
+            throw error
+        }
         guard let apiKey = try await apiKey(for: configuration) else {
+            await stopHook("failed")
             throw CredentialStoreError.emptyCredential
         }
 
@@ -5138,6 +5171,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                 sessionID: childID
             )
             try? await trajectoryRepository.flush(sessionID: childID)
+            await stopHook("completed")
             return result
         } catch {
             if request.outputSchema != nil && !structuredOutputEventRecorded {
@@ -5167,7 +5201,49 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                 sessionID: childID
             )
             try? await trajectoryRepository.flush(sessionID: childID)
+            await stopHook(error is CancellationError ? "cancelled" : "failed")
             throw error
+        }
+    }
+
+    private func runSubagentHook(
+        point: HookPoint,
+        payload: JSONValue
+    ) async throws {
+        guard let configuration = loadedHookConfiguration,
+              let groups = configuration.groups[point],
+              !groups.isEmpty else { return }
+        let result = await HookRunner.run(
+            point: point,
+            toolName: nil,
+            payload: payload,
+            groups: groups,
+            mode: configuration.mode,
+            executor: configuration.executor
+        )
+        guard !result.blocked else {
+            throw LocalToolError.pluginDenied(
+                result.blockReason ?? "Subagent hook blocked"
+            )
+        }
+    }
+
+    private func runSubagentHookIgnoringFailure(
+        point: HookPoint,
+        payload: JSONValue
+    ) async {
+        do {
+            try await runSubagentHook(point: point, payload: payload)
+        } catch {
+            await traceStore.record(
+                HarnessTraceDraft(
+                    kind: .error,
+                    sessionID: nil,
+                    runID: UUID(),
+                    name: "hook/\(point.rawValue)",
+                    error: error.localizedDescription
+                )
+            )
         }
     }
 
