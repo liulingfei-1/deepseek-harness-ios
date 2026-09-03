@@ -547,7 +547,10 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
     @ObservationIgnored private let runtimeHangWatchdog: RuntimeHangWatchdog
     @ObservationIgnored private let runtimeMetricKitSubscriber: RuntimeMetricKitSubscriber
     @ObservationIgnored private let localStateSnapshotStore = LocalStateSnapshotStore()
-    @ObservationIgnored private let localWebhookDeduplicator = LocalWebhookDeduplicator()
+    @ObservationIgnored private let localWebhookDeduplicator = LocalWebhookDeduplicator(
+        storageURL: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("HarnessMobile/Webhooks/github-deliveries.json")
+    )
     @ObservationIgnored private var localStateServer: LocalStateServer?
     @ObservationIgnored private let backgroundResumeCoordinator = SessionBackgroundResumeCoordinator()
     @ObservationIgnored let terminalProvider: any ISHTerminalProviding

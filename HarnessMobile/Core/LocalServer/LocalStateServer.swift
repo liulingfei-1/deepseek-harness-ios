@@ -200,8 +200,19 @@ enum LocalWebhookParser {
 /// GitHub deliveries from retriggering the same local job.
 actor LocalWebhookDeduplicator {
     private let maximumIDs = 4_096
+    private let storageURL: URL?
     private var accepted: [String] = []
     private var known = Set<String>()
+
+    init(storageURL: URL? = nil) {
+        self.storageURL = storageURL
+        if let storageURL,
+           let data = try? Data(contentsOf: storageURL),
+           let saved = try? JSONDecoder().decode([String].self, from: data) {
+            accepted = Array(saved.suffix(maximumIDs))
+            known = Set(accepted)
+        }
+    }
 
     func accept(_ deliveryID: String) -> Bool {
         guard !known.contains(deliveryID) else { return false }
@@ -213,6 +224,17 @@ actor LocalWebhookDeduplicator {
                 known.remove(accepted.removeFirst())
             }
         }
+        persist()
         return true
+    }
+
+    private func persist() {
+        guard let storageURL,
+              let data = try? JSONEncoder().encode(accepted) else { return }
+        try? FileManager.default.createDirectory(
+            at: storageURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try? data.write(to: storageURL, options: .atomic)
     }
 }

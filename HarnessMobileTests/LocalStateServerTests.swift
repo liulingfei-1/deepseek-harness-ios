@@ -122,4 +122,20 @@ final class LocalStateServerTests: XCTestCase {
         XCTAssertEqual(received?.deliveryID, "delivery-2")
         XCTAssertEqual(received?.eventName, "issues")
     }
+
+    func testWebhookDeduplicatorRestoresAcceptedIDsAfterReload() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let storageURL = directory.appendingPathComponent("deliveries.json")
+        let first = LocalWebhookDeduplicator(storageURL: storageURL)
+        let firstAcceptance = await first.accept("delivery-persisted")
+        XCTAssertTrue(firstAcceptance)
+
+        let reloaded = LocalWebhookDeduplicator(storageURL: storageURL)
+        let duplicateAcceptance = await reloaded.accept("delivery-persisted")
+        let newAcceptance = await reloaded.accept("delivery-new")
+        XCTAssertFalse(duplicateAcceptance)
+        XCTAssertTrue(newAcceptance)
+    }
 }

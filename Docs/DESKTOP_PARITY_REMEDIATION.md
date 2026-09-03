@@ -92,11 +92,11 @@
 
 - **状态**：VERIFY
 - **上游证据**：桌面 `webhook` / `webhook-github` 包以 delivery ID、event name 和 JSON object payload 投递事件；移动端新增同构的纯解析入口。
-- **移动端变更**：新增 `LocalWebhookEvent`、`LocalWebhookParser.github`、`LocalWebhookDeduplicator` 和 loopback `POST /webhook/github` 路由；`AppModel` 将收到的 delivery ID 投递到去重 actor。
-- **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter LocalStateServerTests` → 7 tests passed。
+- **移动端变更**：新增 `LocalWebhookEvent`、`LocalWebhookParser.github`、`LocalWebhookDeduplicator` 和 loopback `POST /webhook/github` 路由；`AppModel` 将收到的 delivery ID 写入 Application Support 下的有界去重集，冷启动后可恢复。
+- **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter LocalStateServerTests` → 8 tests passed，包含跨实例重载去重测试。
 - **Simulator**：本批次尚待重跑 Xcode arm64 Simulator build。
 - **iPhone 16 Pro**：尚未验证真实 GitHub delivery、前后台生命周期、隧道可达性和重启去重，保留 `VERIFY`。
-- **剩余动作**：补 GitHub 签名验证、持久化 delivery state、重试与 Agent/Job 触发；公网 ingress 和 iOS 后台持续监听仍按平台证据标记。
+- **剩余动作**：补 GitHub 签名验证、重试与 Agent/Job 触发；公网 ingress 和 iOS 后台持续监听仍按平台证据标记。
 
 ### PARITY-006 · 子 Agent reasoning effort 参数（2026-09-03）
 
