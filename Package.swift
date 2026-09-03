@@ -32,6 +32,7 @@ let package = Package(
                 "AppModelProviderProfileTests.swift",
                 "AppModelModelDiscoveryTests.swift",
                 "ProductionToolCatalogTests.swift",
+                "ControllerSplitTests.swift",
                 "ISHPluginHostNodeSmoke.mjs",
                 "AGENTS.md"
             ]
