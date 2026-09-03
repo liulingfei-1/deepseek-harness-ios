@@ -11,13 +11,15 @@ import Foundation
 /// turn shows the same words before and after its events load. The response
 /// commits at `turn/end` from a draft of the newest text-bearing assistant
 /// message.
-struct SessionTurnOutlineEntry: Codable, Sendable, Equatable {
+struct SessionTurnOutlineEntry: Codable, Sendable, Equatable, Identifiable {
     let turn: Int
     let seq: UInt64
     /// Bounded first-human-prompt preview; empty until an eligible prompt lands.
     var prompt: String
     /// Bounded final-response preview; empty until the turn ends with text.
     var response: String
+
+    var id: Int { turn }
 }
 
 struct SessionTurnOutlineState: Codable, Sendable, Equatable {

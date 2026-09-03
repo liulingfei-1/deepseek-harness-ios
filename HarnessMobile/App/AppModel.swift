@@ -297,6 +297,10 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
     /// long conversations.
     var trajectoryEvents: [SessionEvent] = []
     var trajectoryVisibleEvents: [SessionEvent] = []
+    /// Whole-log turn outline used by the trajectory rail. Unlike the bounded
+    /// event window above, this projection is folded from the durable stream
+    /// on session load and then advanced incrementally as new events arrive.
+    var trajectoryOutline: SessionTurnOutlineState = .empty
     var trajectoryEventCount = 0
     var isLoadingOlderTrajectory = false
     var canLoadOlderTrajectory: Bool {
@@ -6965,6 +6969,18 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                 sessionID: sessionID,
                 replacing: isNewSession
             )
+            if isNewSession {
+                // The snapshot is intentionally bounded by the live store's
+                // retention window. Fold the lossless stream once so the
+                // outline remains stable while older pages are loaded.
+                let allEvents = try await trajectoryRepository.allEvents(sessionID: sessionID)
+                guard activeSessionID == sessionID else { return }
+                trajectoryOutline = SessionTurnOutline.fold(allEvents)
+            } else if !snapshot.events.isEmpty {
+                for event in snapshot.events {
+                    SessionTurnOutline.apply(event, to: &trajectoryOutline)
+                }
+            }
         } catch {
             guard activeSessionID == sessionID else { return }
             presentError(error)
@@ -7116,6 +7132,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         trajectoryEventCount = 0
         trajectoryMetrics = nil
         trajectoryRecoveredTornTail = false
+        trajectoryOutline = .empty
         harnessTraceEvents = []
         harnessTraceSummary = nil
         trajectoryVisibleEvents = []
@@ -8205,6 +8222,14 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
             )
         }
         return try await credentialStore.readAPIKey(for: origin)
+    }
+
+    func readCredential(forOrigin origin: String) async throws -> String? {
+        try await credentialStore.readAPIKey(for: origin)
+    }
+
+    func saveCredential(_ key: String, forOrigin origin: String) async throws {
+        try await credentialStore.saveAPIKey(key, for: origin)
     }
 
     /// Resolves the current profile identity only while a request is being

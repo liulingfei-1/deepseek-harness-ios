@@ -12,6 +12,7 @@ final class TrajectoryViewState {
     var selectedEvent: SessionEvent?
     var isHarnessInspectorPresented = false
     var isRefreshing = false
+    var pendingTurnSequence: UInt64?
 }
 
 struct TrajectoryView: View {
@@ -58,6 +59,14 @@ struct TrajectoryView: View {
             .pickerStyle(.segmented)
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
+
+            if !model.trajectoryOutline.turns.isEmpty {
+                SessionTurnOutlineRail(
+                    entries: model.trajectoryOutline.turns,
+                    selectedSequence: state.pendingTurnSequence,
+                    action: jumpToTurn
+                )
+            }
 
             Divider()
 
@@ -123,8 +132,9 @@ struct TrajectoryView: View {
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            ScrollView {
-                LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+            ScrollViewReader { reader in
+                ScrollView {
+                    LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
                     if model.canLoadOlderTrajectory {
                         Button {
                             Task { await model.loadOlderTrajectory() }
@@ -154,6 +164,7 @@ struct TrajectoryView: View {
                                 elapsedMilliseconds: projection.elapsedMilliseconds(for: event),
                                 action: { state.selectedEvent = event }
                             )
+                            .id(event.seq)
                             Divider()
                                 .padding(.leading, 52)
                         }
@@ -168,6 +179,7 @@ struct TrajectoryView: View {
                                             elapsedMilliseconds: projection.elapsedMilliseconds(for: event),
                                             action: { state.selectedEvent = event }
                                         )
+                                        .id(event.seq)
                                         Divider()
                                             .padding(.leading, 52)
                                     }
@@ -193,6 +205,7 @@ struct TrajectoryView: View {
                                             elapsedMilliseconds: projection.elapsedMilliseconds(for: event),
                                             action: { state.selectedEvent = event }
                                         )
+                                        .id(event.seq)
                                         Divider()
                                             .padding(.leading, 52)
                                     }
@@ -209,15 +222,33 @@ struct TrajectoryView: View {
                             }
                         }
                     }
+                    }
+                    .padding(.bottom, 18)
                 }
-                .padding(.bottom, 18)
+                .scrollDismissesKeyboard(.interactively)
+                .background(HarnessTheme.pageBackground)
+                .refreshable {
+                    await refreshNow()
+                }
+                .accessibilityLabel("轨迹时间线")
+                .onChange(of: state.pendingTurnSequence) { _, sequence in
+                    guard let sequence else { return }
+                    withAnimation {
+                        reader.scrollTo(sequence, anchor: .top)
+                    }
+                }
             }
-            .scrollDismissesKeyboard(.interactively)
-            .background(HarnessTheme.pageBackground)
-            .refreshable {
-                await refreshNow()
+        }
+    }
+
+    private func jumpToTurn(_ entry: SessionTurnOutlineEntry) {
+        state.mode = .turns
+        Task { @MainActor in
+            while (model.trajectoryVisibleEvents.first?.seq ?? UInt64.max) > entry.seq,
+                  model.canLoadOlderTrajectory {
+                await model.loadOlderTrajectory()
             }
-            .accessibilityLabel("轨迹时间线")
+            state.pendingTurnSequence = entry.seq
         }
     }
 
@@ -573,6 +604,70 @@ private struct TrajectoryMetricsHeader: View {
             title: "耗时",
             value: TrajectoryFormat.duration(summary.durationMilliseconds)
         )
+    }
+}
+
+/// Compact, whole-session navigation rail mirroring desktop's turn outline.
+/// It stays horizontally scrollable so large sessions do not push the event
+/// ledger below the fold, while each item exposes its prompt/response preview
+/// to VoiceOver and can load older pages before jumping to the anchor.
+private struct SessionTurnOutlineRail: View {
+    let entries: [SessionTurnOutlineEntry]
+    let selectedSequence: UInt64?
+    let action: (SessionTurnOutlineEntry) -> Void
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            LazyHStack(spacing: 8) {
+                ForEach(entries) { entry in
+                    Button { action(entry) } label: {
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(spacing: 4) {
+                                Text("回合 \(entry.turn)")
+                                    .font(.caption.weight(.semibold))
+                                Text("#\(entry.seq)")
+                                    .font(.caption2.monospaced())
+                                    .foregroundStyle(.tertiary)
+                            }
+                            if !entry.prompt.isEmpty {
+                                Text(entry.prompt)
+                                    .font(.caption2)
+                                    .lineLimit(1)
+                            } else if !entry.response.isEmpty {
+                                Text(entry.response)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            } else {
+                                Text("尚无摘要")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .frame(width: 164, alignment: .leading)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(
+                            selectedSequence == entry.seq
+                                ? Color.accentColor.opacity(0.16)
+                                : HarnessTheme.secondarySurface,
+                            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("回合 \(entry.turn)")
+                    .accessibilityValue(
+                        [entry.prompt, entry.response].first(where: { !$0.isEmpty }) ?? "尚无摘要"
+                    )
+                    .accessibilityHint("定位到此回合")
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+        }
+        .background(HarnessTheme.secondarySurface)
+        .accessibilityLabel("回合大纲")
     }
 }
 

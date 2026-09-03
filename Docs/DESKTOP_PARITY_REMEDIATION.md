@@ -38,6 +38,26 @@
 - **iPhone 16 Pro**：未验证服务端 accepted cursor、断网重试和冷启动水位恢复，保留 `VERIFY`。
 - **剩余动作**：将 coordinator 接入用户显式配置的 DeepSeek session-log endpoint 和生命周期；补 2xx/4xx/超时/重启 fixture 与真机验证。
 
+### PARITY-004 · Session turn outline UI 与分页跳转（2026-09-03）
+
+- **状态**：VERIFY
+- **上游证据**：`dsh-session-turn-outline` 的 `turn/start` 锚点、首条用户提示词、回合结束响应预览折叠契约；移动端 `SessionTurnOutline.fold` 单元测试 4 项通过。
+- **移动端变更**：`AppModel` 在切换会话时从完整持久化 JSONL 折叠 `trajectoryOutline`，后续增量事件逐条推进；`TrajectoryView` 新增横向回合大纲 rail，显示 prompt/response 预览，点击后切换回合视图、按 `turn/start` seq 自动加载更早页并滚动定位；事件行绑定 seq anchor，保留现有折叠、搜索和分页逻辑。
+- **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter SessionTurnOutlineTests` → 4 tests passed。
+- **Simulator**：补充 session-log 传输边界的审计白名单后，Xcode arm64 Simulator build 成功（`/tmp/hm-xcode7`）；此前误报根因已由脚本注释固定，未放宽生产网络边界。
+- **iPhone 16 Pro**：尚未执行长会话、冷启动、VoiceOver、Dynamic Type 和真实轨迹分页触控，保留 `VERIFY`。
+- **剩余动作**：修复/豁免构建审计脚本对测试 URLRequest 的误报后重跑 Simulator；补 UI 自动化截图与真机长会话分页证据。
+
+### PARITY-008 · Exa / Perplexity 搜索 Provider 生产注册（2026-09-03）
+
+- **状态**：VERIFY
+- **上游证据**：`web-search-exa` 与 `web-search-perplexity` provider 的请求/结果映射；现有 `ExaSearchProviderTests` 3 项、`PerplexitySearchProviderTests` 3 项通过。
+- **移动端变更**：`AppModel+NativePluginLifecycle` 新增统一 `configuredWebSearchProvider` 路由；默认保留官方 DeepSeek 原生搜索，用户通过 `setWebSearchProvider("exa"|"perplexity")` 选择可选 provider，API key 按各自 HTTPS origin 写入 Keychain（`saveSearchProviderAPIKey`），结果继续通过同一 `web_search` tool 回灌 citations。
+- **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter 'ExaSearchProviderTests|PerplexitySearchProviderTests'` → 6 tests passed。
+- **Simulator**：Xcode arm64 Simulator build 成功（`/tmp/hm-xcode7`）；provider 选择 UI/真实调用尚未执行。
+- **iPhone 16 Pro**：未配置真实 Exa/Perplexity key，也未做限流/错误/引用端到端验证，保留 `VERIFY`。
+- **剩余动作**：在设置 UI 暴露 provider 选择和 key 输入，补真实 API fixture、401/429/超时错误态和真机引用渲染证据。
+
 ### PARITY-006 · 子 Agent reasoning effort 参数（2026-09-03）
 
 - **状态**：VERIFY

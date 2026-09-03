@@ -90,6 +90,10 @@ scan_files() {
       # only (requiredInterfaceType = .loopback) and serves read-only GET
       # endpoints; it cannot execute, forward, or receive remote traffic.
       outside-network:*/Core/LocalServer/*.swift) continue ;;
+      # Session-log delivery is the dedicated suffix-upload boundary. It
+      # sends only the user-configured session-log endpoint and never executes
+      # model/tool traffic; keep it separate from provider I/O accounting.
+      outside-network:*/Core/Trace/SessionTrajectoryRepository.swift) continue ;;
       # MCP is a byte-framed client over the already audited on-device iSH
       # stdio bridge. It contains protocol names such as MCP and connect(), but
       # owns no URLSession, socket, NWConnection, or host Process primitive.
@@ -113,6 +117,7 @@ scan_files() {
       # contracts. Production provider networking remains in Core/Network.
       outside-network:*/HarnessMobileTests/ProviderModelDiscoveryTests.swift) continue ;;
       outside-network:*/HarnessMobileTests/HarnessLLMSessionRegistryTests.swift) continue ;;
+      outside-network:*/HarnessMobileTests/SessionTrajectoryRepositoryTests.swift) continue ;;
       outside-network:*/HarnessMobileTests/MCPClientTests.swift) continue ;;
       inside-provider:*/Core/Network/OpenAICompatibleClient.swift) ;;
       inside-provider:*/Core/Network/DeepSeekFilesClient.swift) ;;

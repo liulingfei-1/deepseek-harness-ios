@@ -221,6 +221,9 @@ git diff --check
 | PARITY-003 telemetry | VERIFY | `TelemetrySessionPersistence` 接入 AppModel append；5 项 telemetry tests 通过；全量 897 tests/5 skipped/0 failures；模式设置、feedback release、真机 OTLP 待验证 |
 | PARITY-006 子 Agent reasoning | VERIFY | schema 与 LocalSubagentRequest 支持 reasoning_effort，并应用到 child configuration；新增 `list_subagent_models`；HarnessJobs 专项通过；provider listing/真实多 provider 仍待实现 |
 | PARITY-007 hooks | VERIFY | 新增注入式 `HookRunner`，匹配/顺序/阻断折叠专项测试通过；AgentRuntime 生命周期和真实 executor 待接线 |
-| PARITY-004/005/008..014 | TODO | 已完成源码/上游定位并写入本计划，尚未宣称实现 |
+| PARITY-004 turn outline UI | VERIFY | 全日志 outline 折叠接入 AppModel；Trajectory rail 支持预览、按 seq 分页加载和滚动定位；4 项 outline tests 通过；Simulator 被既有 Device-only tool audit 的 URLRequest 误报阻断，真机 UI 未验收 |
+| PARITY-005 ACP transport | TODO | 客户端 wire 已有 fixture，真实 iSH stdio/provider 注册仍待实现 |
+| PARITY-008 Exa/Perplexity | VERIFY | AppModel 统一路由、Keychain origin 存取和显式 provider 选择已接入；6 个 provider mapping tests 通过；设置 UI、真实 API 与真机引用仍待验证 |
+| PARITY-009..014 | TODO | 已完成源码/上游定位并写入本计划，尚未宣称实现 |
 
 本表只记录可复核证据，不把“计划存在”或“源码类型存在”当作能力完成。

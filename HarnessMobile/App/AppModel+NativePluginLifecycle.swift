@@ -54,17 +54,33 @@ extension AppModel {
         }
     }
 
-    /// Upstream `web-search-deepseek`: a search backend that reuses the
-    /// DeepSeek credential against the Anthropic-compatible Messages endpoint
-    /// with the native `web_search_20250305` server tool. Only the official
-    /// DeepSeek route exposes that endpoint; custom OpenAI-compatible routes
-    /// keep the on-device DuckDuckGo backend.
-    func deepSeekSearchProviderIfConfigured() -> (any WebSearchProvider)? {
-        guard effectiveConfiguration.providerID == .deepSeekOfficial else { return nil }
-        return DeepSeekSearchProvider(resolveApiKey: { [weak self] in
+    /// Builds the production web-search route. DeepSeek's native server tool
+    /// is preferred when the active profile is official DeepSeek; Exa and
+    /// Perplexity are available when their canonical-origin credentials exist
+    /// in Keychain. All candidates share one tool schema and preserve source
+    /// citations, while missing optional keys fail over without fake results.
+    func configuredWebSearchProvider() -> (any WebSearchProvider)? {
+        let selected = UserDefaults.standard.string(forKey: "harness.web-search-provider")
+        if (selected == nil || selected == DeepSeekSearchProvider.identifierValue),
+           effectiveConfiguration.providerID == .deepSeekOfficial {
+            return DeepSeekSearchProvider(resolveApiKey: { [weak self] in
+                guard let self else { return nil }
+                return (try? await self.apiKey(for: self.effectiveConfiguration)) ?? nil
+            })
+        }
+        if selected == ExaSearchProvider.identifierValue {
+            return ExaSearchProvider(resolveApiKey: { [weak self] in
             guard let self else { return nil }
-            return (try? await self.apiKey(for: self.effectiveConfiguration)) ?? nil
-        })
+            return try? await self.readCredential(forOrigin: ExaSearchProvider.defaultBaseURL)
+            })
+        }
+        if selected == PerplexitySearchProvider.identifierValue {
+            return PerplexitySearchProvider(resolveApiKey: { [weak self] in
+            guard let self else { return nil }
+            return try? await self.readCredential(forOrigin: PerplexitySearchProvider.defaultBaseURL)
+            })
+        }
+        return nil
     }
 
     func nativeAgentBaseTools() -> [any LocalAgentTool] {
@@ -90,8 +106,31 @@ extension AppModel {
             scheduleStore: scheduleStore,
             terminalProvider: terminalProvider,
             trajectoryRepository: trajectoryRepository,
-            webSearchProvider: deepSeekSearchProviderIfConfigured()
+            webSearchProvider: configuredWebSearchProvider()
         ).filter { NativeAgentPluginPolicy.approvedBaseToolNames.contains($0.definition.name) }
+    }
+
+    /// Stores an optional search-provider key under its HTTPS origin, keeping
+    /// search credentials independent from the active inference profile.
+    func saveSearchProviderAPIKey(_ key: String, providerID: String) async throws {
+        let origin: String
+        switch providerID {
+        case ExaSearchProvider.identifierValue:
+            origin = ExaSearchProvider.defaultBaseURL
+        case PerplexitySearchProvider.identifierValue:
+            origin = PerplexitySearchProvider.defaultBaseURL
+        default:
+            throw CredentialStoreError.invalidOrigin
+        }
+        try await saveCredential(key, forOrigin: origin)
+    }
+
+    func setWebSearchProvider(_ providerID: String?) {
+        if let providerID {
+            UserDefaults.standard.set(providerID, forKey: "harness.web-search-provider")
+        } else {
+            UserDefaults.standard.removeObject(forKey: "harness.web-search-provider")
+        }
     }
 
     func loadNativeAgentPlugins() async throws {
