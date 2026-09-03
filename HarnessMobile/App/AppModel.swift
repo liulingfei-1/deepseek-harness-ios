@@ -529,6 +529,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
     @ObservationIgnored let modelCatalogDiscoverer: any ModelCatalogDiscovering
     @ObservationIgnored let traceStore: HarnessTraceStore
     @ObservationIgnored let trajectoryRepository: any SessionPersistence
+    @ObservationIgnored private let sessionTelemetrySink: SessionTelemetryOtelSink
     @ObservationIgnored private let slashCommandRegistry: SlashCommandRegistry
     @ObservationIgnored let skillRegistry: MobileSkillRegistry
     @ObservationIgnored private let workspaceInstructionTransitions: WorkspaceInstructionTransitionEngine
@@ -641,7 +642,18 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         self.nativeAgentPluginStore = nativeAgentPluginStore
         self.pluginInstallCoordinator = pluginInstallCoordinator
         self.modelCatalogDiscoverer = modelCatalogDiscoverer ?? modelClient
-        self.trajectoryRepository = trajectoryRepository
+        let telemetryDirectory = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        )[0].appendingPathComponent("HarnessMobile/Telemetry", isDirectory: true)
+        let telemetrySink = SessionTelemetryOtelSink(
+            configuration: .init(mode: .disabled, outputDirectory: telemetryDirectory)
+        )
+        self.sessionTelemetrySink = telemetrySink
+        self.trajectoryRepository = TelemetrySessionPersistence(
+            base: trajectoryRepository,
+            sink: telemetrySink
+        )
         self.slashCommandRegistry = slashCommandRegistry
         skillRegistry = MobileSkillRegistry(workspaceStore: workspaceStore)
         workspaceInstructionTransitions = WorkspaceInstructionTransitionEngine(

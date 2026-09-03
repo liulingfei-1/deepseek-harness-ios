@@ -327,3 +327,78 @@ final class SessionTelemetryOtelSink: SessionTelemetrySink, @unchecked Sendable 
         }
     }
 }
+
+/// Decorates the canonical persistence seam so every production append is
+/// projected into telemetry without requiring callers to remember a second
+/// side effect. The sink remains deployment-configurable; the default App
+/// composition uses `.disabled`, which preserves the local-only default while
+/// making the capture path available for an explicit feedback/full mode.
+final class TelemetrySessionPersistence: SessionPersistence, @unchecked Sendable {
+    private let base: any SessionPersistence
+    private let sink: SessionTelemetrySink
+    private let redactors: [SessionTelemetry.Redactor]
+
+    init(
+        base: any SessionPersistence,
+        sink: SessionTelemetrySink,
+        redactors: [SessionTelemetry.Redactor] = []
+    ) {
+        self.base = base
+        self.sink = sink
+        self.redactors = redactors
+    }
+
+    func prepare(sessionID: UUID) async throws -> SessionTrajectoryPreparation {
+        try await base.prepare(sessionID: sessionID)
+    }
+
+    func append(_ draft: SessionEventDraft, sessionID: UUID) async throws -> SessionEvent {
+        let event = try await base.append(draft, sessionID: sessionID)
+        SessionTelemetry.capture(events: [event], sessionID: sessionID, redactors: redactors, sink: sink)
+        return event
+    }
+
+    func snapshot(sessionID: UUID, after cursor: SessionTrajectoryCursor?) async throws -> SessionTrajectorySnapshot {
+        try await base.snapshot(sessionID: sessionID, after: cursor)
+    }
+
+    func persistenceSnapshot(sessionID: UUID) async throws -> SessionPersistenceSnapshot {
+        try await base.persistenceSnapshot(sessionID: sessionID)
+    }
+
+    func allEvents(sessionID: UUID) async throws -> [SessionEvent] {
+        try await base.allEvents(sessionID: sessionID)
+    }
+
+    func replacementRangeForSurfacePrefix(count: Int, sessionID: UUID) async throws -> ClosedRange<UInt64>? {
+        try await base.replacementRangeForSurfacePrefix(count: count, sessionID: sessionID)
+    }
+
+    func persistedEvents(sessionID: UUID, matching shouldRetain: @Sendable @escaping (SessionEvent) -> Bool) async throws -> [SessionEvent] {
+        try await base.persistedEvents(sessionID: sessionID, matching: shouldRetain)
+    }
+
+    func page(sessionID: UUID, before sequence: UInt64, limit: Int, matching shouldRetain: @Sendable @escaping (SessionEvent) -> Bool) async throws -> [SessionEvent] {
+        try await base.page(sessionID: sessionID, before: sequence, limit: limit, matching: shouldRetain)
+    }
+
+    func registerKnownEventTypes(_ eventTypes: Set<String>) async throws {
+        try await base.registerKnownEventTypes(eventTypes)
+    }
+
+    func flush(sessionID: UUID) async throws {
+        try await base.flush(sessionID: sessionID)
+    }
+
+    func listSessionIDs() async throws -> [UUID] {
+        try await base.listSessionIDs()
+    }
+
+    func delete(sessionID: UUID) async throws {
+        try await base.delete(sessionID: sessionID)
+    }
+
+    func resetAll() async throws {
+        try await base.resetAll()
+    }
+}

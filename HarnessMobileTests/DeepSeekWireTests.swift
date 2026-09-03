@@ -29,6 +29,49 @@ final class DeepSeekWireTests: XCTestCase {
         XCTAssertNil(object["max_completion_tokens"])
     }
 
+    func testDeepSeekRequestExtensionsAreMergedAtTopLevel() throws {
+        let configuration = try ProviderProfile.catalogDefault(
+            for: .deepSeekOfficial
+        ).configuration(model: "deepseek-test").validated()
+        let request = ModelRequest(
+            configuration: configuration,
+            apiKey: "test-only",
+            systemPrompt: "system",
+            messages: [.user("hello")],
+            tools: [],
+            requestExtensions: [
+                "dsh_session_log": .object([
+                    "cursor": .number(4),
+                    "suffix": .array([.string("event")])
+                ])
+            ]
+        )
+
+        let encoded = try OpenAICompatibleClient.encodeOpenAIRequestBody(request)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        let log = try XCTUnwrap(object["dsh_session_log"] as? [String: Any])
+        XCTAssertEqual(log["cursor"] as? Int, 4)
+        XCTAssertEqual(log["suffix"] as? [String], ["event"])
+        XCTAssertNil(object["additionalFields"])
+    }
+
+    func testDeepSeekRequestExtensionsCannotOverrideWireFields() throws {
+        let configuration = try ProviderProfile.catalogDefault(
+            for: .deepSeekOfficial
+        ).configuration(model: "deepseek-test").validated()
+        let request = ModelRequest(
+            configuration: configuration,
+            apiKey: "test-only",
+            systemPrompt: "system",
+            messages: [.user("hello")],
+            tools: [],
+            requestExtensions: ["model": .string("attacker")]
+        )
+        let encoded = try OpenAICompatibleClient.encodeOpenAIRequestBody(request)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        XCTAssertEqual(object["model"] as? String, "deepseek-test")
+    }
+
     func testToolTranscriptValidationRejectsMissingResultLocally() {
         let request = ModelRequest(
             configuration: AgentConfiguration(),

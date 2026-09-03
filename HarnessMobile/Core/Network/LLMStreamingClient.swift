@@ -53,6 +53,10 @@ struct ModelRequest: Sendable, Equatable {
     /// the session or trace. Keeping them request-local avoids data URLs in
     /// durable conversation state.
     let imagePayloads: [ModelImagePayload]
+    /// Provider-specific top-level request fields. These are populated by
+    /// the DeepSeek extension registry immediately before dispatch and are
+    /// never persisted in session state.
+    let requestExtensions: [String: JSONValue]
     /// Immutable profile/endpoint identity captured before this request starts.
     /// It contains no credential material and is never inferred from mutable UI
     /// state during adapter dispatch.
@@ -65,7 +69,8 @@ struct ModelRequest: Sendable, Equatable {
         messages: [AgentMessage],
         tools: [ModelToolDefinition],
         imagePayloads: [ModelImagePayload] = [],
-        route: ProviderRequestRoute? = nil
+        route: ProviderRequestRoute? = nil,
+        requestExtensions: [String: JSONValue] = [:]
     ) {
         self.configuration = configuration
         self.apiKey = apiKey
@@ -74,6 +79,7 @@ struct ModelRequest: Sendable, Equatable {
         self.tools = tools
         self.imagePayloads = imagePayloads
         self.route = route
+        self.requestExtensions = requestExtensions
     }
 }
 

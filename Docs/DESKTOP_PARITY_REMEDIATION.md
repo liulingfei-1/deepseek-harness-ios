@@ -1,5 +1,33 @@
 # DeepSeek Harness Mobile 对齐与插件迁移
 
+### PARITY-PLAN-2026-09-03 · 全量逐项实施计划
+
+- **状态**：ACTIVE
+- **证据**：新增 `Docs/DESKTOP_PARITY_IMPLEMENTATION_PLAN_2026-09-03.md`，基于移动端 HEAD `9e33cd43`、锁定上游 `dsh-v0.1.1-rc.2` 与最新上游 `76fda729799fe9b3848dbe2c211d4b231032b81e` 的源码/运行审计。
+- **范围**：请求扩展、session log、telemetry、turn outline、ACP、子 Agent 路由、hooks、Exa/Perplexity、agent team、LocalStateServer、`llm-pi-ai`、e2b/webhook 与平台发行形态共 14 项。
+- **执行规则**：每项按上游核对 → 生产接线 → 专项测试 → Simulator/真机证据 → 回写本日志顺序推进；源码、测试和设备结果优先于控制文档。
+- **当前结果**：计划文档已创建；源码改造从 PARITY-001 开始，尚未宣称任何新增项完成。
+
+### PARITY-001 · DeepSeek 请求扩展生产接线（2026-09-03）
+
+- **状态**：VERIFY
+- **上游证据**：`deepseek-llm-api-extensions` 的 provider registry/请求前置贡献模型；移动端原有 registry 单测通过。
+- **移动端变更**：`ModelRequest` 增加 request-local `requestExtensions`；`OpenAICompatibleClient` 持有 `DeepSeekLlmAPIExtensionRegistry`，在官方 DeepSeek dispatch 前先生成无扩展 base body，再异步收集扩展并以不可变快照发送；`OpenAICompatibleWireSerializer` 将合法扩展字段合并到顶层并保持其他 provider 不变。
+- **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-parity-p1 --filter DeepSeekWireTests/testDeepSeekRequestExtensionsAreMergedAtTopLevel` → 1 test passed；扩展保护回归 `--filter DeepSeekWireTests` → 29 tests passed；全量 `swift test --build-path /tmp/hm-parity-final` → 897 tests, 5 skipped, 0 failures。
+- **Simulator**：SwiftPM 编译目标 arm64 macOS 通过；Xcode Simulator 本轮尚未重跑。
+- **iPhone 16 Pro**：尚未用真实 DeepSeek API/插件注册扩展验证，保留 `VERIFY`。
+- **剩余动作**：在 AppModel/插件生命周期注册真实扩展 provider，并补 2xx accept callback、session ID/purpose 传递和真实请求 fixture。
+
+### PARITY-003 · Session telemetry append 接线（2026-09-03）
+
+- **状态**：VERIFY
+- **上游证据**：`session-telemetry` / `session-telemetry-otel` capture 与 sink 契约；原有 `SessionTelemetryTests` 5 项通过。
+- **移动端变更**：新增 `TelemetrySessionPersistence` 装饰器，拦截所有 `SessionPersistence.append` 结果并调用 `SessionTelemetry.capture`；`AppModel` 默认将注入的轨迹持久化包装为该装饰器，并保留 disabled OTel sink 供显式部署模式切换。
+- **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-parity-p2 --filter SessionTelemetryTests` → 5 tests passed；最终全量 `swift test --build-path /tmp/hm-parity-final` → 897 tests, 5 skipped, 0 failures；同构建目标成功编译包含 `AppModel` 与 wrapper。
+- **Simulator**：arm64 Simulator Xcode build 在本轮前序改造后通过；Telemetry UI/feedback 交互尚未执行。
+- **iPhone 16 Pro**：未验证真实 feedback release、OTLP endpoint 和冷启动恢复，保留 `VERIFY`。
+- **剩余动作**：将 telemetry mode/endpoint 接入设置与 feedback action；补 sink flush/shutdown 生命周期和真实设备验证。
+
 > 更新：2026-08-29。本文只保留当前仍需行动或验收的事项。已经通过自动化门的历史修补不再作为待办重复列出；完整历史证据由 git 提交、测试报告和本文件的归档索引追溯。
 
 ## 当前结论

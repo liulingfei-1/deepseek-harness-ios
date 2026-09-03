@@ -6,6 +6,7 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
     private let session: URLSession
     private let modelDiscoveryCache: ModelDiscoveryCache
     private let filesClient: DeepSeekFilesClient
+    let deepSeekExtensionRegistry: DeepSeekLlmAPIExtensionRegistry
     private let activeStreamLock = NSLock()
     private var activeStreams: [UUID: AsyncThrowingStream<LLMStreamEvent, Error>.Continuation] = [:]
 
@@ -24,7 +25,8 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
     init(
         filesClient: DeepSeekFilesClient,
         sessionConfiguration: URLSessionConfiguration? = nil,
-        modelDiscoveryCache: ModelDiscoveryCache = ModelDiscoveryCache()
+        modelDiscoveryCache: ModelDiscoveryCache = ModelDiscoveryCache(),
+        deepSeekExtensionRegistry: DeepSeekLlmAPIExtensionRegistry = DeepSeekLlmAPIExtensionRegistry()
     ) {
         let configuration = sessionConfiguration ?? Self.makeSessionConfiguration()
 
@@ -32,6 +34,7 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
         self.redirectDelegate = redirectDelegate
         self.modelDiscoveryCache = modelDiscoveryCache
         self.filesClient = filesClient
+        self.deepSeekExtensionRegistry = deepSeekExtensionRegistry
         session = URLSession(
             configuration: configuration,
             delegate: redirectDelegate,
@@ -211,9 +214,10 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
         switch adapter.streamingDialect {
         case .deepSeekChatCompletions:
             let prepared = await filesClient.prepare(validatedRequest)
+            let extended = try await applyingDeepSeekExtensions(to: prepared)
             do {
                 try await performOpenAI(
-                    prepared,
+                    extended,
                     adapter: adapter,
                     continuation: continuation
                 )
@@ -225,7 +229,7 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
                     await filesClient.invalidate(payload, request: validatedRequest)
                 }
                 try await performOpenAI(
-                    Self.inlineImageRequest(prepared),
+                    Self.inlineImageRequest(extended),
                     adapter: adapter,
                     continuation: continuation
                 )
@@ -243,6 +247,40 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
                 continuation: continuation
             )
         }
+    }
+
+    /// Captures the exact base wire body before asking registered providers
+    /// for their top-level fields, then performs the real request with the
+    /// merged immutable snapshot. Extensions are only meaningful on the
+    /// official DeepSeek route; generic OpenAI-compatible traffic remains
+    /// byte-for-byte governed by its existing compatibility profile.
+    private func applyingDeepSeekExtensions(to request: ModelRequest) async throws -> ModelRequest {
+        guard request.configuration.providerID == .deepSeekOfficial else { return request }
+        let baseRequest = ModelRequest(
+            configuration: request.configuration,
+            apiKey: request.apiKey,
+            systemPrompt: request.systemPrompt,
+            messages: request.messages,
+            tools: request.tools,
+            imagePayloads: request.imagePayloads,
+            route: request.route
+        )
+        let adapter = try ModelProviderAdapterRegistry.adapter(for: request.configuration.providerID)
+        let baseBody = try adapter.makeStreamingRequest(baseRequest).httpBody ?? Data()
+        let fields = try await deepSeekExtensionRegistry.prepare(
+            .init(baseBody: baseBody, sessionID: nil, purpose: nil)
+        )
+        guard !fields.isEmpty else { return request }
+        return ModelRequest(
+            configuration: request.configuration,
+            apiKey: request.apiKey,
+            systemPrompt: request.systemPrompt,
+            messages: request.messages,
+            tools: request.tools,
+            imagePayloads: request.imagePayloads,
+            route: request.route,
+            requestExtensions: fields
+        )
     }
 
     static func shouldRetryInlineImages(after error: Error, request: ModelRequest) -> Bool {

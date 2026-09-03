@@ -343,6 +343,16 @@ enum OpenAICompatibleWireSerializer {
         guard var object = try JSONSerialization.jsonObject(with: canonical) as? [String: Any] else {
             throw ModelClientError.invalidResponse
         }
+        if !request.requestExtensions.isEmpty {
+            let valueEncoder = JSONEncoder()
+            for (key, value) in request.requestExtensions
+                where CodingKeyValidator.isValidTopLevelExtension(key) {
+                if let data = try? valueEncoder.encode(value),
+                   let json = try? JSONSerialization.jsonObject(with: data) {
+                    object[key] = json
+                }
+            }
+        }
         let compatibility = resolved.compatibilityBaseline.overlaying(
             request.configuration.openAICompatibility
         )
@@ -466,5 +476,19 @@ enum OpenAICompatibleWireSerializer {
         if let object = value as? [String: Any] { return removingNullsFromObject(object) }
         if let array = value as? [Any] { return array.compactMap(removingNullsFromValue) }
         return value
+    }
+}
+
+private enum CodingKeyValidator {
+    static func isValidTopLevelExtension(_ key: String) -> Bool {
+        let reserved: Set<String> = [
+            "model", "messages", "tools", "stream", "stream_options",
+            "thinking", "reasoning_effort", "max_tokens", "max_completion_tokens"
+        ]
+        guard !reserved.contains(key) else { return false }
+        guard !key.isEmpty, key.count <= 64 else { return false }
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
+        guard key.unicodeScalars.allSatisfy({ allowed.contains($0) }) else { return false }
+        return key.first?.isLetter == true
     }
 }
