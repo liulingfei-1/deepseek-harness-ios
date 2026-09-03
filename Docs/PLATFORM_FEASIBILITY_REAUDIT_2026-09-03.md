@@ -71,8 +71,14 @@
 1. ~~**ui-schedule 等价 UI**~~ ✅ 已补齐：`HarnessSchedulePanel`（Features/Chat）从会话选项可达，只读 pending/finished + pending 取消，UI 测试 + 截图验证
 2. ~~**会话级模型目录**~~ ✅ 实际已对齐：SessionModelPickerView 已分 `providerSection`（选配置）→ `modelSection`（选模型）两段，对应桌面 `/model` provider→model 分层
 3. ~~**ui-workflow-run 顶层节点**~~ ✅ 已对齐：聊天以 `WorkflowToolCard` 呈现 run 摘要+阶段+子 Agent 成员+日志+结果（= 桌面 run 节点折叠的等价）；新增 `WorkflowRunTree` 数据层（Core/Trace）供轨迹/导出按 run 分组（提交 本轮）
-4. **Browser client-half 承载**（WKWebView）与本地管理 server、e2b/webhook/ACP 出站（见 §1，需 D-001 重裁）
-5. iSH CLI 包 + tmux、快照回放测试链
+4. **本地管理 server** ✅ 已实现：`LocalStateServer`（Core/LocalServer）——NWListener 仅 loopback，GET /health /status（注入式端点）/404；审计豁免（requiredInterfaceType=.loopback）；测试覆盖 health/status/404（本轮提交待回归）
+5. **iSH tmux/git/openssh** ✅ 已实现：install.sh 扩展（桌面终端工具集进 iSH guest）
+6. **e2b** ⏸ 判定：e2b 官方仅 JS/Python SDK（e2b.dev），无 iOS SDK 与公开纯 REST 契约；iOS 直连需契约先行。D-011 已解除产品阻塞；技术接入待 e2b iOS/REST 面 → 非 iOS 限制，列待接
+7. **webhook 入站** ⏸ 判定：D-011 已允许；需本地 server（#4 内核已备）+ 隧道配置；公网入站与后台约束属部署形态，配置面列后续
+8. **CLI 包** ⏸ 判定：host.mjs 即 node CLI 可运行形态（install.sh 验证）；上游 apps/cli 完整交互（命令面板/补全）是桌面 CLI 大项，iSH 内实现列后续
+9. **快照回放测试链** ⏸ 判定：等价已具备（CompatibilityFixtures + SwiftPM 事件 fixture）；上游完整录制/回放绑定 vitest+ACP 桌面启动，SwiftPM 直搬需等值测试宿主，列后续大项
+10. **Browser client-half（WKWebView 承载）** ⏸ 判定：可承载（浏览器工具已验证 WKWebView），桌面 41 ui 模块功能等价已在 §2 逐项核对（36 对齐/2 部分/1 补齐），React client-half 容器渲染属后续可选
+11. **ACP 远端/子 agent 多后端** ⏸ 判定：D-011 允许；Swift ACP 客户端协议实现列后续（需上游 acp 包契约核对）
 
 ### 真限制（保留，附 iOS 层证据）
 
