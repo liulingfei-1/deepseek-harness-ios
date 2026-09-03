@@ -102,6 +102,7 @@ $(SRCROOT)/HarnessMobile/Core/Plugins/PluginInstallCoordinator.swift
 $(SRCROOT)/HarnessMobile/Core/Trace/SessionPersistence.swift
 $(SRCROOT)/HarnessMobile/Core/Trace/SessionTurnOutline.swift
 $(SRCROOT)/HarnessMobile/Core/Trace/WorkflowRunTree.swift
+$(SRCROOT)/HarnessMobile/Core/LocalServer/LocalStateServer.swift
 $(SRCROOT)/HarnessMobile/Core/Trace/SessionTelemetry.swift
 $(SRCROOT)/HarnessMobile/Core/Trace/SessionQueryReadModel.swift
 $(SRCROOT)/HarnessMobile/Core/Security/CredentialStore.swift
@@ -291,6 +292,7 @@ $(SRCROOT)/HarnessMobileTests/SessionTitleSettingsTests.swift
 $(SRCROOT)/HarnessMobileTests/SessionEventTrajectoryTests.swift
 $(SRCROOT)/HarnessMobileTests/SessionTurnOutlineTests.swift
 $(SRCROOT)/HarnessMobileTests/WorkflowRunTreeTests.swift
+$(SRCROOT)/HarnessMobileTests/LocalStateServerTests.swift
 $(SRCROOT)/HarnessMobileTests/SessionTelemetryTests.swift
 $(SRCROOT)/HarnessMobileTests/DeepSeekSearchProviderTests.swift
 $(SRCROOT)/HarnessMobileTests/DeepSeekLlmAPIExtensionRegistryTests.swift

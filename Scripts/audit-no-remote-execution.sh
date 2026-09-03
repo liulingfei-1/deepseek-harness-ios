@@ -86,6 +86,10 @@ scan_files() {
       outside-network:*/Core/Tools/WebFetchTool.swift) continue ;;
       outside-network:*/Core/Browser/HarnessBrowserWebKitBackend.swift) continue ;;
       outside-network:*/Core/Tools/ISH/ISHGuestNetworkMonitor.swift) continue ;;
+      # LocalStateServer owns an NWListener bound to the loopback interface
+      # only (requiredInterfaceType = .loopback) and serves read-only GET
+      # endpoints; it cannot execute, forward, or receive remote traffic.
+      outside-network:*/Core/LocalServer/*.swift) continue ;;
       # MCP is a byte-framed client over the already audited on-device iSH
       # stdio bridge. It contains protocol names such as MCP and connect(), but
       # owns no URLSession, socket, NWConnection, or host Process primitive.

@@ -85,6 +85,7 @@
 		32F96B7CE22EA8F392F8DC29 /* PerplexitySearchProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FECBFEF12F494FD87059F2F9 /* PerplexitySearchProviderTests.swift */; };
 		331F93EFA0EF5FB3B645301C /* HarnessBrowserServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7290E7A2CD796BB8C070833 /* HarnessBrowserServiceTests.swift */; };
 		34262B5B6CB42767B4D4F00D /* ISHPluginHostDynamicHarnessBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = E83A1DE7AF1B033BABE9A3E4 /* ISHPluginHostDynamicHarnessBridge.swift */; };
+		3649DCFD5E5DCDD6BBACFEA3 /* LocalStateServerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75DB818BC58E5EA5B0D1AE46 /* LocalStateServerTests.swift */; };
 		38B5104232F19A10668C6075 /* HarnessMobileLiveUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CEEB203BE45838F82FC81FE /* HarnessMobileLiveUITests.swift */; };
 		39ABE8FECD486167EF31FDF9 /* AgentRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A61C0C03A79911A8AAAC0F4 /* AgentRuntime.swift */; };
 		3A0E961709F215D72ECF1DB4 /* SessionTurnOutlineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95119D6FCB4A20C1D2410940 /* SessionTurnOutlineTests.swift */; };
@@ -170,6 +171,7 @@
 		854E4CF2BAC1C23C9A979436 /* MobileSkillRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D095E59E98F5FFA00A7A21B /* MobileSkillRegistryTests.swift */; };
 		85B08CA7CD6E602039B3B96C /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 130EB856B4947319E3ED74A6 /* AppModel.swift */; };
 		86A723CE67DD7B162969DB5A /* DevicePermissionCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2DBD237518BA0B2C0C80F0D /* DevicePermissionCenter.swift */; };
+		87BBAF009AC4AB669513959C /* LocalStateServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08EB7BECD8E2BC65041D3E7E /* LocalStateServer.swift */; };
 		88093EE05A3E8FD2483E9F9F /* NativeAgentPluginCompilerLiveTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02BD0D0B56CD208F4D231F0D /* NativeAgentPluginCompilerLiveTests.swift */; };
 		8946D453D1F635A2364C58FB /* MessageBubble.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08C725F0B7FCD400DB2FC984 /* MessageBubble.swift */; };
 		894BC7F633962ACAD64ABFD3 /* WorkspaceTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDD76953C97A8C1D82C8A459 /* WorkspaceTools.swift */; };
@@ -411,6 +413,7 @@
 		0568195733C86DFEBC2E762C /* AppModel+PluginMarketplaceTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+PluginMarketplaceTool.swift"; sourceTree = "<group>"; };
 		080F89F60D3C8C83221FFF8A /* CustomOpenAICompatibleWireTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomOpenAICompatibleWireTests.swift; sourceTree = "<group>"; };
 		08C725F0B7FCD400DB2FC984 /* MessageBubble.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageBubble.swift; sourceTree = "<group>"; };
+		08EB7BECD8E2BC65041D3E7E /* LocalStateServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalStateServer.swift; sourceTree = "<group>"; };
 		09114E3FD16D8419038B96B7 /* SessionBackgroundResumeCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionBackgroundResumeCoordinatorTests.swift; sourceTree = "<group>"; };
 		0AF43E26DA9CA5296FAD75E1 /* BackgroundCompletionNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundCompletionNotifier.swift; sourceTree = "<group>"; };
 		0CB624FD94F65154D4F546EA /* LocalToolRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalToolRegistry.swift; sourceTree = "<group>"; };
@@ -562,6 +565,7 @@
 		73185C3EC8B64CCD4F2EB8B8 /* AgentRuntimeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRuntimeTests.swift; sourceTree = "<group>"; };
 		736034CB82B62577864C3CDF /* UpstreamCompatibilityFixtureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpstreamCompatibilityFixtureTests.swift; sourceTree = "<group>"; };
 		73AC7C312F65028E79E715ED /* TerminalBuffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalBuffer.swift; sourceTree = "<group>"; };
+		75DB818BC58E5EA5B0D1AE46 /* LocalStateServerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalStateServerTests.swift; sourceTree = "<group>"; };
 		766852BED305AAAB4BEEF552 /* OpenAICompatibleClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAICompatibleClient.swift; sourceTree = "<group>"; };
 		770E17D0C7999336D1F91FE4 /* MobileNativeTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileNativeTools.swift; sourceTree = "<group>"; };
 		77DED968A233B404775ACFDE /* MCPToolSuite.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPToolSuite.swift; sourceTree = "<group>"; };
@@ -1204,6 +1208,7 @@
 				2E251F96935EF8E728B639D8 /* ISHTerminalProviderTests.swift */,
 				FBA21746853A642926F74EDF /* LegacyBackgroundTaskLeaseTests.swift */,
 				304DB4D75BEE9DE90F87628A /* LiveModelAPIIntegrationTests.swift */,
+				75DB818BC58E5EA5B0D1AE46 /* LocalStateServerTests.swift */,
 				6F137A51DB436001832D92FF /* LSPToolTests.swift */,
 				4C86676FF0BE3AB86C0E1D6E /* MCPClientTests.swift */,
 				BE0AC9558AB7F8C2CB07674C /* MemoryStoreTests.swift */,
@@ -1284,6 +1289,7 @@
 				1F3D6172414152F2F947F6FF /* Export */,
 				82627322A787EE4EAB6BF2FC /* Hooks */,
 				C3833BBDC497286C98ED9E03 /* Jobs */,
+				BDDB38BC065FF3D4ACAA6A02 /* LocalServer */,
 				3CE4FE075A2B297B459B7B7D /* Network */,
 				4B235159345B4912238FA866 /* Performance */,
 				AC8DA5381E76882EC7EE74B4 /* Permissions */,
@@ -1405,6 +1411,14 @@
 				B40E3E6B7F5B5DD3E534F263 /* TerminalTypes.swift */,
 			);
 			path = OpenMinis;
+			sourceTree = "<group>";
+		};
+		BDDB38BC065FF3D4ACAA6A02 /* LocalServer */ = {
+			isa = PBXGroup;
+			children = (
+				08EB7BECD8E2BC65041D3E7E /* LocalStateServer.swift */,
+			);
+			path = LocalServer;
 			sourceTree = "<group>";
 		};
 		C0F5023A56EC53679E6E9D9B /* Plugins */ = {
@@ -1834,6 +1848,7 @@
 				6AD5C55AAC90B7BA5BFBA9A8 /* LSPToolTests.swift in Sources */,
 				FD5EEBC8BA8777C058890720 /* LegacyBackgroundTaskLeaseTests.swift in Sources */,
 				D800FF1FBF36BE02ED7FC6A5 /* LiveModelAPIIntegrationTests.swift in Sources */,
+				3649DCFD5E5DCDD6BBACFEA3 /* LocalStateServerTests.swift in Sources */,
 				CAAEDD4FC59BED3D68E1C3C9 /* MCPClientTests.swift in Sources */,
 				70D2D2BEFBF318461FF5EBBC /* MemoryStoreTests.swift in Sources */,
 				EFA6A723425D4A2984768E41 /* MessageFeedbackSidecarTests.swift in Sources */,
@@ -2006,6 +2021,7 @@
 				20A327BCCC0DCD3C0E2688F9 /* LSPTool.swift in Sources */,
 				25292D1997EBBA2677B86C1B /* LegacyBackgroundTaskLease.swift in Sources */,
 				121EA8AF2576B0683503E05C /* LocalAgentTool.swift in Sources */,
+				87BBAF009AC4AB669513959C /* LocalStateServer.swift in Sources */,
 				DD123551ACCF5FBA038F1804 /* LocalToolRegistry.swift in Sources */,
 				B06F9938BF2F6C9F61247DC0 /* MCPClient.swift in Sources */,
 				642A8E5D5B82CF3E0A74E9D6 /* MCPModels.swift in Sources */,
