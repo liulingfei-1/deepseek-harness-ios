@@ -149,6 +149,13 @@
 - **Simulator/iPhone 16 Pro**：真实 iSH 子进程仍未执行；当前仅完成编译/注入路径验证，保持 `VERIFY`。
 - **剩余动作**：持久化 provider id 与设置 UI；在设备上用真实 ACP agent 验证非零退出、取消、EOF shutdown、重连和后台恢复。
 
+### PARITY-005 · ACP cancellation propagation（2026-09-04）
+
+- **上游核对**：`subagent-acp` 的 abort signal 会终止子进程运行；仅让父任务本地抛出取消会留下活动 ACP session。
+- **移动端变更**：`ACPSubagentClient.runAndWait` 统一捕获 `Task.checkCancellation` 与 `Task.sleep` 的取消，向已建立的 session 发送 `session/cancel`，再映射为 `ACPSubagentError.cancelled`。
+- **专项验证**：`ACPSubagentClientTests.testRunAndWaitCancellationPropagatesToActiveSession` → **1 test passed**；ACP 全套测试 → **8 tests passed**。
+- **剩余边界**：真实 iSH ACP entrypoint、EOF/非零退出、重连、后台和 iPhone 16 Pro 仍需设备证据，状态保持 `VERIFY`。
+
 ### PARITY-013 · GitHub webhook envelope 与投递去重（2026-09-04）
 
 - **状态**：VERIFY

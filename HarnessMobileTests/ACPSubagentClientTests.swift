@@ -209,4 +209,34 @@ final class ACPSubagentClientTests: XCTestCase {
         let result = try await client.runAndWait(prompt: "hi", timeout: .seconds(2))
         XCTAssertEqual(result, "ok")
     }
+
+    func testRunAndWaitCancellationPropagatesToActiveSession() async throws {
+        let transport = MockTransport()
+        let client = ACPSubagentClient(transport: transport, cwd: "/workspace")
+        let task = Task { () -> Result<String, Error> in
+            do {
+                return .success(try await client.runAndWait(prompt: "hi", timeout: .seconds(2)))
+            } catch {
+                return .failure(error)
+            }
+        }
+        while transport.sent.count < 1 { await Task.yield() }
+        transport.agentResponds([
+            "jsonrpc": .string("2.0"), "id": .number(1), "result": .object([:])
+        ])
+        transport.agentResponds([
+            "jsonrpc": .string("2.0"), "id": .number(2),
+            "result": .object(["sessionId": .string("cancel-me")])
+        ])
+        while !transport.sent.contains(where: { $0.contains("session/prompt") }) {
+            await Task.yield()
+        }
+        task.cancel()
+        let result = await task.value
+        guard case let .failure(error) = result else {
+            return XCTFail("cancelled ACP run must fail")
+        }
+        XCTAssertEqual(error as? ACPSubagentError, .cancelled)
+        XCTAssertTrue(transport.sent.contains { $0.contains("session/cancel") && $0.contains("cancel-me") })
+    }
 }

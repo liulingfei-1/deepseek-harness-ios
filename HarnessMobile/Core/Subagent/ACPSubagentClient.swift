@@ -307,13 +307,18 @@ final class ACPSubagentClient: @unchecked Sendable {
         run(prompt: prompt)
         let clock = ContinuousClock()
         let deadline = clock.now + timeout
-        while outcome == nil {
-            try Task.checkCancellation()
-            if clock.now >= deadline {
-                cancel()
-                throw ACPSubagentError.timedOut
+        do {
+            while outcome == nil {
+                try Task.checkCancellation()
+                if clock.now >= deadline {
+                    cancel()
+                    throw ACPSubagentError.timedOut
+                }
+                try await Task.sleep(for: .milliseconds(25))
             }
-            try await Task.sleep(for: .milliseconds(25))
+        } catch is CancellationError {
+            cancel()
+            throw ACPSubagentError.cancelled
         }
         guard outcome == .completed else {
             if Task.isCancelled { throw ACPSubagentError.cancelled }
