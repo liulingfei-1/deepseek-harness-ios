@@ -34,7 +34,9 @@ if [ -n "$mirror" ]; then
     esac
 fi
 
-apk add --no-cache nodejs npm ca-certificates
+# Desktop terminal parity (tmux/git/openssh live inside the iSH guest so the
+# mobile terminal and shell tools match the desktop toolset).
+apk add --no-cache nodejs npm ca-certificates tmux git openssh
 
 node_major="$(node -p 'Number(process.versions.node.split(".")[0])')"
 if [ "$node_major" -lt 20 ]; then
