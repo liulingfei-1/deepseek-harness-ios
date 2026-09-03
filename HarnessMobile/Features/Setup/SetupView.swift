@@ -420,7 +420,8 @@ struct SetupView: View {
     private var inferenceSection: some View {
         Section {
             Picker("思考模式", selection: $draft.reasoningMode) {
-                ForEach(ReasoningMode.supportedModes(for: draft.providerID)) { mode in
+                ForEach(draft.supportedReasoningModes
+                    ?? ReasoningMode.supportedModes(for: draft.providerID)) { mode in
                     Text(mode.title).tag(mode)
                 }
             }
@@ -744,16 +745,25 @@ private struct SetupModelCatalog {
                     && builtIn?.inputModalities.contains(.image) == true
                     ? builtIn?.inputModalities ?? discoveredModel.inputModalities
                     : discoveredModel.inputModalities
+                let resolvedName = discoveredModel.name ?? existing.name
+                let resolvedDescription = discoveredModel.description ?? existing.description
+                let resolvedContextWindow = discoveredModel.contextWindow ?? existing.contextWindow
+                let resolvedMaxOutputTokens = discoveredModel.maxOutputTokens ?? existing.maxOutputTokens
+                let resolvedReasoningModes = discoveredModel.reasoningModes ?? existing.reasoningModes
+                let resolvedDefaultReasoningMode = discoveredModel.defaultReasoningMode
+                    ?? existing.defaultReasoningMode
                 models[position] = ProviderModel(
                     id: discoveredModel.id,
-                    name: discoveredModel.name ?? existing.name,
-                    description: discoveredModel.description ?? existing.description,
-                    contextWindow: discoveredModel.contextWindow ?? existing.contextWindow,
-                    maxOutputTokens: discoveredModel.maxOutputTokens ?? existing.maxOutputTokens,
+                    name: resolvedName,
+                    description: resolvedDescription,
+                    contextWindow: resolvedContextWindow,
+                    maxOutputTokens: resolvedMaxOutputTokens,
+                    inputModalities: refreshedModalities,
+                    reasoningModes: resolvedReasoningModes,
+                    defaultReasoningMode: resolvedDefaultReasoningMode,
                     // A refreshed provider catalog is authoritative for model
                     // capabilities. Keeping the cached value can leave a
                     // vision model marked as text-only after discovery.
-                    inputModalities: refreshedModalities,
                     openAICompatibility: existing.openAICompatibility
                 )
             } else {

@@ -37,6 +37,8 @@ struct ProviderModel: Codable, Sendable, Equatable, Hashable, Identifiable {
     let contextWindow: Int?
     let maxOutputTokens: Int?
     let inputModalities: [ModelInputModality]
+    let reasoningModes: [ReasoningMode]?
+    let defaultReasoningMode: ReasoningMode?
     let openAICompatibility: OpenAICompletionsCompatibility?
 
     init(
@@ -46,6 +48,8 @@ struct ProviderModel: Codable, Sendable, Equatable, Hashable, Identifiable {
         contextWindow: Int? = nil,
         maxOutputTokens: Int? = nil,
         inputModalities: [ModelInputModality] = [.text],
+        reasoningModes: [ReasoningMode]? = nil,
+        defaultReasoningMode: ReasoningMode? = nil,
         openAICompatibility: OpenAICompletionsCompatibility? = nil
     ) {
         self.id = id
@@ -54,11 +58,13 @@ struct ProviderModel: Codable, Sendable, Equatable, Hashable, Identifiable {
         self.contextWindow = contextWindow
         self.maxOutputTokens = maxOutputTokens
         self.inputModalities = inputModalities
+        self.reasoningModes = reasoningModes
+        self.defaultReasoningMode = defaultReasoningMode
         self.openAICompatibility = openAICompatibility
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, description, contextWindow, maxOutputTokens, inputModalities, openAICompatibility
+        case id, name, description, contextWindow, maxOutputTokens, inputModalities, reasoningModes, defaultReasoningMode, openAICompatibility
     }
 
     init(from decoder: Decoder) throws {
@@ -72,6 +78,14 @@ struct ProviderModel: Codable, Sendable, Equatable, Hashable, Identifiable {
             [ModelInputModality].self,
             forKey: .inputModalities
         ) ?? [.text]
+        reasoningModes = try container.decodeIfPresent(
+            [ReasoningMode].self,
+            forKey: .reasoningModes
+        )
+        defaultReasoningMode = try container.decodeIfPresent(
+            ReasoningMode.self,
+            forKey: .defaultReasoningMode
+        )
         openAICompatibility = try container.decodeIfPresent(
             OpenAICompletionsCompatibility.self,
             forKey: .openAICompatibility
@@ -260,6 +274,9 @@ enum ModelProviderCatalog {
         result.inputModalities = descriptor.builtInModels.first(
             where: { $0.id == descriptor.defaultModel }
         )?.inputModalities
+        result.supportedReasoningModes = descriptor.builtInModels.first(
+            where: { $0.id == descriptor.defaultModel }
+        )?.reasoningModes
         result.maxOutputTokens = descriptor.builtInModels.first(
             where: { $0.id == descriptor.defaultModel }
         )?.maxOutputTokens ?? result.maxOutputTokens

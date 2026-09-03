@@ -155,12 +155,17 @@ extension AppModel {
         } else {
             apiKey = try await self.apiKey(for: configuration)
         }
+        let requestedModelID = modelID ?? configuration.model
+        if let profile = providerDirectory.profile(matching: configuration),
+           let declared = profile.models.first(where: { $0.id == requestedModelID }) {
+            return declared
+        }
         return try await modelCatalogDiscoverer.resolveModelInfo(
             ModelResolutionRequest(
                 configuration: configuration,
                 apiKey: apiKey,
                 trustedOrigin: trustedOrigin,
-                modelID: modelID ?? configuration.model
+                modelID: requestedModelID
             )
         )
     }

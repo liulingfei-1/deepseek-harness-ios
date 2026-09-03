@@ -153,6 +153,16 @@ actor ModelDiscoveryCache {
         if let description = model.description, description.utf8.count > 2_048 { return false }
         if let contextWindow = model.contextWindow, contextWindow <= 0 { return false }
         if let maxOutputTokens = model.maxOutputTokens, maxOutputTokens <= 0 { return false }
+        if let reasoningModes = model.reasoningModes {
+            guard !reasoningModes.isEmpty,
+                  Set(reasoningModes).count == reasoningModes.count,
+                  model.defaultReasoningMode == nil
+                      || reasoningModes.contains(model.defaultReasoningMode!) else {
+                return false
+            }
+        } else if model.defaultReasoningMode != nil {
+            return false
+        }
         return true
     }
 }

@@ -201,8 +201,8 @@
 
 - **状态**：VERIFY
 - **上游证据**：最新 `llm` runtime 暴露 `listModels`、`resolveModelInfo`、reasoning/context/modality capability，并要求每次调用绑定当前 adapter registration。
-- **移动端变更**：`ModelCatalogDiscovering` 增加 exact `resolveModelInfo`；OpenAI-compatible 与 Anthropic adapter 均支持 advisory `listModels`。解析 `data[]` 与 enriched `models{}`，属性键优先、忽略 primitive entries、缺失名称回退模型 ID；Anthropic 使用原生 `x-api-key`、`anthropic-version: 2023-06-01` 和 `?limit=1000`，根地址自动规范为 `/v1/models`。`ProviderModel` 现在保留 description，profile/UI 合并路径不丢失该字段；未知模型解析回退为可请求的 identity，不把目录缺失误判为路由拒绝。既有 `ProviderCapabilityCache` 持久化继续生效。
-- **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter ProviderModelDiscoveryTests` → 20 tests passed，覆盖 Anthropic loopback listing、header/query、enriched map、exact built-in resolution；Xcode arm64 Simulator build、Plugin Host check、Node smoke、边界审计、上游一致性和 `git diff --check` 待本批次收尾复跑。
+- **移动端变更**：`ModelCatalogDiscovering` 增加 exact `resolveModelInfo`；OpenAI-compatible 与 Anthropic adapter 均支持 advisory `listModels`。解析 `data[]` 与 enriched `models{}`，属性键优先、忽略 primitive entries、缺失名称回退模型 ID；Anthropic 使用原生 `x-api-key`、`anthropic-version: 2023-06-01` 和 `?limit=1000`，根地址自动规范为 `/v1/models`。`ProviderModel` 现在保留 description 及逐模型 `reasoningModes/defaultReasoningMode`；profile/UI 合并路径不丢失这些字段，AgentConfiguration 校验与 OpenAI wire 支持 `minimal/medium/xhigh`。未知模型解析回退为可请求的 identity，不把目录缺失误判为路由拒绝。既有 `ProviderCapabilityCache` 持久化继续生效。
+- **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter ProviderModelDiscoveryTests` → 21 tests passed，覆盖 Anthropic loopback listing、header/query、enriched map、exact resolution、逐模型 reasoning 能力和不支持 level 拒绝；全量 Swift 回归 → 929 tests、5 skipped、0 failures。
 - **剩余动作**：OAuth 登录/刷新生命周期、per-model reasoning/context wire metadata、registration-bound runtime reload、真实多 provider/API/设备证据；未完成部分保持 `VERIFY`。
 
 ### PARITY-006 · 子 Agent reasoning effort 参数（2026-09-03）

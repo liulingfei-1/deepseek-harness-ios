@@ -10,6 +10,7 @@ struct AgentConfiguration: Codable, Sendable, Equatable {
     var baseURL: String = defaultBaseURL
     var model: String = defaultModel
     var inputModalities: [ModelInputModality]?
+    var supportedReasoningModes: [ReasoningMode]?
     var reasoningMode: ReasoningMode = .high
     var openAIWireProfile: OpenAICompatibleWireProfile?
     var openAICompatibility: OpenAICompletionsCompatibility?
@@ -24,6 +25,7 @@ struct AgentConfiguration: Codable, Sendable, Equatable {
         baseURL: String = defaultBaseURL,
         model: String = defaultModel,
         inputModalities: [ModelInputModality]? = nil,
+        supportedReasoningModes: [ReasoningMode]? = nil,
         reasoningMode: ReasoningMode = .high,
         openAIWireProfile: OpenAICompatibleWireProfile? = nil,
         openAICompatibility: OpenAICompletionsCompatibility? = nil,
@@ -37,6 +39,7 @@ struct AgentConfiguration: Codable, Sendable, Equatable {
         self.baseURL = baseURL
         self.model = model
         self.inputModalities = inputModalities
+        self.supportedReasoningModes = supportedReasoningModes
         self.reasoningMode = reasoningMode
         self.openAIWireProfile = openAIWireProfile
         self.openAICompatibility = openAICompatibility
@@ -52,6 +55,7 @@ struct AgentConfiguration: Codable, Sendable, Equatable {
         case baseURL
         case model
         case inputModalities
+        case supportedReasoningModes
         case reasoningMode
         case openAIWireProfile
         case openAICompatibility
@@ -69,6 +73,10 @@ struct AgentConfiguration: Codable, Sendable, Equatable {
         inputModalities = try container.decodeIfPresent(
             [ModelInputModality].self,
             forKey: .inputModalities
+        )
+        supportedReasoningModes = try container.decodeIfPresent(
+            [ReasoningMode].self,
+            forKey: .supportedReasoningModes
         )
         reasoningMode = try container.decodeIfPresent(ReasoningMode.self, forKey: .reasoningMode)
             ?? .high
@@ -181,7 +189,9 @@ struct AgentConfiguration: Codable, Sendable, Equatable {
         guard maxOutputTokens >= 128 else {
             throw AgentConfigurationError.invalidMaxOutputTokens
         }
-        guard ReasoningMode.supportedModes(for: providerID).contains(reasoningMode) else {
+        let allowedReasoningModes = self.supportedReasoningModes
+            ?? ReasoningMode.supportedModes(for: providerID)
+        guard allowedReasoningModes.contains(reasoningMode) else {
             throw AgentConfigurationError.unsupportedReasoningMode(providerID, reasoningMode)
         }
         if ModelProviderCatalog.descriptor(for: providerID).wireProtocol != .openAIChatCompletions,
@@ -210,7 +220,7 @@ struct AgentConfiguration: Codable, Sendable, Equatable {
     }
 
     var requiresDeepSeekReasoningReplay: Bool {
-        guard reasoningMode == .low || reasoningMode == .high || reasoningMode == .max,
+        guard reasoningMode != .providerDefault && reasoningMode != .off,
               let host = try? chatCompletionsURL().host?.lowercased() else {
             return false
         }
@@ -221,8 +231,11 @@ struct AgentConfiguration: Codable, Sendable, Equatable {
 enum ReasoningMode: String, Codable, CaseIterable, Sendable, Identifiable {
     case providerDefault
     case off
+    case minimal
     case low
+    case medium
     case high
+    case xhigh
     case max
 
     var id: String { rawValue }
@@ -233,10 +246,16 @@ enum ReasoningMode: String, Codable, CaseIterable, Sendable, Identifiable {
             return "服务默认"
         case .off:
             return "关闭"
+        case .minimal:
+            return "Minimal"
         case .low:
             return "Low"
+        case .medium:
+            return "Medium"
         case .high:
             return "High"
+        case .xhigh:
+            return "XHigh"
         case .max:
             return "Max"
         }

@@ -331,7 +331,8 @@ struct SessionModelPickerView: View {
     private var inferenceSection: some View {
         Section {
             Picker("思考模式", selection: $draft.reasoningMode) {
-                ForEach(ReasoningMode.supportedModes(for: draft.providerID)) { mode in
+                ForEach(draft.supportedReasoningModes
+                    ?? ReasoningMode.supportedModes(for: draft.providerID)) { mode in
                     Text(mode.title).tag(mode)
                 }
             }
@@ -581,17 +582,26 @@ struct SessionModelCatalog {
                     && builtIn?.inputModalities.contains(.image) == true
                     ? builtIn?.inputModalities ?? discoveredModel.inputModalities
                     : discoveredModel.inputModalities
+                let resolvedName = discoveredModel.name ?? current.name
+                let resolvedDescription = discoveredModel.description ?? current.description
+                let resolvedContextWindow = discoveredModel.contextWindow ?? current.contextWindow
+                let resolvedMaxOutputTokens = discoveredModel.maxOutputTokens ?? current.maxOutputTokens
+                let resolvedReasoningModes = discoveredModel.reasoningModes ?? current.reasoningModes
+                let resolvedDefaultReasoningMode = discoveredModel.defaultReasoningMode
+                    ?? current.defaultReasoningMode
                 models[position] = ProviderModel(
                     id: discoveredModel.id,
-                    name: discoveredModel.name ?? current.name,
-                    description: discoveredModel.description ?? current.description,
-                    contextWindow: discoveredModel.contextWindow ?? current.contextWindow,
-                    maxOutputTokens: discoveredModel.maxOutputTokens ?? current.maxOutputTokens,
+                    name: resolvedName,
+                    description: resolvedDescription,
+                    contextWindow: resolvedContextWindow,
+                    maxOutputTokens: resolvedMaxOutputTokens,
+                    inputModalities: refreshedModalities,
+                    reasoningModes: resolvedReasoningModes,
+                    defaultReasoningMode: resolvedDefaultReasoningMode,
                     // The refreshed catalog is authoritative for capabilities.
                     // Keeping `current.inputModalities` here preserves stale
                     // `.text` metadata from an older profile and makes
                     // `deepseek-v4-flash-vision-exp` fail the vision guard.
-                    inputModalities: refreshedModalities,
                     openAICompatibility: current.openAICompatibility
                 )
             } else {

@@ -403,17 +403,23 @@ enum ChatWireSerializer {
             return nil
         case .off:
             return .init(type: "disabled")
-        case .low, .high, .max:
+        case .minimal, .low, .medium, .high, .xhigh, .max:
             return .init(type: "enabled")
         }
     }
 
     private static func makeReasoningEffort(_ mode: ReasoningMode) -> String? {
         switch mode {
+        case .minimal:
+            return "minimal"
         case .low:
             return "low"
+        case .medium:
+            return "medium"
         case .high:
             return "high"
+        case .xhigh:
+            return "xhigh"
         case .max:
             return "max"
         case .providerDefault, .off:

@@ -219,6 +219,28 @@ final class ProviderModelDiscoveryTests: XCTestCase {
         XCTAssertEqual(models[1].inputModalities, [.text, .image])
     }
 
+    func testModelListingCarriesPerModelReasoningCapabilities() throws {
+        let data = Data(#"{"data":[{"id":"reasoning-gateway","reasoning_modes":["off","low","xhigh","max"],"reasoning_default":"low"}]}"#.utf8)
+        let model = try XCTUnwrap(OpenAIChatCompletionsAdapter().decodeModelList(data).first)
+        XCTAssertEqual(model.reasoningModes, [.off, .low, .xhigh, .max])
+        XCTAssertEqual(model.defaultReasoningMode, .low)
+
+        var configuration = AgentConfiguration(
+            providerID: .customOpenAICompatible,
+            baseURL: "https://gateway.example/v1",
+            model: model.id,
+            supportedReasoningModes: model.reasoningModes,
+            reasoningMode: .low
+        )
+        XCTAssertNoThrow(try configuration.validated())
+        configuration.reasoningMode = .high
+        XCTAssertThrowsError(try configuration.validated()) { error in
+            guard case .unsupportedReasoningMode(.customOpenAICompatible, .high)? = error as? AgentConfigurationError else {
+                return XCTFail("expected unsupported per-model reasoning mode")
+            }
+        }
+    }
+
     func testAnthropicListingUsesNativeURLAndHeaders() throws {
         var configuration = ModelProviderCatalog.applying(.anthropic, to: AgentConfiguration())
         configuration.baseURL = "https://api.anthropic.com"
@@ -326,6 +348,15 @@ final class ProviderModelDiscoveryTests: XCTestCase {
         )
         XCTAssertNil(openAIBody["thinking"])
         XCTAssertNil(openAIBody["system"])
+
+        var xhighConfiguration = openAIConfiguration
+        xhighConfiguration.reasoningMode = .xhigh
+        let xhighBody = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: try XCTUnwrap(openAI.makeStreamingRequest(request(xhighConfiguration)).httpBody)
+            ) as? [String: Any]
+        )
+        XCTAssertEqual(xhighBody["reasoning_effort"] as? String, "xhigh")
 
         let anthropicConfiguration = ModelProviderCatalog.applying(
             .anthropic,

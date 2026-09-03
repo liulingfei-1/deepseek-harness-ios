@@ -196,7 +196,11 @@ struct OpenAIChatCompletionsAdapter: ModelProviderAdapter {
                     ),
                     inputModalities: Self.validatedInputModalities(
                         item.inputModalities ?? item.input
-                    )
+                    ),
+                    reasoningModes: Self.validatedReasoningModes(
+                        item.reasoningModes ?? item.reasoningEfforts
+                    ),
+                    defaultReasoningMode: item.defaultReasoningMode.flatMap(ReasoningMode.init)
                 )
             )
         }
@@ -233,6 +237,15 @@ struct OpenAIChatCompletionsAdapter: ModelProviderAdapter {
             return [.text]
         }
         return values
+    }
+
+    static func validatedReasoningModes(_ rawValues: [String]?) -> [ReasoningMode]? {
+        guard let rawValues, !rawValues.isEmpty else { return nil }
+        let modes = rawValues.compactMap(ReasoningMode.init(rawValue:))
+        guard modes.count == rawValues.count, Set(modes).count == modes.count else {
+            return nil
+        }
+        return modes
     }
 }
 
@@ -331,6 +344,9 @@ private struct OpenAIModelListItem: Decodable {
     let name: String?
     let displayName: String?
     let description: String?
+    let reasoningModes: [String]?
+    let reasoningEfforts: [String]?
+    let defaultReasoningMode: String?
     let contextWindow: Int?
     let contextLength: Int?
     let maxTokens: Int?
@@ -343,6 +359,9 @@ private struct OpenAIModelListItem: Decodable {
         case name
         case displayName = "display_name"
         case description
+        case reasoningModes = "reasoning_modes"
+        case reasoningEfforts = "reasoning_efforts"
+        case defaultReasoningMode = "reasoning_default"
         case contextWindow = "context_window"
         case contextLength = "context_length"
         case maxTokens = "max_tokens"
@@ -357,6 +376,9 @@ private struct OpenAIModelListItem: Decodable {
         name = try? container.decode(String.self, forKey: .name)
         displayName = try? container.decode(String.self, forKey: .displayName)
         description = try? container.decode(String.self, forKey: .description)
+        reasoningModes = try? container.decode([String].self, forKey: .reasoningModes)
+        reasoningEfforts = try? container.decode([String].self, forKey: .reasoningEfforts)
+        defaultReasoningMode = try? container.decode(String.self, forKey: .defaultReasoningMode)
         contextWindow = try? container.decode(Int.self, forKey: .contextWindow)
         contextLength = try? container.decode(Int.self, forKey: .contextLength)
         maxTokens = try? container.decode(Int.self, forKey: .maxTokens)

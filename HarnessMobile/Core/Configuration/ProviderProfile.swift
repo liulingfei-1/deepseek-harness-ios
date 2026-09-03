@@ -157,6 +157,8 @@ struct ProviderProfile: Codable, Sendable, Equatable, Identifiable {
                 contextWindow: current.contextWindow,
                 maxOutputTokens: current.maxOutputTokens,
                 inputModalities: inputModalities,
+                reasoningModes: current.reasoningModes,
+                defaultReasoningMode: current.defaultReasoningMode,
                 openAICompatibility: current.openAICompatibility
             )
         }
@@ -214,7 +216,12 @@ struct ProviderProfile: Codable, Sendable, Equatable, Identifiable {
             model: selectedModelID,
             inputModalities: catalogModel?.inputModalities
                 ?? selectedModel?.inputModalities,
-            reasoningMode: reasoningMode ?? self.reasoningMode,
+            supportedReasoningModes: catalogModel?.reasoningModes
+                ?? selectedModel?.reasoningModes,
+            reasoningMode: reasoningMode
+                ?? catalogModel?.defaultReasoningMode
+                ?? selectedModel?.defaultReasoningMode
+                ?? self.reasoningMode,
             openAIWireProfile: openAIWireProfile,
             openAICompatibility: mergedCompatibility,
             retryPolicy: retryPolicy,
@@ -266,6 +273,7 @@ struct ProviderProfile: Codable, Sendable, Equatable, Identifiable {
 
         let normalizedModels = try Self.validatedModels(
             models,
+            providerID: providerID,
             ensuring: normalizedDefaultModel,
             requireDeclaredModel: isCustom
         )
@@ -331,6 +339,7 @@ struct ProviderProfile: Codable, Sendable, Equatable, Identifiable {
 
     private static func validatedModels(
         _ models: [ProviderModel],
+        providerID: ModelProviderID,
         ensuring defaultModel: String,
         requireDeclaredModel: Bool
     ) throws -> [ProviderModel] {
@@ -349,6 +358,19 @@ struct ProviderProfile: Codable, Sendable, Equatable, Identifiable {
                   Set(model.inputModalities).count == model.inputModalities.count else {
                 throw ProviderProfileError.invalidModelInputModalities(id)
             }
+            if let reasoningModes = model.reasoningModes {
+                guard !reasoningModes.isEmpty,
+                      Set(reasoningModes).count == reasoningModes.count,
+                      reasoningModes.allSatisfy({
+                          ReasoningMode.supportedModes(for: providerID).contains($0)
+                      }),
+                      model.defaultReasoningMode == nil
+                          || reasoningModes.contains(model.defaultReasoningMode!) else {
+                    throw ProviderProfileError.invalidModelReasoningModes(id)
+                }
+            } else if model.defaultReasoningMode != nil {
+                throw ProviderProfileError.invalidModelReasoningModes(id)
+            }
             let name = model.name?.trimmingCharacters(in: .whitespacesAndNewlines)
             result.append(
                 ProviderModel(
@@ -358,6 +380,8 @@ struct ProviderProfile: Codable, Sendable, Equatable, Identifiable {
                     contextWindow: model.contextWindow,
                     maxOutputTokens: model.maxOutputTokens,
                     inputModalities: model.inputModalities,
+                    reasoningModes: model.reasoningModes,
+                    defaultReasoningMode: model.defaultReasoningMode,
                     openAICompatibility: model.openAICompatibility
                 )
             )
@@ -497,6 +521,7 @@ enum ProviderProfileError: LocalizedError, Sendable, Equatable {
     case invalidCredentialReference
     case invalidModelID
     case invalidModelInputModalities(String)
+    case invalidModelReasoningModes(String)
     case duplicateModelID(String)
     case emptyDefaultModel
     case customProviderRequiresModel
@@ -526,6 +551,8 @@ enum ProviderProfileError: LocalizedError, Sendable, Equatable {
             return "模型 ID 不能为空，且不能超过 256 字节。"
         case let .invalidModelInputModalities(id):
             return "模型 ID“\(id)”的输入类型必须包含 text，且不能重复。"
+        case let .invalidModelReasoningModes(id):
+            return "模型 ID“\(id)”的 reasoning 能力声明无效。"
         case let .duplicateModelID(id):
             return "模型 ID“\(id)”重复。"
         case .emptyDefaultModel:
