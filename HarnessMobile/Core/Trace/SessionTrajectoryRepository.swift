@@ -14,6 +14,7 @@ enum SessionTrajectoryRepositoryError: Error, Sendable, Equatable, LocalizedErro
     case resetInProgress
     case turnNumberExhausted
     case syncBaseUnavailable(UInt64)
+    case malformedDeliveryAcceptance(UInt64)
     case syncBaseMismatch(expected: UInt64, actual: UInt64)
     case syncAssetsUnsupported
     case syncTombstonesUnsupported
@@ -28,6 +29,8 @@ enum SessionTrajectoryRepositoryError: Error, Sendable, Equatable, LocalizedErro
             return "会话 Turn 编号已达到上限。"
         case let .syncBaseUnavailable(baseSequence):
             return "本地轨迹中不存在同步基线 \(baseSequence)。"
+        case let .malformedDeliveryAcceptance(sequence):
+            return "轨迹中的 delivery-accepted 事件 \(sequence) 格式非法。"
         case let .syncBaseMismatch(expected, actual):
             return "同步 suffix 基线冲突：本地期待 \(expected)，收到 \(actual)。"
         case .syncAssetsUnsupported:
@@ -399,5 +402,83 @@ actor SessionLogDeliveryCoordinator {
               value.rounded(.down) == value,
               value <= Double(UInt64.max) else { return nil }
         return UInt64(value)
+    }
+}
+
+/// Request-extension provider for the upstream `session-log-deepseek` field.
+/// It derives the resend suffix from the canonical event log and records the
+/// acceptance watermark in that same log after the model endpoint returns 2xx.
+struct SessionLogDeepSeekExtensionProvider: Sendable {
+    let persistence: any SessionPersistence
+
+    func makeProvider() -> DeepSeekLlmAPIExtensionRegistry.Provider {
+        let persistence = persistence
+        return .init(contribution: { context in
+            guard let rawSessionID = context.sessionID,
+                  let sessionID = UUID(uuidString: rawSessionID) else {
+                return nil
+            }
+            let events = try await persistence.allEvents(sessionID: sessionID)
+            let acceptedThrough = try Self.acceptedThrough(events, sessionID: sessionID)
+            guard let through = events.last?.seq else { return nil }
+            let suffix = events.filter {
+                acceptedThrough < 0 || $0.seq > UInt64(acceptedThrough)
+            }
+            let wireEvents = try suffix.map(Self.wireEvent)
+            let createdAt = events.first?.time ?? SessionEventTimestamp.nowMilliseconds()
+            let value: JSONValue = .object([
+                "version": .number(1),
+                "session": .object([
+                    "version": .number(0),
+                    "id": .string(sessionID.uuidString.lowercased()),
+                    "createdAt": .number(Double(createdAt))
+                ]),
+                "afterSeq": .number(Double(acceptedThrough)),
+                "throughSeq": .number(Double(through)),
+                "events": .array(wireEvents)
+            ])
+            return .init(value: value, accept: {
+                _ = try await persistence.append(
+                    SessionEventDraft(
+                        type: SessionEventVocabulary.deliveryAccepted,
+                        data: .object([
+                            "sessionId": .string(sessionID.uuidString.lowercased()),
+                            "throughSeq": .number(Double(through))
+                        ])
+                    ),
+                    sessionID: sessionID
+                )
+            })
+        })
+    }
+
+    private static func acceptedThrough(_ events: [SessionEvent], sessionID: UUID) throws -> Int64 {
+        let expected = sessionID.uuidString.lowercased()
+        var current = Int64(-1)
+        for event in events where event.type == SessionEventVocabulary.deliveryAccepted {
+            guard let object = event.data.objectValue,
+                  let session = object["sessionId"]?.stringValue,
+                  !session.isEmpty,
+                  let raw = object["throughSeq"],
+                  case let .number(number) = raw,
+                  number.isFinite,
+                  number.rounded(.down) == number,
+                  number >= -1,
+                  number <= Double(Int64.max) else {
+                throw SessionTrajectoryRepositoryError.malformedDeliveryAcceptance(event.seq)
+            }
+            if event.seq <= UInt64(Int64.max), number >= Double(event.seq) {
+                throw SessionTrajectoryRepositoryError.malformedDeliveryAcceptance(event.seq)
+            }
+            if session.lowercased() == expected {
+                current = max(current, Int64(number))
+            }
+        }
+        return current
+    }
+
+    private static func wireEvent(_ event: SessionEvent) throws -> JSONValue {
+        let data = try JSONEncoder().encode(event)
+        return try JSONDecoder().decode(JSONValue.self, from: data)
     }
 }

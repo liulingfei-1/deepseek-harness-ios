@@ -222,6 +222,10 @@ final class LocalStateServer: @unchecked Sendable {
 
     private func handle(_ connection: NWConnection) {
         connection.start(queue: queue)
+        receiveRequest(on: connection, buffer: Data())
+    }
+
+    private func receiveRequest(on connection: NWConnection, buffer: Data) {
         connection.receive(
             minimumIncompleteLength: 1,
             maximumLength: 8 * 1024
@@ -230,7 +234,38 @@ final class LocalStateServer: @unchecked Sendable {
                 connection.cancel()
                 return
             }
-            let request = String(decoding: data, as: UTF8.self)
+            var requestData = buffer
+            requestData.append(data)
+            guard requestData.count <= 64 * 1024 else {
+                connection.cancel()
+                return
+            }
+            let separator = Data("\r\n\r\n".utf8)
+            guard let headerEnd = requestData.range(of: separator) else {
+                if !isComplete { self.receiveRequest(on: connection, buffer: requestData) }
+                else { connection.cancel() }
+                return
+            }
+            let headerData = requestData[..<headerEnd.lowerBound]
+            let headerText = String(decoding: headerData, as: UTF8.self)
+            let contentLength = headerText
+                .split(separator: "\r\n")
+                .dropFirst()
+                .compactMap { line -> Int? in
+                    let parts = line.split(separator: ":", maxSplits: 1)
+                    guard parts.count == 2,
+                          parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
+                            .caseInsensitiveCompare("Content-Length") == .orderedSame else { return nil }
+                    return Int(parts[1].trimmingCharacters(in: .whitespacesAndNewlines))
+                }
+                .first ?? 0
+            let bodyStart = headerEnd.upperBound
+            guard requestData.count >= bodyStart + contentLength else {
+                if !isComplete { self.receiveRequest(on: connection, buffer: requestData) }
+                else { connection.cancel() }
+                return
+            }
+            let request = String(decoding: requestData, as: UTF8.self)
             self.webhookHandlerLock.lock()
             let webhookHandler = self.webhookHandler
             let webhookSecret = self.webhookSecret
@@ -250,7 +285,6 @@ final class LocalStateServer: @unchecked Sendable {
                 content: Data((headers + body).utf8),
                 completion: .contentProcessed { _ in connection.cancel() }
             )
-            _ = isComplete
             _ = error
         }
     }

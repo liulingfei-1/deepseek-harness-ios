@@ -50,12 +50,39 @@ final class DeepSeekLlmAPIExtensionRegistry: @unchecked Sendable {
         }
     }
 
-    /// A provider returning top-level fields for one request, plus an
-    /// optional post-2xx callback.
+    /// A provider returning one top-level field value and an optional
+    /// request-specific post-2xx callback.
     struct Provider: Sendable {
-        let prepare: @Sendable (RequestContext) async throws -> JSONValue?
-        /// Runs at most once per captured request after a 2xx response.
-        var onAccept: (@Sendable () async throws -> Void)?
+        struct Contribution: Sendable {
+            let value: JSONValue
+            let accept: (@Sendable () async throws -> Void)?
+
+            init(
+                value: JSONValue,
+                accept: (@Sendable () async throws -> Void)? = nil
+            ) {
+                self.value = value
+                self.accept = accept
+            }
+        }
+
+        fileprivate let prepareContribution: @Sendable (RequestContext) async throws -> Contribution?
+
+        init(
+            prepare: @escaping @Sendable (RequestContext) async throws -> JSONValue?,
+            onAccept: (@Sendable () async throws -> Void)? = nil
+        ) {
+            prepareContribution = { context in
+                guard let value = try await prepare(context) else { return nil }
+                return Contribution(value: value, accept: onAccept)
+            }
+        }
+
+        init(
+            contribution: @escaping @Sendable (RequestContext) async throws -> Contribution?
+        ) {
+            prepareContribution = contribution
+        }
     }
 
     /// Detached extension fields plus an idempotent post-2xx acceptance
@@ -148,9 +175,9 @@ final class DeepSeekLlmAPIExtensionRegistry: @unchecked Sendable {
             for (field, provider) in snapshot {
                 group.addTask {
                     try Task.checkCancellation()
-                    let contribution = try await provider.prepare(context)
+                    let contribution = try await provider.prepareContribution(context)
                     try Task.checkCancellation()
-                    return (field, contribution, contribution == nil ? nil : provider.onAccept)
+                    return (field, contribution?.value, contribution?.accept)
                 }
             }
             var results: [(String, JSONValue?, (@Sendable () async throws -> Void)?)] = []
@@ -166,19 +193,6 @@ final class DeepSeekLlmAPIExtensionRegistry: @unchecked Sendable {
             }
         }
         return Prepared(fields: fields, callbacks: callbacks)
-    }
-
-    /// Runs every captured provider's post-2xx callback exactly once.
-    /// Multiple failures merge into the reported error.
-    func acceptAll(providers: [(String, Provider)]) async throws {
-        try await withThrowingTaskGroup(of: Void.self) { group in
-            for (_, provider) in providers {
-                if let callback = provider.onAccept {
-                    group.addTask { try await callback() }
-                }
-            }
-            try await group.waitForAll()
-        }
     }
 
     /// Field names must be ASCII identifiers starting with a letter,

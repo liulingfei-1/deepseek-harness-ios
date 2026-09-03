@@ -24,7 +24,7 @@ git diff --check
 | ID | 上游事实（已用 GitHub API 复核） | 本地生产路径 | 当前状态 | 下一步与完成证据 |
 |---|---|---|---|---|
 | PARITY-001 | DeepSeek request extension 注册与 provider wire serializer | `DeepSeekLlmAPIExtensionRegistry` → request serializer | VERIFY | 已补结构化 body/session/purpose、并发 preparation、取消、幂等 acceptance 与真实 URLProtocol 2xx wire fixture；仍需真实 provider/插件注册、重试回放和真机证据 |
-| PARITY-002 | `session-log-deepseek` delivery-accepted + suffix/watermark | Trace/session persistence | VERIFY | 断网重启、真实 endpoint；watermark accepted cursor 证据 |
+| PARITY-002 | `session-log-deepseek` delivery-accepted + suffix/watermark | `SessionLogDeepSeekExtensionProvider` → canonical trajectory → DeepSeek request registry | VERIFY | 已接入可选 `dsh_session_log` provider、suffix/watermark、2xx acceptance 事件和 malformed watermark 拒绝；仍缺真实 endpoint、断网重启和真机证据 |
 | PARITY-003 | telemetry ledger + OTLP sink | `SessionTelemetry`/`SessionTelemetryOtelSink` | VERIFY | 真实 feedback sink 与设置 UI；默认关闭保持可见 |
 | PARITY-004 | turn outline/trajectory rail | `SessionTurnOutline` + Chat rail | VERIFY | 长会话、分页、VoiceOver、真机 |
 | PARITY-005 | ACP `initialize → session/new → session/prompt → session/update` | `ACPSubagentClient`、iSH transport、provider catalog | VERIFY | 真实 ACP entrypoint、cancel/exit/reconnect、持久 provider 选择 |
@@ -37,6 +37,19 @@ git diff --check
 | PARITY-012 | E2B 包通过官方 npm SDK `Sandbox.create`，含 fs/subprocess provider | 无 E2B SDK；本机 iSH 可作为语义替代 | IOS-REPLACEMENT/VERIFY | 先保存上游 fixture 与账号配置契约；没有可靠 REST 契约不得猜 endpoint |
 | PARITY-013 | provider-neutral webhook rule registry；规则返回可选 Session request | loopback POST → parse/HMAC → durable dedup → rule → Job/可选 wake | VERIFY | 当前批次已补通用 provider 路由、持久规则、重试、可选唤醒；仍缺公网隧道、后台持续监听、真机 |
 | PARITY-014 | frontend-static/client-half、Windows host 包 | WKWebView 已可承载但桌面 bundle 未接入 | OUT-OF-SCOPE/VERIFY | 打包并接入真实 bundle；Windows PowerShell/win32/ACL 保持平台不适用 |
+
+### PARITY-002 本批次逐步修改清单
+
+- [x] `SessionLogDeepSeekExtensionProvider` 从 canonical `SessionPersistence` 读取完整事件，折叠匹配 session 的 `delivery-accepted` 水位并只发送未确认 suffix。
+- [x] 以 `DeepSeekLlmAPIExtensionRegistry.Provider.Contribution` 返回 `dsh_session_log`，2xx 后追加 `session-log-deepseek/delivery-accepted`，由 request-local acceptance transaction 保证只执行一次。
+- [x] AppModel 增加显式 `sessionLogEnabled` 接线，默认关闭与上游插件配置一致。
+- [x] 增加 suffix、acceptance、第二次 watermark 和 malformed acceptance 回归测试；相关 registry/trajectory 测试 25 项通过。
+- [ ] 真实 DeepSeek endpoint、断网重启、服务端接收与 iPhone 16 Pro 证据；未取得前保持 `VERIFY`。
+
+### PARITY-010 本批次补丁
+
+- [x] 修复 `LocalStateServer` 单次 `NWConnection.receive` 导致的分片 HTTP 请求误报 400；现在按 header 与 `Content-Length` 聚合完整请求后再路由。
+- [x] 真实 `URLSession` loopback webhook 回归通过，保留 64 KiB 请求上限。
 
 ## 2. PARITY-013 本批次逐步修改清单
 

@@ -619,6 +619,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         workspaceStore: WorkspaceStore = WorkspaceStore(),
         memoryStore: MemoryStore = MemoryStore(),
         modelClient: OpenAICompatibleClient = OpenAICompatibleClient(),
+        sessionLogEnabled: Bool = false,
         modelCatalogDiscoverer: (any ModelCatalogDiscovering)? = nil,
         trajectoryRepository: any SessionPersistence = SessionTrajectoryRepository(),
         slashCommandRegistry: SlashCommandRegistry = SlashCommandRegistry(),
@@ -666,10 +667,19 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
             configuration: .init(mode: .disabled, outputDirectory: telemetryDirectory)
         )
         self.sessionTelemetrySink = telemetrySink
-        self.trajectoryRepository = TelemetrySessionPersistence(
+        let telemetryPersistence = TelemetrySessionPersistence(
             base: trajectoryRepository,
             sink: telemetrySink
         )
+        self.trajectoryRepository = telemetryPersistence
+        if sessionLogEnabled {
+            try? modelClient.deepSeekExtensionRegistry.register(
+                field: "dsh_session_log",
+                provider: SessionLogDeepSeekExtensionProvider(
+                    persistence: telemetryPersistence
+                ).makeProvider()
+            )
+        }
         self.slashCommandRegistry = slashCommandRegistry
         skillRegistry = MobileSkillRegistry(workspaceStore: workspaceStore)
         workspaceInstructionTransitions = WorkspaceInstructionTransitionEngine(

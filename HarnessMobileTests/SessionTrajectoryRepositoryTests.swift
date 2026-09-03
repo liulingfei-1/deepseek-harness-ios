@@ -705,6 +705,85 @@ final class SessionTrajectoryRepositoryTests: XCTestCase {
         XCTAssertEqual(persistedWatermark, 0)
     }
 
+    func testSessionLogExtensionContributesSuffixAndAppendsAcceptanceEvent() async throws {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sessionID = UUID()
+        let repository = SessionTrajectoryRepository(root: root.appendingPathComponent("events"))
+        _ = try await repository.append(.turnStart(turn: 1, time: 1), sessionID: sessionID)
+        _ = try await repository.append(
+            .turnEnd(turn: 1, reason: .string("completed"), time: 2),
+            sessionID: sessionID
+        )
+        let registry = DeepSeekLlmAPIExtensionRegistry()
+        try registry.register(
+            field: "dsh_session_log",
+            provider: SessionLogDeepSeekExtensionProvider(persistence: repository).makeProvider()
+        )
+
+        let prepared = try await registry.prepareTransaction(
+            .init(
+                baseBody: Data(#"{"model":"deepseek-test"}"#.utf8),
+                sessionID: sessionID.uuidString,
+                purpose: nil
+            )
+        )
+        let field = try XCTUnwrap(prepared.fields["dsh_session_log"]?.objectValue)
+        XCTAssertEqual(field["version"], .number(1))
+        XCTAssertEqual(field["afterSeq"], .number(-1))
+        XCTAssertEqual(field["throughSeq"], .number(1))
+        if case let .array(events)? = field["events"] {
+            XCTAssertEqual(events.count, 2)
+        } else {
+            XCTFail("expected session-log event array")
+        }
+
+        try await prepared.accept()
+        let events = try await repository.allEvents(sessionID: sessionID)
+        XCTAssertEqual(events.last?.type, SessionEventVocabulary.deliveryAccepted)
+        XCTAssertEqual(events.last?.data.objectValue?["throughSeq"], .number(1))
+
+        let second = try await registry.prepareTransaction(
+            .init(baseBody: Data("{}".utf8), sessionID: sessionID.uuidString, purpose: nil)
+        )
+        let secondField = try XCTUnwrap(second.fields["dsh_session_log"]?.objectValue)
+        XCTAssertEqual(secondField["afterSeq"], .number(1))
+        XCTAssertEqual(secondField["throughSeq"], .number(2))
+    }
+
+    func testSessionLogExtensionRejectsMalformedDeliveryAcceptance() async throws {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sessionID = UUID()
+        let repository = SessionTrajectoryRepository(root: root)
+        _ = try await repository.append(.turnStart(turn: 1, time: 1), sessionID: sessionID)
+        _ = try await repository.append(
+            SessionEventDraft(
+                type: SessionEventVocabulary.deliveryAccepted,
+                data: .object([
+                    "sessionId": .string(sessionID.uuidString.lowercased()),
+                    "throughSeq": .string("not-a-sequence")
+                ])
+            ),
+            sessionID: sessionID
+        )
+
+        let registry = DeepSeekLlmAPIExtensionRegistry()
+        try registry.register(
+            field: "dsh_session_log",
+            provider: SessionLogDeepSeekExtensionProvider(persistence: repository).makeProvider()
+        )
+
+        do {
+            _ = try await registry.prepareTransaction(
+                .init(baseBody: Data("{}".utf8), sessionID: sessionID.uuidString, purpose: nil)
+            )
+            XCTFail("malformed delivery acceptance must reject preparation")
+        } catch let error as SessionTrajectoryRepositoryError {
+            XCTAssertEqual(error, .malformedDeliveryAcceptance(1))
+        }
+    }
+
     private func makeRoot() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("session-trajectory-repository-tests", isDirectory: true)

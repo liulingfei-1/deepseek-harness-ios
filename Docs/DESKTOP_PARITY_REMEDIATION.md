@@ -49,7 +49,15 @@
 - **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-parity-p3 --filter SessionTrajectoryRepositoryTests/testSessionLogDeliveryPersistsAcceptedCursorAndAvoidsDuplicateSuffix` → 1 test passed。
 - **Simulator**：SwiftPM arm64 编译通过；真实 API endpoint 尚未接入 AppModel。
 - **iPhone 16 Pro**：未验证服务端 accepted cursor、断网重试和冷启动水位恢复，保留 `VERIFY`。
-- **剩余动作**：将 coordinator 接入用户显式配置的 DeepSeek session-log endpoint 和生命周期；补 2xx/4xx/超时/重启 fixture 与真机验证。
+- **最新接线（2026-09-04）**：新增 `SessionLogDeepSeekExtensionProvider`，从 canonical `SessionPersistence` 折叠 `delivery-accepted` watermark，向 `DeepSeekLlmAPIExtensionRegistry` 提供 `dsh_session_log` suffix，并在 2xx acceptance 后追加 canonical acceptance event；`AppModel(sessionLogEnabled:)` 提供显式接线，默认关闭。
+- **专项验证**：`SessionTrajectoryRepositoryTests` + `DeepSeekLlmAPIExtensionRegistryTests` → **25 tests passed**，覆盖 suffix、acceptance 幂等、第二次 watermark 和 malformed acceptance；固定门本轮 SwiftPM **920 tests, 5 skipped, 1 existing flaky loopback failure**，修复分片 HTTP 请求聚合后 `LocalStateServerTests` **15 tests passed**，Xcode arm64 Simulator **BUILD SUCCEEDED**。
+- **剩余动作**：将 provider 绑定用户显式 endpoint 生命周期，补真实服务端 ack、断网/重启和 iPhone 16 Pro 证据；缺少这些证据时保持 `VERIFY`。
+
+### PARITY-010 · loopback HTTP 分片请求修复（2026-09-04）
+
+- **根因**：`LocalStateServer` 只读取一次 `NWConnection.receive`，HTTP 请求在头/体分片时被提前路由，导致合法 GitHub webhook 返回 400。
+- **修复**：按 `\r\n\r\n` 和 `Content-Length` 聚合请求，完成后再执行 provider 路由；保留 64 KiB 上限和现有 loopback 绑定。
+- **验证**：`LocalStateServerTests` → **15 tests passed**，含真实 `URLSession` GET/POST loopback；Xcode arm64 Simulator build → **BUILD SUCCEEDED**。
 
 ### PARITY-004 · Session turn outline UI 与分页跳转（2026-09-03）
 
