@@ -752,6 +752,8 @@ private struct SetupModelCatalog {
                 let resolvedReasoningModes = discoveredModel.reasoningModes ?? existing.reasoningModes
                 let resolvedDefaultReasoningMode = discoveredModel.defaultReasoningMode
                     ?? existing.defaultReasoningMode
+                let resolvedReasoningWireStyle = discoveredModel.reasoningWireStyle
+                    ?? existing.reasoningWireStyle
                 models[position] = ProviderModel(
                     id: discoveredModel.id,
                     name: resolvedName,
@@ -761,6 +763,7 @@ private struct SetupModelCatalog {
                     inputModalities: refreshedModalities,
                     reasoningModes: resolvedReasoningModes,
                     defaultReasoningMode: resolvedDefaultReasoningMode,
+                    reasoningWireStyle: resolvedReasoningWireStyle,
                     // A refreshed provider catalog is authoritative for model
                     // capabilities. Keeping the cached value can leave a
                     // vision model marked as text-only after discovery.

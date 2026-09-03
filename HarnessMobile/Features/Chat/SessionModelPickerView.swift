@@ -589,6 +589,8 @@ struct SessionModelCatalog {
                 let resolvedReasoningModes = discoveredModel.reasoningModes ?? current.reasoningModes
                 let resolvedDefaultReasoningMode = discoveredModel.defaultReasoningMode
                     ?? current.defaultReasoningMode
+                let resolvedReasoningWireStyle = discoveredModel.reasoningWireStyle
+                    ?? current.reasoningWireStyle
                 models[position] = ProviderModel(
                     id: discoveredModel.id,
                     name: resolvedName,
@@ -598,6 +600,7 @@ struct SessionModelCatalog {
                     inputModalities: refreshedModalities,
                     reasoningModes: resolvedReasoningModes,
                     defaultReasoningMode: resolvedDefaultReasoningMode,
+                    reasoningWireStyle: resolvedReasoningWireStyle,
                     // The refreshed catalog is authoritative for capabilities.
                     // Keeping `current.inputModalities` here preserves stale
                     // `.text` metadata from an older profile and makes

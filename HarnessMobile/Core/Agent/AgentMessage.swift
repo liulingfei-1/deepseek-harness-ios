@@ -376,6 +376,7 @@ struct AgentMessage: Identifiable, Codable, Sendable, Equatable {
     let role: AgentRole
     var content: String
     var reasoning: String?
+    var reasoningSignature: String?
     var toolCalls: [AgentToolCall]
     var toolCallID: String?
     var toolName: String?
@@ -394,6 +395,7 @@ struct AgentMessage: Identifiable, Codable, Sendable, Equatable {
         case role
         case content
         case reasoning
+        case reasoningSignature
         case toolCalls
         case toolCallID
         case toolName
@@ -413,6 +415,7 @@ struct AgentMessage: Identifiable, Codable, Sendable, Equatable {
         role: AgentRole,
         content: String,
         reasoning: String? = nil,
+        reasoningSignature: String? = nil,
         toolCalls: [AgentToolCall] = [],
         toolCallID: String? = nil,
         toolName: String? = nil,
@@ -430,6 +433,7 @@ struct AgentMessage: Identifiable, Codable, Sendable, Equatable {
         self.role = role
         self.content = content
         self.reasoning = reasoning
+        self.reasoningSignature = reasoningSignature
         self.toolCalls = toolCalls
         self.toolCallID = toolCallID
         self.toolName = toolName
@@ -450,6 +454,7 @@ struct AgentMessage: Identifiable, Codable, Sendable, Equatable {
         role = try container.decode(AgentRole.self, forKey: .role)
         content = try container.decodeIfPresent(String.self, forKey: .content) ?? ""
         reasoning = try container.decodeIfPresent(String.self, forKey: .reasoning)
+        reasoningSignature = try container.decodeIfPresent(String.self, forKey: .reasoningSignature)
         toolCalls = try container.decodeIfPresent([AgentToolCall].self, forKey: .toolCalls) ?? []
         toolCallID = try container.decodeIfPresent(String.self, forKey: .toolCallID)
         toolName = try container.decodeIfPresent(String.self, forKey: .toolName)
@@ -479,6 +484,7 @@ struct AgentMessage: Identifiable, Codable, Sendable, Equatable {
         try container.encode(role, forKey: .role)
         try container.encode(content, forKey: .content)
         try container.encodeIfPresent(reasoning, forKey: .reasoning)
+        try container.encodeIfPresent(reasoningSignature, forKey: .reasoningSignature)
         try container.encode(toolCalls, forKey: .toolCalls)
         try container.encodeIfPresent(toolCallID, forKey: .toolCallID)
         try container.encodeIfPresent(toolName, forKey: .toolName)
@@ -527,6 +533,7 @@ struct AgentMessage: Identifiable, Codable, Sendable, Equatable {
     static func assistant(
         _ text: String,
         reasoning: String? = nil,
+        reasoningSignature: String? = nil,
         toolCalls: [AgentToolCall] = [],
         toolEvents: [AgentToolEvent] = [],
         isIncomplete: Bool = false,
@@ -537,6 +544,7 @@ struct AgentMessage: Identifiable, Codable, Sendable, Equatable {
             role: .assistant,
             content: text,
             reasoning: reasoning,
+            reasoningSignature: reasoningSignature,
             toolCalls: toolCalls,
             isIncomplete: isIncomplete,
             incompleteReason: incompleteReason,

@@ -6,6 +6,8 @@ struct AnthropicMessagesRequest: Encodable, Sendable {
     let messages: [Message]
     let tools: [Tool]?
     let maxTokens: Int
+    let thinking: Thinking?
+    let outputConfig: OutputConfig?
     let stream = true
 
     enum CodingKeys: String, CodingKey {
@@ -14,7 +16,23 @@ struct AnthropicMessagesRequest: Encodable, Sendable {
         case messages
         case tools
         case maxTokens = "max_tokens"
+        case thinking
+        case outputConfig = "output_config"
         case stream
+    }
+
+    struct Thinking: Encodable, Sendable {
+        let type: String
+        let budgetTokens: Int?
+
+        enum CodingKeys: String, CodingKey {
+            case type
+            case budgetTokens = "budget_tokens"
+        }
+    }
+
+    struct OutputConfig: Encodable, Sendable {
+        let effort: String
     }
 
     struct Message: Encodable, Sendable {
@@ -39,6 +57,7 @@ struct AnthropicMessagesRequest: Encodable, Sendable {
         case image(mediaType: String, data: String)
         case toolUse(id: String, name: String, input: JSONValue)
         case toolResult(toolUseID: String, content: String, isError: Bool?)
+        case thinking(thinking: String, signature: String)
 
         private struct ImageSource: Encodable, Sendable {
             let type = "base64"
@@ -62,6 +81,8 @@ struct AnthropicMessagesRequest: Encodable, Sendable {
             case toolUseID = "tool_use_id"
             case content
             case isError = "is_error"
+            case thinking
+            case signature
         }
 
         func encode(to encoder: Encoder) throws {
@@ -86,6 +107,10 @@ struct AnthropicMessagesRequest: Encodable, Sendable {
                 try container.encode(toolUseID, forKey: .toolUseID)
                 try container.encode(content, forKey: .content)
                 try container.encodeIfPresent(isError, forKey: .isError)
+            case let .thinking(thinking, signature):
+                try container.encode("thinking", forKey: .type)
+                try container.encode(thinking, forKey: .thinking)
+                try container.encode(signature, forKey: .signature)
             }
         }
     }
@@ -134,8 +159,60 @@ enum AnthropicWireSerializer {
                     inputSchema: $0.parameters
                 )
             },
-            maxTokens: request.configuration.maxOutputTokens
+            maxTokens: request.configuration.maxOutputTokens,
+            thinking: Self.thinking(for: request.configuration),
+            outputConfig: Self.outputConfig(for: request.configuration)
         )
+    }
+
+    private static func thinking(
+        for configuration: AgentConfiguration
+    ) -> AnthropicMessagesRequest.Thinking? {
+        guard configuration.reasoningMode != .providerDefault else { return nil }
+        if configuration.reasoningMode == .off {
+            return .init(type: "disabled", budgetTokens: nil)
+        }
+        switch configuration.reasoningWireStyle {
+        case .effort:
+            return .init(type: "adaptive", budgetTokens: nil)
+        case .budgetTokens, .none:
+            return .init(
+                type: "enabled",
+                budgetTokens: budgetTokens(for: configuration.reasoningMode, maxTokens: configuration.maxOutputTokens)
+            )
+        }
+    }
+
+    private static func outputConfig(
+        for configuration: AgentConfiguration
+    ) -> AnthropicMessagesRequest.OutputConfig? {
+        guard configuration.reasoningMode != .providerDefault,
+              configuration.reasoningMode != .off,
+              configuration.reasoningWireStyle == .effort else { return nil }
+        return .init(effort: effort(for: configuration.reasoningMode))
+    }
+
+    private static func effort(for mode: ReasoningMode) -> String {
+        switch mode {
+        case .minimal, .low: return "low"
+        case .medium: return "medium"
+        case .high, .xhigh, .max: return "high"
+        case .providerDefault, .off: return "low"
+        }
+    }
+
+    private static func budgetTokens(for mode: ReasoningMode, maxTokens: Int) -> Int {
+        let requested: Int
+        switch mode {
+        case .minimal: requested = 1_024
+        case .low: requested = 2_048
+        case .medium: requested = 8_192
+        case .high, .xhigh, .max: requested = 16_384
+        case .providerDefault, .off: requested = 1_024
+        }
+        // Anthropic requires budget_tokens < max_tokens. Keep the configured
+        // provider capacity authoritative while avoiding an invalid request.
+        return min(requested, max(1, maxTokens - 1))
     }
 
     static func makeMessages(
@@ -216,6 +293,16 @@ enum AnthropicWireSerializer {
             case .assistant:
                 flushToolResults()
                 var blocks: [AnthropicMessagesRequest.ContentBlock] = []
+                if let reasoning = message.reasoning,
+                   !reasoning.isEmpty,
+                   let signature = message.reasoningSignature,
+                   !signature.isEmpty {
+                    blocks.append(.thinking(thinking: reasoning, signature: signature))
+                } else if let reasoning = message.reasoning, !reasoning.isEmpty {
+                    // Aborted/legacy reasoning has no provider signature and
+                    // cannot be replayed as a thinking block.
+                    blocks.append(.text(reasoning))
+                }
                 if !message.content.isEmpty {
                     blocks.append(.text(message.content))
                 }
@@ -297,7 +384,14 @@ struct AnthropicStreamDecoder: Sendable {
             case "text":
                 return block.text.map { $0.isEmpty ? [] : [.text($0)] } ?? []
             case "thinking":
-                return block.thinking.map { $0.isEmpty ? [] : [.reasoning($0)] } ?? []
+                var events: [LLMStreamEvent] = []
+                if let thinking = block.thinking, !thinking.isEmpty {
+                    events.append(.reasoning(thinking))
+                }
+                if let signature = block.signature, !signature.isEmpty {
+                    events.append(.reasoningSignature(signature))
+                }
+                return events
             case "tool_use":
                 guard let id = block.id, let name = block.name else {
                     throw ModelClientError.malformedEvent
@@ -334,7 +428,10 @@ struct AnthropicStreamDecoder: Sendable {
                         arguments: delta.partialJSON ?? ""
                     )
                 ]
-            case "signature_delta", "citations_delta":
+            case "signature_delta":
+                guard let signature = delta.signature, !signature.isEmpty else { return [] }
+                return [.reasoningSignature(signature)]
+            case "citations_delta":
                 return []
             default:
                 return []
@@ -491,6 +588,7 @@ private struct AnthropicStreamEnvelope: Decodable {
         let type: String
         let text: String?
         let thinking: String?
+        let signature: String?
         let id: String?
         let name: String?
         let input: JSONValue?
@@ -501,6 +599,7 @@ private struct AnthropicStreamEnvelope: Decodable {
         let text: String?
         let thinking: String?
         let partialJSON: String?
+        let signature: String?
         let stopReason: String?
 
         enum CodingKeys: String, CodingKey {
@@ -508,6 +607,7 @@ private struct AnthropicStreamEnvelope: Decodable {
             case text
             case thinking
             case partialJSON = "partial_json"
+            case signature
             case stopReason = "stop_reason"
         }
     }

@@ -712,3 +712,13 @@ git diff --check
 - **ACP 远端子 agent 客户端**（`8f3c4d68`）：对齐 `subagent-acp` × `@agentclientprotocol/sdk` 1.4.0（PROTOCOL_VERSION=1）——initialize（无可选 client capabilities）→ session/new（cwd+空 mcpServers）→ session/prompt（text blocks）→ `agent_message_chunk` 流式折叠 → 终态 stopReason 映射（closed vocabulary；`max_turn_requests` 与未知变体一律 error，不冒充成功）；`session/request_permission` 按策略自动应答（allow 取首个 allow_once/allow_always，无则/拒绝答 cancelled）；`session/cancel`。Wire 为纯函数 + 注入式 line transport（iSH stdio 子进程或任意桥接），5 测试钉全生命周期/双权限策略/取消/映射。传输端真进程接线与远端 agent 属真机/配置项（D-011）。
 - **会话快照宿主**（`9087c55f`）：桌面 session-snapshot 的 SwiftPM 等值——录制（事件表→封闭 fixture）、规范化（seq/time/id 与 uuid 形 ids 折叠为占位）、凭据形状串进不了 fixture、回放报首个精确 mismatch（条数或事件下标）、`SNAPSHOT_UPDATE=1` 刷新模式与缺失即录制；4 测试。真场景 fixture 积累与 ACP 录制驱动列后续。
 - 收尾 SwiftPM 全量绿。
+
+### PAR-105 · Anthropic extended thinking wire 与签名回放（2026-09-04）
+
+- 状态：VERIFY
+- 上游证据：`deepseek-ai/deepseek-harness` master `76fda729799fe9b3848dbe2c211d4b231032b81e`；`@earendil-works/pi-ai@0.84.4` `anthropic-messages` adapter。上游真实路径要求 adaptive `thinking` + `output_config.effort`、老模型 `budget_tokens`，并在多轮工具调用回放 thinking `signature`。
+- 移动端变更：`AnthropicMessagesWire` 增加 `thinking`、`output_config`、budget/effort 映射和 signed thinking content block；`AnthropicStreamDecoder` 解析 `signature`/`signature_delta`；`LLMStreamEvent`、`TurnAccumulator`、`AgentMessage` 保留签名；iSH 动态桥支持事件透传。
+- 测试命令与真实结果：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter 'AnthropicMessagesWireTests|ProviderModelDiscoveryTests'`，35 项通过；另有 `TurnAccumulatorTests` 签名累积回归；完整 SwiftPM 934 项、5 skipped、0 failures。
+- Simulator：专项编译通过；固定 arm64 Simulator build 在本批次收尾门复跑。
+- iPhone 16 Pro：未用真实 Anthropic API/工具回合验证，保持 VERIFY。
+- 剩余平台限制或后续动作：OAuth 授权/刷新、runtime adapter reload、真实 provider/API/iSH/后台和真机证据；不能用模拟器或 mock 代替。

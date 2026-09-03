@@ -162,7 +162,7 @@ enum SessionTitleGenerator {
                 guard output.utf8.count <= maximumOutputBytes else {
                     throw SessionTitleGeneratorError.outputTooLarge
                 }
-            case .reasoning, .usage:
+            case .reasoning, .reasoningSignature, .usage:
                 continue
             case .toolCallDelta:
                 throw SessionTitleGeneratorError.unexpectedToolCall

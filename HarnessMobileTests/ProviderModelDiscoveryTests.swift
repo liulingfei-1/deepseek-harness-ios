@@ -96,7 +96,7 @@ final class ProviderModelDiscoveryTests: XCTestCase {
         XCTAssertEqual(try configuration.validated().providerID, .anthropic)
         XCTAssertEqual(
             ReasoningMode.supportedModes(for: .anthropic),
-            [.providerDefault, .off]
+            ReasoningMode.allCases
         )
     }
 

@@ -159,6 +159,7 @@ struct ProviderProfile: Codable, Sendable, Equatable, Identifiable {
                 inputModalities: inputModalities,
                 reasoningModes: current.reasoningModes,
                 defaultReasoningMode: current.defaultReasoningMode,
+                reasoningWireStyle: current.reasoningWireStyle,
                 openAICompatibility: current.openAICompatibility
             )
         }
@@ -218,6 +219,8 @@ struct ProviderProfile: Codable, Sendable, Equatable, Identifiable {
                 ?? selectedModel?.inputModalities,
             supportedReasoningModes: catalogModel?.reasoningModes
                 ?? selectedModel?.reasoningModes,
+            reasoningWireStyle: catalogModel?.reasoningWireStyle
+                ?? selectedModel?.reasoningWireStyle,
             reasoningMode: reasoningMode
                 ?? catalogModel?.defaultReasoningMode
                 ?? selectedModel?.defaultReasoningMode
@@ -382,6 +385,7 @@ struct ProviderProfile: Codable, Sendable, Equatable, Identifiable {
                     inputModalities: model.inputModalities,
                     reasoningModes: model.reasoningModes,
                     defaultReasoningMode: model.defaultReasoningMode,
+                    reasoningWireStyle: model.reasoningWireStyle,
                     openAICompatibility: model.openAICompatibility
                 )
             )

@@ -205,7 +205,10 @@ struct OpenAIChatCompletionsAdapter: ModelProviderAdapter {
                             ?? item.reasoningOptions
                                 .first(where: { $0.type == "effort" })?.values
                     ),
-                    defaultReasoningMode: item.defaultReasoningMode.flatMap(ReasoningMode.init)
+                    defaultReasoningMode: item.defaultReasoningMode.flatMap(ReasoningMode.init),
+                    reasoningWireStyle: item.reasoningOptions
+                        .compactMap { $0.type.flatMap(ModelReasoningWireStyle.init(rawValue:)) }
+                        .first
                 )
             )
         }

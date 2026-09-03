@@ -7,6 +7,86 @@ import XCTest
 #endif
 
 final class AnthropicMessagesWireTests: XCTestCase {
+    func testSerializerEmitsBudgetThinkingAndSignedReplayBlock() throws {
+        var configuration = ModelProviderCatalog.applying(.anthropic, to: AgentConfiguration())
+        configuration.reasoningMode = .high
+        configuration.reasoningWireStyle = .budgetTokens
+        let request = ModelRequest(
+            configuration: configuration,
+            apiKey: "test-only",
+            systemPrompt: "system",
+            messages: [
+                .assistant(
+                    "answer",
+                    reasoning: "internal",
+                    reasoningSignature: "sig-123"
+                )
+            ],
+            tools: []
+        )
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: AnthropicWireSerializer.encodeRequest(request))
+                as? [String: Any]
+        )
+        let thinking = try XCTUnwrap(object["thinking"] as? [String: Any])
+        XCTAssertEqual(thinking["type"] as? String, "enabled")
+        XCTAssertEqual(thinking["budget_tokens"] as? Int, 8_191)
+        let content = try XCTUnwrap(
+            ((object["messages"] as? [[String: Any]])?.first?["content"] as? [[String: Any]])
+        )
+        XCTAssertEqual(content.map { $0["type"] as? String }, ["thinking", "text"])
+        XCTAssertEqual(content[0]["signature"] as? String, "sig-123")
+    }
+
+    func testSerializerEmitsAdaptiveEffortAndDisabledThinking() throws {
+        var configuration = ModelProviderCatalog.applying(.anthropic, to: AgentConfiguration())
+        configuration.reasoningWireStyle = .effort
+        configuration.reasoningMode = .xhigh
+        var request = ModelRequest(
+            configuration: configuration,
+            apiKey: "test-only",
+            systemPrompt: "system",
+            messages: [.user("hi")],
+            tools: []
+        )
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: AnthropicWireSerializer.encodeRequest(request))
+                as? [String: Any]
+        )
+        XCTAssertEqual((object["thinking"] as? [String: Any])?["type"] as? String, "adaptive")
+        XCTAssertEqual((object["output_config"] as? [String: Any])?["effort"] as? String, "high")
+        configuration.reasoningMode = .off
+        request = ModelRequest(
+            configuration: configuration,
+            apiKey: "test-only",
+            systemPrompt: "system",
+            messages: [.user("hi")],
+            tools: []
+        )
+        object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: AnthropicWireSerializer.encodeRequest(request))
+                as? [String: Any]
+        )
+        XCTAssertEqual((object["thinking"] as? [String: Any])?["type"] as? String, "disabled")
+        XCTAssertNil(object["output_config"])
+    }
+
+    func testStreamDecoderPreservesThinkingSignatureDeltas() throws {
+        var decoder = AnthropicStreamDecoder()
+        XCTAssertEqual(
+            try decoder.decodeEvents(
+                "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"plan\",\"signature\":\"sig-a\"}}"
+            ),
+            [.reasoning("plan"), .reasoningSignature("sig-a")]
+        )
+        XCTAssertEqual(
+            try decoder.decodeEvents(
+                "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"sig-b\"}}"
+            ),
+            [.reasoningSignature("sig-b")]
+        )
+    }
+
     func testSerializerPreservesUserImagesAsAnthropicBase64Blocks() throws {
         let imageID = UUID()
         let configuration = ModelProviderCatalog.applying(.anthropic, to: AgentConfiguration())

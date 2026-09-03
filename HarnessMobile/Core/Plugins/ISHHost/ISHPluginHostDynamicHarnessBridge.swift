@@ -959,6 +959,8 @@ enum ISHPluginHostDynamicHarnessBridge {
             return .object(["kind": .string("text"), "text": .string(bounded(text, maximum: 32 * 1_024))])
         case let .reasoning(text):
             return .object(["kind": .string("reasoning"), "text": .string(bounded(text, maximum: 32 * 1_024))])
+        case let .reasoningSignature(signature):
+            return .object(["kind": .string("reasoningSignature"), "signature": .string(bounded(signature, maximum: 256 * 1_024))])
         case let .toolCallDelta(index, id, type, name, arguments):
             return .object([
                 "kind": .string("toolCallDelta"),
@@ -1026,6 +1028,8 @@ enum ISHPluginHostDynamicHarnessBridge {
             return .text(try requiredString(object, "text", allowEmpty: true))
         case "reasoning":
             return .reasoning(try requiredString(object, "text", allowEmpty: true))
+        case "reasoningSignature":
+            return .reasoningSignature(try requiredString(object, "signature", allowEmpty: true))
         case "toolCallDelta":
             guard let index = try optionalInteger(object["index"]) else {
                 throw ISHPluginHostHarnessBridgeError.invalidResponse(

@@ -97,7 +97,7 @@ struct NativeAgentPluginCompiler: Sendable {
                 )
             case .finish:
                 sawFinish = true
-            case .text, .reasoning, .usage:
+            case .text, .reasoning, .reasoningSignature, .usage:
                 break
             }
         }

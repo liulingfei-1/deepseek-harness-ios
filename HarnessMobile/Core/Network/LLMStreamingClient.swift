@@ -137,6 +137,8 @@ struct ModelTokenUsage: Sendable, Equatable {
 enum LLMStreamEvent: Sendable, Equatable {
     case text(String)
     case reasoning(String)
+    /// Opaque provider signature required to replay signed reasoning blocks.
+    case reasoningSignature(String)
     case toolCallDelta(
         index: Int,
         id: String?,

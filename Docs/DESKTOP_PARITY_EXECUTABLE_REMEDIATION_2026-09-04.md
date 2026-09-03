@@ -96,7 +96,11 @@ git diff --check
 - [x] `ProviderModel` 保存逐模型 reasoning levels/default；配置校验、picker 和 OpenAI reasoning wire 覆盖上游七级集合。
 - [x] OpenAI/enriched model listing 读取上游 `reasoning_options` 的 effort values，budget-only 声明保持无离散 levels，避免误报能力。
 - [x] OpenAI/enriched model listing 读取上游嵌套 `limit.context/output` 与 `modalities.input` 字段，并复用既有能力校验。
-- [ ] OAuth 授权/刷新、provider-specific reasoning/context wire fixture、runtime reload 和真实设备证据。
+- [x] provider-specific Anthropic reasoning wire：`effort` 使用 `thinking.type=adaptive` + `output_config.effort`；`budget_tokens` 使用 `thinking.type=enabled` + 有界预算；`off` 使用 `thinking.type=disabled`。
+- [x] Anthropic thinking stream 的 `signature` / `signature_delta` 进入 `LLMStreamEvent`、`TurnAccumulator` 和可持久化 `AgentMessage.reasoningSignature`。
+- [x] 多轮工具调用回放 signed thinking block；缺签名的旧/中断 reasoning 降级为文本，避免伪造签名。
+- [x] 新增 Anthropic request/stream/replay 回归测试；Anthropic/model 专项 35 项通过，完整 SwiftPM 934 项（5 skipped）通过。
+- [ ] OAuth 授权/刷新、runtime reload、真实多 provider/API/iSH/后台/iPhone 16 Pro 证据；未取得前保持 `VERIFY`。
 
 ## 5. PARITY-010 本批次逐步修改清单
 

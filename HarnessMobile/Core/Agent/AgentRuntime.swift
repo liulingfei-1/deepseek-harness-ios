@@ -684,6 +684,8 @@ actor AgentRuntime {
                                 assistantChunkSeqs.append(event.seq)
                             }
                             await eventHandler(.reasoningDelta(delta))
+                        case let .reasoningSignature(signature):
+                            try accumulator.appendReasoningSignature(signature)
                         case let .toolCallDelta(index, id, type, name, arguments):
                             if !didRecordFirstToken {
                                 didRecordFirstToken = true
@@ -750,6 +752,7 @@ actor AgentRuntime {
                         let interruptedAssistant = AgentMessage.assistant(
                             visibleText ?? "",
                             reasoning: visibleReasoning,
+                            reasoningSignature: accumulator.reasoningSignature,
                             isIncomplete: true,
                             incompleteReason: .cancelled,
                             source: modelSource.jsonValue
@@ -987,6 +990,9 @@ actor AgentRuntime {
             var assistant = AgentMessage.assistant(
                 accumulator.text,
                 reasoning: accumulator.reasoning.isEmpty ? nil : accumulator.reasoning,
+                reasoningSignature: accumulator.reasoningSignature.isEmpty
+                    ? nil
+                    : accumulator.reasoningSignature,
                 toolCalls: calls,
                 toolEvents: toolEvents,
                 isIncomplete: isProviderLengthBoundary,
@@ -1586,6 +1592,8 @@ actor AgentRuntime {
                 case .reasoning:
                     // Private summary reasoning is intentionally neither surfaced
                     // nor written into the checkpoint or trajectory.
+                    continue
+                case .reasoningSignature:
                     continue
                 case .toolCallDelta:
                     throw AgentRuntimeError.compactionProducedToolCall
@@ -4433,6 +4441,7 @@ private struct PendingToolCall: Sendable {
 struct TurnAccumulator: Sendable {
     private(set) var text = ""
     private(set) var reasoning = ""
+    private(set) var reasoningSignature = ""
     private(set) var hasToolCallDeltas = false
     private var calls: [Int: PendingToolCall] = [:]
     mutating func appendText(_ delta: String) throws {
@@ -4441,6 +4450,13 @@ struct TurnAccumulator: Sendable {
 
     mutating func appendReasoning(_ delta: String) throws {
         reasoning += delta
+    }
+
+    mutating func appendReasoningSignature(_ delta: String) throws {
+        reasoningSignature += delta
+        guard reasoningSignature.utf8.count <= 256 * 1_024 else {
+            throw AgentRuntimeError.invalidToolCallStream
+        }
     }
 
     mutating func appendToolCall(

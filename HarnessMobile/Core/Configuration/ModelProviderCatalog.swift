@@ -30,6 +30,11 @@ enum ModelInputModality: String, Codable, Sendable, Equatable, Hashable {
     case image
 }
 
+enum ModelReasoningWireStyle: String, Codable, Sendable, Equatable, Hashable {
+    case effort
+    case budgetTokens = "budget_tokens"
+}
+
 struct ProviderModel: Codable, Sendable, Equatable, Hashable, Identifiable {
     let id: String
     let name: String?
@@ -39,6 +44,7 @@ struct ProviderModel: Codable, Sendable, Equatable, Hashable, Identifiable {
     let inputModalities: [ModelInputModality]
     let reasoningModes: [ReasoningMode]?
     let defaultReasoningMode: ReasoningMode?
+    let reasoningWireStyle: ModelReasoningWireStyle?
     let openAICompatibility: OpenAICompletionsCompatibility?
 
     init(
@@ -50,6 +56,7 @@ struct ProviderModel: Codable, Sendable, Equatable, Hashable, Identifiable {
         inputModalities: [ModelInputModality] = [.text],
         reasoningModes: [ReasoningMode]? = nil,
         defaultReasoningMode: ReasoningMode? = nil,
+        reasoningWireStyle: ModelReasoningWireStyle? = nil,
         openAICompatibility: OpenAICompletionsCompatibility? = nil
     ) {
         self.id = id
@@ -60,11 +67,12 @@ struct ProviderModel: Codable, Sendable, Equatable, Hashable, Identifiable {
         self.inputModalities = inputModalities
         self.reasoningModes = reasoningModes
         self.defaultReasoningMode = defaultReasoningMode
+        self.reasoningWireStyle = reasoningWireStyle
         self.openAICompatibility = openAICompatibility
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, description, contextWindow, maxOutputTokens, inputModalities, reasoningModes, defaultReasoningMode, openAICompatibility
+        case id, name, description, contextWindow, maxOutputTokens, inputModalities, reasoningModes, defaultReasoningMode, reasoningWireStyle, openAICompatibility
     }
 
     init(from decoder: Decoder) throws {
@@ -85,6 +93,10 @@ struct ProviderModel: Codable, Sendable, Equatable, Hashable, Identifiable {
         defaultReasoningMode = try container.decodeIfPresent(
             ReasoningMode.self,
             forKey: .defaultReasoningMode
+        )
+        reasoningWireStyle = try container.decodeIfPresent(
+            ModelReasoningWireStyle.self,
+            forKey: .reasoningWireStyle
         )
         openAICompatibility = try container.decodeIfPresent(
             OpenAICompletionsCompatibility.self,
@@ -198,12 +210,16 @@ enum ModelProviderCatalog {
                 ProviderModel(
                     id: "claude-sonnet-4-5",
                     name: "Claude Sonnet 4.5",
-                    inputModalities: [.text, .image]
+                    inputModalities: [.text, .image],
+                    reasoningModes: ReasoningMode.allCases,
+                    reasoningWireStyle: .budgetTokens
                 ),
                 ProviderModel(
                     id: "claude-opus-4-1",
                     name: "Claude Opus 4.1",
-                    inputModalities: [.text, .image]
+                    inputModalities: [.text, .image],
+                    reasoningModes: ReasoningMode.allCases,
+                    reasoningWireStyle: .budgetTokens
                 )
             ],
             compatibilityNotice: "Anthropic Messages 支持原生 /v1/models 发现；超过 1000 个模型时仅加载首批，其余模型仍可手动输入。"

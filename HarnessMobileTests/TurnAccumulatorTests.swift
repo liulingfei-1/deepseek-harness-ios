@@ -6,6 +6,15 @@ import XCTest
 #endif
 
 final class TurnAccumulatorTests: XCTestCase {
+    func testReasoningSignatureAccumulatesForReplay() throws {
+        var accumulator = TurnAccumulator()
+        try accumulator.appendReasoning("plan")
+        try accumulator.appendReasoningSignature("sig-")
+        try accumulator.appendReasoningSignature("123")
+        XCTAssertEqual(accumulator.reasoning, "plan")
+        XCTAssertEqual(accumulator.reasoningSignature, "sig-123")
+    }
+
     func testInterleavedToolCallDeltasPreserveIndexOrder() throws {
         var accumulator = TurnAccumulator()
         try accumulator.appendToolCall(

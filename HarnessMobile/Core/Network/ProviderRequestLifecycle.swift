@@ -114,7 +114,7 @@ enum ProviderQuickTester {
                 guard output.utf8.count <= maximumOutputBytes else {
                     throw ProviderQuickTestError.outputTooLarge
                 }
-            case .reasoning, .usage:
+            case .reasoning, .reasoningSignature, .usage:
                 continue
             case .toolCallDelta:
                 throw ProviderQuickTestError.unexpectedToolCall

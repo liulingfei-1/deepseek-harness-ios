@@ -72,6 +72,8 @@ final class UpstreamCompatibilityFixtureTests: XCTestCase {
             return "text:\(value)"
         case let .reasoning(value):
             return "reasoning:\(value)"
+        case let .reasoningSignature(value):
+            return "reasoningSignature:\(value)"
         case let .toolCallDelta(index, id, type, name, arguments):
             return [
                 "tool",

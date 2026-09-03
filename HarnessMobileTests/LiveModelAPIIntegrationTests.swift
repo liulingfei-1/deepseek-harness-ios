@@ -32,7 +32,7 @@ final class LiveModelAPIIntegrationTests: XCTestCase {
                 text += delta
             case .finish:
                 sawFinish = true
-            case .reasoning, .toolCallDelta, .usage:
+            case .reasoning, .reasoningSignature, .toolCallDelta, .usage:
                 break
             }
         }

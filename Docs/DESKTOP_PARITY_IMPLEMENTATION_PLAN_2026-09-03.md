@@ -230,3 +230,11 @@ git diff --check
 | PARITY-013 webhook | VERIFY | GitHub delivery/event/payload envelope、loopback POST `/webhook/github`、有界去重及跨重启 delivery state 已实现；Settings 可配置/删除 Keychain secret，listener 支持运行时 secret 与真实 POST/HMAC；修复 AppModel sink 初始化时提前 claim delivery 的 bug，Job 投影路径已接通；11 个 LocalStateServer 测试通过；rule/重试/Agent 唤醒仍待实现 |
 
 本表只记录可复核证据，不把“计划存在”或“源码类型存在”当作能力完成。
+
+### 2026-09-04 增量：Anthropic extended thinking
+
+1. 先完成 `ModelReasoningWireStyle` 与模型目录能力合并，区分 `effort` 和 `budget_tokens`。
+2. 在 Anthropic request builder 发出 adaptive/effort、enabled/budget、disabled 三种原生字段组合。
+3. 在 SSE decoder、AgentRuntime accumulator、持久化消息和多轮工具回放之间传递签名；缺签名历史只按文本回放。
+4. 用 wire/stream/replay 专项测试锁定字段和事件顺序，再执行固定全量验收门。
+5. 当前结果：Anthropic/model 专项 35 项通过，另有 TurnAccumulator 签名回归；完整 SwiftPM 934 项、5 skipped、0 failures；真实 API、OAuth、runtime reload、iSH/后台/真机仍为 VERIFY。

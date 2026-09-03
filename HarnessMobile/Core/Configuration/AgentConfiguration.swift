@@ -11,6 +11,7 @@ struct AgentConfiguration: Codable, Sendable, Equatable {
     var model: String = defaultModel
     var inputModalities: [ModelInputModality]?
     var supportedReasoningModes: [ReasoningMode]?
+    var reasoningWireStyle: ModelReasoningWireStyle?
     var reasoningMode: ReasoningMode = .high
     var openAIWireProfile: OpenAICompatibleWireProfile?
     var openAICompatibility: OpenAICompletionsCompatibility?
@@ -26,6 +27,7 @@ struct AgentConfiguration: Codable, Sendable, Equatable {
         model: String = defaultModel,
         inputModalities: [ModelInputModality]? = nil,
         supportedReasoningModes: [ReasoningMode]? = nil,
+        reasoningWireStyle: ModelReasoningWireStyle? = nil,
         reasoningMode: ReasoningMode = .high,
         openAIWireProfile: OpenAICompatibleWireProfile? = nil,
         openAICompatibility: OpenAICompletionsCompatibility? = nil,
@@ -40,6 +42,7 @@ struct AgentConfiguration: Codable, Sendable, Equatable {
         self.model = model
         self.inputModalities = inputModalities
         self.supportedReasoningModes = supportedReasoningModes
+        self.reasoningWireStyle = reasoningWireStyle
         self.reasoningMode = reasoningMode
         self.openAIWireProfile = openAIWireProfile
         self.openAICompatibility = openAICompatibility
@@ -56,6 +59,7 @@ struct AgentConfiguration: Codable, Sendable, Equatable {
         case model
         case inputModalities
         case supportedReasoningModes
+        case reasoningWireStyle
         case reasoningMode
         case openAIWireProfile
         case openAICompatibility
@@ -77,6 +81,10 @@ struct AgentConfiguration: Codable, Sendable, Equatable {
         supportedReasoningModes = try container.decodeIfPresent(
             [ReasoningMode].self,
             forKey: .supportedReasoningModes
+        )
+        reasoningWireStyle = try container.decodeIfPresent(
+            ModelReasoningWireStyle.self,
+            forKey: .reasoningWireStyle
         )
         reasoningMode = try container.decodeIfPresent(ReasoningMode.self, forKey: .reasoningMode)
             ?? .high
@@ -264,9 +272,7 @@ enum ReasoningMode: String, Codable, CaseIterable, Sendable, Identifiable {
     static func supportedModes(for providerID: ModelProviderID) -> [ReasoningMode] {
         switch ModelProviderCatalog.descriptor(for: providerID).wireProtocol {
         case .anthropicMessages:
-            // Extended thinking requires replaying signed thinking blocks across
-            // tool turns. Keep it off until that durable wire contract is stored.
-            return [.providerDefault, .off]
+            return allCases
         case .openAIChatCompletions:
             return allCases
         }
