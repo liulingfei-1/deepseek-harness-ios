@@ -77,6 +77,32 @@ final class LocalStateServerTests: XCTestCase {
         XCTAssertGreaterThan(assignedPort, 0, "loopback listener must bind an ephemeral port")
     }
 
+    func testLiveHTTPClientReadsLoopbackEndpoint() async throws {
+        let server = LocalStateServer(endpoints: [
+            .init(path: "/status", handler: { #"{"status":"live","turns":7}"# })
+        ])
+        XCTAssertNotNil(server)
+        server?.start()
+        defer { server?.stop() }
+        var assignedPort: UInt16 = 0
+        for _ in 0..<40 {
+            if let port = server?.port, port > 0 {
+                assignedPort = port
+                break
+            }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        XCTAssertGreaterThan(assignedPort, 0)
+        let body = try await LocalStateHTTPClient(port: assignedPort).get(path: "/status")
+        XCTAssertTrue(body.contains(#""status":"live""#))
+        do {
+            _ = try await LocalStateHTTPClient(port: assignedPort).get(path: "status")
+            XCTFail("relative paths must be rejected")
+        } catch let error as LocalStateHTTPError {
+            XCTAssertEqual(error, .invalidPath)
+        }
+    }
+
     func testGitHubWebhookParserValidatesEnvelopeAndDeduplicates() async {
         let parsed = LocalWebhookParser.github(
             deliveryID: "delivery-1",

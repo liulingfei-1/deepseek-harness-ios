@@ -225,7 +225,7 @@ git diff --check
 | PARITY-005 ACP transport | VERIFY | `ISHACPLineTransport` 复用 iSH transport，并新增 `ACPSubagentProviderDescriptor/Catalog`、自定义 command/args/env、`runAndWait`，且 `acp_provider` 已接入 `subagent`/Jobs；ACP/Jobs 专项通过；真实 iSH agent、持久化选择与真机仍待验证 |
 | PARITY-008 Exa/Perplexity | VERIFY | AppModel 统一路由、Keychain origin 存取和显式 provider 选择已接入；6 个 provider mapping tests 通过；设置 UI、真实 API 与真机引用仍待验证 |
 | PARITY-009 agent team | IOS-REPLACEMENT | 现有 workflow tool 提供本机编排、并行/流水线、成员生命周期与可恢复轨迹树；桌面后台 team daemon 机制不适用于 iOS，保留前台语义等价实现 |
-| PARITY-010 LocalStateServer | VERIFY | AppModel 启动 loopback server 并注册 health/status/sessions；新增线程安全快照盒与会话/运行投影更新，6 个路由/快照测试通过；真机 HTTP 仍待验证 |
+| PARITY-010 LocalStateServer | VERIFY | AppModel 启动 loopback server 并注册 health/status/sessions；新增线程安全快照盒、真实 `LocalStateHTTPClient` GET 与发送完成后再 cancel 的连接修复；LocalStateServer 10 tests 通过；真机 HTTP 仍待验证 |
 | PARITY-011/012/014 | TODO | 已完成源码/上游定位并写入本计划，尚未宣称实现 |
 | PARITY-013 webhook | VERIFY | GitHub delivery/event/payload envelope、loopback POST `/webhook/github`、有界去重及跨重启 delivery state 已实现；支持显式 secret 的 HMAC-SHA256 校验；9 个 LocalStateServer 测试通过；Agent/Job 触发仍待实现 |
 

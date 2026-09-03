@@ -172,8 +172,10 @@ final class LocalStateServer: @unchecked Sendable {
             minimumIncompleteLength: 1,
             maximumLength: 8 * 1024
         ) { [weak self] data, _, isComplete, error in
-            defer { connection.cancel() }
-            guard let self, let data, !data.isEmpty else { return }
+            guard let self, let data, !data.isEmpty else {
+                connection.cancel()
+                return
+            }
             let request = String(decoding: data, as: UTF8.self)
             self.webhookHandlerLock.lock()
             let webhookHandler = self.webhookHandler
@@ -191,11 +193,45 @@ final class LocalStateServer: @unchecked Sendable {
                 + "Connection: close\r\n\r\n"
             connection.send(
                 content: Data((headers + body).utf8),
-                completion: .contentProcessed { _ in }
+                completion: .contentProcessed { _ in connection.cancel() }
             )
             _ = isComplete
             _ = error
         }
+    }
+}
+
+enum LocalStateHTTPError: Error, Sendable, Equatable {
+    case invalidPath
+    case invalidResponse
+    case server(status: Int, body: String)
+}
+
+/// Client seam used by native integrations and tests to exercise the actual
+/// loopback listener rather than only the pure router.
+struct LocalStateHTTPClient: Sendable {
+    let baseURL: URL
+
+    init(port: UInt16) {
+        baseURL = URL(string: "http://127.0.0.1:\(port)")!
+    }
+
+    func get(path: String) async throws -> String {
+        guard path.first == "/", !path.contains("?"), !path.contains("#") else {
+            throw LocalStateHTTPError.invalidPath
+        }
+        var request = URLRequest(url: baseURL.appendingPathComponent(String(path.dropFirst())))
+        request.httpMethod = "GET"
+        request.timeoutInterval = 5
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw LocalStateHTTPError.invalidResponse
+        }
+        let body = String(decoding: data, as: UTF8.self)
+        guard (200..<300).contains(http.statusCode) else {
+            throw LocalStateHTTPError.server(status: http.statusCode, body: body)
+        }
+        return body
     }
 }
 

@@ -29,7 +29,7 @@
 | 007 | VERIFY | Claude/Codex command hook runner 已接入；本批次补齐子 Agent生命周期事件 | 真机 iSH/ACP、超时/取消、诊断轨迹 |
 | 008 | VERIFY | Exa/Perplexity provider 路由与 Keychain origin 已接线 | 设置 UI、401/429/timeout、真实 citations |
 | 009 | IOS-REPLACEMENT | Workflow 提供本机 team 语义替代 | 多成员长时并发/恢复真机证据 |
-| 010 | VERIFY | loopback `/health`、`/status`、`/sessions` 已启动并动态投影 | 真实 HTTP、端口冲突、生命周期 |
+| 010 | VERIFY | loopback `/health`、`/status`、`/sessions` 已启动并动态投影；`LocalStateHTTPClient` live GET 已验证 | `/sessions` live、端口冲突、生命周期、真机 |
 | 011 | TODO | 静态 provider catalog；缺动态 catalog/OAuth/reload | 先建立 capability cache，再逐 provider 接入 |
 | 012 | TODO | 无 e2b/fs/subprocess provider | 先写上游 REST compatibility fixture，再决定本机替代或显式远程适配 |
 | 013 | VERIFY | GitHub envelope、loopback POST、持久去重、可选 HMAC 已实现 | Agent/Job 触发、重试、配置 UI、后台/公网边界 |
@@ -54,7 +54,7 @@
 
 ### P4：本机 server、webhook、team
 
-- **010 LocalStateServer**：保留 loopback-only；补 controller JSON schema、端口冲突和 App 前后台启停测试。无浏览器容器时，桌面 `frontend-static` 标 `IOS-REPLACEMENT`。
+- **010 LocalStateServer**：保留 loopback-only；已补 `LocalStateHTTPClient` 真实 URLSession GET，并修复发送完成前取消连接的生命周期 bug；继续补 controller JSON schema、端口冲突和 App 前后台启停测试。无浏览器容器时，桌面 `frontend-static` 标 `IOS-REPLACEMENT`。
 - **013 webhook**：按上游 `webhook` runtime 的 rule/dispatch 语义，把已验证 GitHub delivery 投影成 Agent/Job 请求；delivery ID 去重必须先于触发，失败可重试且不能重复确认。
 - **009 team**：继续复用 `LocalWorkflowTool`/`WorkflowRunTree`；只有当有独立成员状态、durable claim 和恢复测试时才扩大实现。
 
