@@ -205,6 +205,14 @@
 - **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter ProviderModelDiscoveryTests` → 22 tests passed，覆盖 Anthropic loopback listing、header/query、enriched map、exact resolution、逐模型 reasoning 能力、上游 `reasoning_options` 映射和不支持 level 拒绝；全量 Swift 回归 → 930 tests、5 skipped、0 failures。
 - **剩余动作**：OAuth 登录/刷新生命周期、per-model reasoning/context wire metadata、registration-bound runtime reload、真实多 provider/API/设备证据；未完成部分保持 `VERIFY`。
 
+### PARITY-011 · OAuth credential record 与 refresh single-flight（2026-09-04）
+
+- **状态**：VERIFY
+- **上游核对**：最新 `credentials` seam 使用 `ApiKeyRecord | GrantRecord`，授权 flow 只有观察到 record commit 才报告 authorized；provider refresh 必须在存储层 read-modify-write 之内完成。
+- **移动端变更**：新增 `ProviderOAuthCredential`（access/refresh token、过期时间、token type、scope）和独立 Keychain record namespace；`CredentialStore` 提供 save/read/delete，旧 API-key schema 保持兼容；`ProviderOAuthRefreshCoordinator` 按 profile single-flight，刷新前重读最新 grant 并原子写回；AppModel credential lookup/status 可读取 OAuth access token，沿用既有 profile generation reload。
+- **专项验证**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter ProviderRequestLifecycleTests` → **6 tests passed**，含 10 路并发 refresh 只执行一次与 OAuth round-trip/过期判断。
+- **剩余边界**：provider-specific OAuth authorization UI、401 自动重试、真实授权服务、iSH/后台/iPhone 16 Pro 仍未取得证据，不能写成 `DONE`。
+
 ### PARITY-006 · 子 Agent reasoning effort 参数（2026-09-03）
 
 - **状态**：VERIFY

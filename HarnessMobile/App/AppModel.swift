@@ -1275,10 +1275,18 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         for profile in providerDirectory.profiles {
             do {
                 let origin = try profile.configuration().credentialOrigin()
-                statuses[profile.id] = try await credentialStore.describeAPIKey(
+                let apiKeyStatus = try await credentialStore.describeAPIKey(
                     for: profile.credentialReference,
                     expectedOrigin: origin
                 )
+                if apiKeyStatus == .missing {
+                    statuses[profile.id] = try await credentialStore.readOAuthCredential(
+                        for: profile.credentialReference,
+                        expectedOrigin: origin
+                    ) == nil ? .missing : .configured
+                } else {
+                    statuses[profile.id] = apiKeyStatus
+                }
             } catch CredentialStoreError.credentialOriginMismatch {
                 statuses[profile.id] = .originMismatch
             } catch {
@@ -8532,10 +8540,18 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         let origin = try configuration.credentialOrigin()
         if let reference = configuration.credentialReference
             ?? providerDirectory.profile(matching: configuration)?.credentialReference {
-            return try await credentialStore.readAPIKey(
+            if let apiKey = try await credentialStore.readAPIKey(
                 for: reference,
                 expectedOrigin: origin
-            )
+            ) {
+                return apiKey
+            }
+            // OAuth grants use the same request seam: adapters receive only
+            // the current access token, never refresh metadata.
+            return try await credentialStore.readOAuthCredential(
+                for: reference,
+                expectedOrigin: origin
+            )?.accessToken
         }
         return try await credentialStore.readAPIKey(for: origin)
     }
@@ -8546,6 +8562,22 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
 
     func saveCredential(_ key: String, forOrigin origin: String) async throws {
         try await credentialStore.saveAPIKey(key, for: origin)
+    }
+
+    func saveOAuthCredential(
+        _ credential: ProviderOAuthCredential,
+        for configuration: AgentConfiguration
+    ) async throws {
+        let reference = configuration.credentialReference
+            ?? providerDirectory.profile(matching: configuration)?.credentialReference
+        guard let reference else {
+            throw CredentialStoreError.emptyCredential
+        }
+        try await credentialStore.saveOAuthCredential(
+            credential,
+            for: reference,
+            origin: configuration.credentialOrigin()
+        )
     }
 
     func deleteCredential(forOrigin origin: String) async throws {

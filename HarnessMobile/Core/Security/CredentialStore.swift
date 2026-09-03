@@ -101,6 +101,49 @@ actor CredentialStore {
         return record.secret
     }
 
+    /// Stores an opaque OAuth grant alongside the existing API-key schema. The
+    /// grant is kept under a separate account namespace so older installs can
+    /// continue to decode their API-key records without migration.
+    func saveOAuthCredential(
+        _ credential: ProviderOAuthCredential,
+        for reference: CredentialReference,
+        origin: String
+    ) throws {
+        let validatedReference = try reference.validated()
+        let validatedOrigin = try validatedOrigin(origin)
+        let record = OAuthCredentialRecord(
+            schemaVersion: OAuthCredentialRecord.currentSchemaVersion,
+            origin: validatedOrigin,
+            credential: try credential.validated()
+        )
+        let data = try JSONEncoder().encode(record)
+        try upsert(data: data, account: oauthAccount(validatedReference))
+    }
+
+    func readOAuthCredential(
+        for reference: CredentialReference,
+        expectedOrigin: String
+    ) throws -> ProviderOAuthCredential? {
+        let validatedReference = try reference.validated()
+        let expectedOrigin = try validatedOrigin(expectedOrigin)
+        guard let data = try readData(account: oauthAccount(validatedReference)) else {
+            return nil
+        }
+        guard let record = try? JSONDecoder().decode(OAuthCredentialRecord.self, from: data),
+              record.schemaVersion == OAuthCredentialRecord.currentSchemaVersion else {
+            throw CredentialStoreError.keychain(errSecDecode)
+        }
+        guard record.origin == expectedOrigin else {
+            throw CredentialStoreError.credentialOriginMismatch
+        }
+        return try record.credential.validated()
+    }
+
+    func deleteOAuthCredential(for reference: CredentialReference) throws {
+        let validatedReference = try reference.validated()
+        try delete(account: oauthAccount(validatedReference))
+    }
+
     func describeAPIKey(
         for reference: CredentialReference,
         expectedOrigin: String
@@ -202,6 +245,10 @@ actor CredentialStore {
         "model-api-key-ref|\(reference.rawValue)"
     }
 
+    private func oauthAccount(_ reference: CredentialReference) -> String {
+        "model-oauth-ref|\(reference.rawValue)"
+    }
+
     private func normalizedKey(_ key: String) throws -> String {
         let normalized = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else {
@@ -294,6 +341,16 @@ private struct ReferencedCredential: Codable {
     let schemaVersion: Int
     let origin: String
     let secret: String
+}
+
+/// A versioned wrapper lets the OAuth payload evolve without changing the
+/// legacy API-key record decoder.
+private struct OAuthCredentialRecord: Codable {
+    static let currentSchemaVersion = 1
+
+    let schemaVersion: Int
+    let origin: String
+    let credential: ProviderOAuthCredential
 }
 
 enum CredentialStoreError: LocalizedError, Sendable {

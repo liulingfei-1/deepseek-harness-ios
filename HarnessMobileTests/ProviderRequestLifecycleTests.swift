@@ -33,6 +33,71 @@ final class ProviderRequestLifecycleTests: XCTestCase {
         XCTAssertEqual(refreshCount, 1)
     }
 
+    func testOAuthCredentialRoundTripsAndExpiresWithLeeway() throws {
+        let credential = ProviderOAuthCredential(
+            accessToken: "access",
+            refreshToken: "refresh",
+            expiresAt: Date(timeIntervalSince1970: 1_000),
+            scope: "models"
+        )
+        let data = try JSONEncoder().encode(credential)
+        let decoded = try JSONDecoder().decode(ProviderOAuthCredential.self, from: data)
+        XCTAssertEqual(decoded, credential)
+        XCTAssertTrue(credential.isExpired(at: Date(timeIntervalSince1970: 950), leeway: 60))
+        XCTAssertFalse(credential.isExpired(at: Date(timeIntervalSince1970: 900), leeway: 60))
+        XCTAssertEqual(credential.authorizationValue, "Bearer access")
+    }
+
+    func testOAuthRefreshCoordinatorReReadsAndSharesRotation() async throws {
+        let store = CredentialStore(
+            service: "com.llf.harnessmobile.oauth-tests.\(UUID().uuidString)"
+        )
+        let reference = CredentialReference(rawValue: "provider.openai.oauth")
+        let origin = "https://api.openai.com:443"
+        try await store.saveOAuthCredential(
+            ProviderOAuthCredential(
+                accessToken: "expired",
+                refreshToken: "refresh",
+                expiresAt: Date(timeIntervalSince1970: 1)
+            ),
+            for: reference,
+            origin: origin
+        )
+        let refreshCount = RefreshCounter()
+        let coordinator = ProviderOAuthRefreshCoordinator()
+
+        let values = try await withThrowingTaskGroup(of: String?.self, returning: [String?].self) { group in
+            for _ in 0..<10 {
+                group.addTask {
+                    try await coordinator.accessToken(
+                        profileID: "openai",
+                        credentialStore: store,
+                        reference: reference,
+                        expectedOrigin: origin
+                    ) { current in
+                        await refreshCount.increment()
+                        XCTAssertEqual(current.refreshToken, "refresh")
+                        return ProviderOAuthCredential(
+                            accessToken: "fresh",
+                            refreshToken: "rotated",
+                            expiresAt: Date().addingTimeInterval(3_600)
+                        )
+                    }
+                }
+            }
+            var values: [String?] = []
+            for try await value in group { values.append(value) }
+            return values
+        }
+
+        XCTAssertEqual(values, Array(repeating: "Bearer fresh", count: 10))
+        let refreshes = await refreshCount.currentValue()
+        XCTAssertEqual(refreshes, 1)
+        let stored = try await store.readOAuthCredential(for: reference, expectedOrigin: origin)
+        XCTAssertEqual(stored?.accessToken, "fresh")
+        XCTAssertEqual(stored?.refreshToken, "rotated")
+    }
+
     func testQuickTestUsesSingleAdapterRequestWithoutToolsOrConversationState() async throws {
         let client = QuickTestClient(events: [.text("ready"), .finish(.stop)])
         var configuration = ModelProviderCatalog.applying(.openAI, to: AgentConfiguration())

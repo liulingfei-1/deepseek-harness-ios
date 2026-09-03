@@ -1,5 +1,77 @@
 import Foundation
 
+/// Provider-owned OAuth grant persisted separately from API-key credentials.
+/// The adapter only needs the access token; refresh metadata stays local to the
+/// credential store and is never included in a model request.
+struct ProviderOAuthCredential: Codable, Sendable, Equatable {
+    let accessToken: String
+    let refreshToken: String?
+    let expiresAt: Date?
+    let tokenType: String
+    let scope: String?
+
+    init(
+        accessToken: String,
+        refreshToken: String? = nil,
+        expiresAt: Date? = nil,
+        tokenType: String = "Bearer",
+        scope: String? = nil
+    ) {
+        self.accessToken = accessToken
+        self.refreshToken = refreshToken
+        self.expiresAt = expiresAt
+        self.tokenType = tokenType
+        self.scope = scope
+    }
+
+    func validated() throws -> ProviderOAuthCredential {
+        let access = accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !access.isEmpty, access.utf8.count <= 16_384 else {
+            throw ProviderOAuthCredentialError.invalidAccessToken
+        }
+        let refresh = refreshToken?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let refresh, refresh.isEmpty || refresh.utf8.count > 16_384 {
+            throw ProviderOAuthCredentialError.invalidRefreshToken
+        }
+        let type = tokenType.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !type.isEmpty,
+              type.utf8.count <= 64,
+              type.unicodeScalars.allSatisfy({ $0.value < 128 && !CharacterSet.whitespacesAndNewlines.contains($0) }) else {
+            throw ProviderOAuthCredentialError.invalidTokenType
+        }
+        return ProviderOAuthCredential(
+            accessToken: access,
+            refreshToken: refresh,
+            expiresAt: expiresAt,
+            tokenType: type,
+            scope: scope?.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+    }
+
+    func isExpired(at now: Date = Date(), leeway: TimeInterval = 60) -> Bool {
+        guard let expiresAt else { return false }
+        return expiresAt <= now.addingTimeInterval(max(0, leeway))
+    }
+
+    var authorizationValue: String { "\(tokenType) \(accessToken)" }
+}
+
+enum ProviderOAuthCredentialError: LocalizedError, Sendable, Equatable {
+    case invalidAccessToken
+    case invalidRefreshToken
+    case invalidTokenType
+    case missingRefreshToken
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidAccessToken: "OAuth access token 无效。"
+        case .invalidRefreshToken: "OAuth refresh token 无效。"
+        case .invalidTokenType: "OAuth token type 无效。"
+        case .missingRefreshToken: "OAuth 凭据没有 refresh token。"
+        }
+    }
+}
+
 /// Immutable dispatch identity captured before a provider request starts. The
 /// adapter verifies the endpoint again at send time, so an altered route cannot
 /// be silently substituted after a profile edit.
@@ -56,6 +128,55 @@ actor ProviderRefreshSingleFlight<Value: Sendable> {
         inFlight[profileID] = task
         defer { inFlight.removeValue(forKey: profileID) }
         return try await task.value
+    }
+}
+
+/// Resolves an OAuth access token and serializes refresh-token rotation per
+/// profile. The closure is provider-specific; this coordinator owns only the
+/// read-latest/refresh/write ordering shared by every adapter.
+actor ProviderOAuthRefreshCoordinator {
+    private let flight = ProviderRefreshSingleFlight<ProviderOAuthCredential?>()
+
+    func accessToken(
+        profileID: String,
+        credentialStore: CredentialStore,
+        reference: CredentialReference,
+        expectedOrigin: String,
+        refresh: @escaping @Sendable (ProviderOAuthCredential) async throws -> ProviderOAuthCredential
+    ) async throws -> String? {
+        guard let current = try await credentialStore.readOAuthCredential(
+            for: reference,
+            expectedOrigin: expectedOrigin
+        ) else {
+            return nil
+        }
+        if !current.isExpired() {
+            return current.authorizationValue
+        }
+        let resolved = try await flight.run(profileID: profileID) {
+            // Re-read inside the single-flight operation: another process or
+            // request may have rotated the grant while this task was queued.
+            guard let latest = try await credentialStore.readOAuthCredential(
+                for: reference,
+                expectedOrigin: expectedOrigin
+            ) else {
+                return nil
+            }
+            if !latest.isExpired() {
+                return latest
+            }
+            guard latest.refreshToken != nil else {
+                throw ProviderOAuthCredentialError.missingRefreshToken
+            }
+            let refreshed = try await refresh(latest).validated()
+            try await credentialStore.saveOAuthCredential(
+                refreshed,
+                for: reference,
+                origin: expectedOrigin
+            )
+            return refreshed
+        }
+        return resolved?.authorizationValue
     }
 }
 
