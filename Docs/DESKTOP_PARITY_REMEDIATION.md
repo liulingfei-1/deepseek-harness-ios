@@ -25,6 +25,12 @@
 - **专项验证**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-parity-p1 --filter 'DeepSeekLlmAPIExtensionRegistryTests|DeepSeekWireTests.testDeepSeekExtensionsArePreparedForWireAndAcceptedOnceAfter2xx'` → 7 tests passed；真实注入式 `URLProtocol` 捕获顶层扩展字段并确认 2xx acceptance 只执行一次。
 - **状态**：VERIFY。尚未用真实 DeepSeek API、插件注册生命周期或 iPhone 16 Pro 完成端到端验收，不能标记 DONE。
 
+### PARITY-001 · 固定验收门复跑（2026-09-04）
+
+- SwiftPM 全量：`swift test --build-path /tmp/hm-parity-p1-full` → **918 tests, 5 skipped, 0 failures**。
+- Xcode：arm64 generic iOS Simulator `-derivedDataPath /tmp/hm-xcode-p1e build` → **BUILD SUCCEEDED**；设备审计脚本通过。
+- Plugin Host：`npm run check`、Node smoke → **PASS**；`check-upstream-parity.sh`、`git diff --check` → **PASS**。
+
 ### PARITY-003 · Session telemetry append 接线（2026-09-03）
 
 - **状态**：VERIFY
