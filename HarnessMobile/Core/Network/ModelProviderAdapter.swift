@@ -188,14 +188,16 @@ struct OpenAIChatCompletionsAdapter: ModelProviderAdapter {
                     description: item.description,
                     contextWindow: Self.positiveCapacity(
                         item.contextWindow,
-                        item.contextLength
+                        item.contextLength,
+                        item.limit?.context
                     ),
                     maxOutputTokens: Self.positiveCapacity(
                         item.maxOutputTokens,
-                        item.maxTokens
+                        item.maxTokens,
+                        item.limit?.output
                     ),
                     inputModalities: Self.validatedInputModalities(
-                        item.inputModalities ?? item.input
+                        item.inputModalities ?? item.input ?? item.modalities?.input
                     ),
                     reasoningModes: Self.validatedReasoningModes(
                         item.reasoningModes
@@ -357,6 +359,8 @@ private struct OpenAIModelListItem: Decodable {
     let maxOutputTokens: Int?
     let inputModalities: [String]?
     let input: [String]?
+    let limit: ModelLimit?
+    let modalities: ModelModalities?
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -373,6 +377,8 @@ private struct OpenAIModelListItem: Decodable {
         case maxOutputTokens = "max_output_tokens"
         case inputModalities = "input_modalities"
         case input
+        case limit
+        case modalities
     }
 
     init(from decoder: Decoder) throws {
@@ -391,10 +397,21 @@ private struct OpenAIModelListItem: Decodable {
         maxOutputTokens = try? container.decode(Int.self, forKey: .maxOutputTokens)
         inputModalities = try? container.decode([String].self, forKey: .inputModalities)
         input = try? container.decode([String].self, forKey: .input)
+        limit = try? container.decode(ModelLimit.self, forKey: .limit)
+        modalities = try? container.decode(ModelModalities.self, forKey: .modalities)
     }
 
     struct ReasoningOption: Decodable {
         let type: String?
         let values: [String]?
+    }
+
+    struct ModelLimit: Decodable {
+        let context: Int?
+        let output: Int?
+    }
+
+    struct ModelModalities: Decodable {
+        let input: [String]?
     }
 }

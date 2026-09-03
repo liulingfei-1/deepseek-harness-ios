@@ -151,7 +151,7 @@ git diff --check
 ### PARITY-011 · `llm-pi-ai` 等价能力
 
 - **上游参考**：最新上游 `llm-pi-ai` provider/model catalog、native protocol、OAuth、runtime reload、replay metadata、wire protocol。
-- **当前证据**：`ModelProviderCatalog.swift` 支持 DeepSeek/OpenAI/Anthropic/OpenRouter/custom OpenAI-compatible；已接入 OpenAI/enriched 与 Anthropic 原生动态 listing、exact model identity resolution、description、逐模型 reasoning metadata（含上游 `reasoning_options` effort values）与持久 capability cache，仍缺 OAuth、runtime reload 和真实设备证据。
+- **当前证据**：`ModelProviderCatalog.swift` 支持 DeepSeek/OpenAI/Anthropic/OpenRouter/custom OpenAI-compatible；已接入 OpenAI/enriched 与 Anthropic 原生动态 listing、exact model identity resolution、description、逐模型 reasoning metadata（含上游 `reasoning_options` effort values、`limit` 与 `modalities` 嵌套字段）与持久 capability cache，仍缺 OAuth、runtime reload 和真实设备证据。
 - **目标行为**：provider/model 动态发现、协议选择、授权生命周期、能力协商、运行时 reload、重放 metadata 和错误语义一致。
 - **影响文件**：configuration/network/auth/settings/UI/AgentRuntime/tests。
 - **步骤**：建立 provider plugin protocol；迁移静态 provider；实现 capability/cache；补 OAuth adapter（平台允许的 provider）；统一 request/replay metadata；逐 provider fixture 对比上游。

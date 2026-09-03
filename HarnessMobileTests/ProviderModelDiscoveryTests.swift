@@ -216,7 +216,7 @@ final class ProviderModelDiscoveryTests: XCTestCase {
         XCTAssertEqual(models.map(\.id), ["gateway-chat", "vision"])
         XCTAssertEqual(models[0].name, "Gateway Chat")
         XCTAssertEqual(models[0].contextWindow, 65_536)
-        XCTAssertEqual(models[1].inputModalities, [.text, .image])
+        XCTAssertEqual(models[1].inputModalities, [.text])
     }
 
     func testModelListingCarriesPerModelReasoningCapabilities() throws {
@@ -242,11 +242,14 @@ final class ProviderModelDiscoveryTests: XCTestCase {
     }
 
     func testModelListingReadsUpstreamReasoningOptionsEffortValues() throws {
-        let data = Data(#"{"models":{"claude-opus-4-7":{"reasoning":true,"reasoning_options":[{"type":"effort","values":["low","medium","high","xhigh","max"]}]},"claude-haiku-4-5":{"reasoning_options":[{"type":"budget_tokens","min":1024}]}}}"#.utf8)
+        let data = Data(#"{"models":{"claude-opus-4-7":{"reasoning":true,"reasoning_options":[{"type":"effort","values":["low","medium","high","xhigh","max"]}],"modalities":{"input":["text","image"]},"limit":{"context":1000000,"output":128000}},"claude-haiku-4-5":{"reasoning_options":[{"type":"budget_tokens","min":1024}]}}}"#.utf8)
         let models = try OpenAIChatCompletionsAdapter().decodeModelList(data)
         XCTAssertEqual(models.map(\.id), ["claude-haiku-4-5", "claude-opus-4-7"])
         XCTAssertNil(models[0].reasoningModes)
         XCTAssertEqual(models[1].reasoningModes, [.low, .medium, .high, .xhigh, .max])
+        XCTAssertEqual(models[1].contextWindow, 1_000_000)
+        XCTAssertEqual(models[1].maxOutputTokens, 128_000)
+        XCTAssertEqual(models[1].inputModalities, [.text, .image])
     }
 
     func testAnthropicListingUsesNativeURLAndHeaders() throws {
