@@ -93,7 +93,7 @@
 - **状态**：VERIFY
 - **上游核对**：`packages/subagent/subagent-acp` 要求 deployment-owned `command`、`args`、`cwd`、`permission`、`env`，每次 activation 独立进程，并在 dispose 时处理取消、EOF、退出与超时。
 - **移动端变更**：`ACPSubagentProviderDescriptor` + actor `ACPSubagentProviderCatalog` 保存并排序 provider 配置；`ACPSubagentProviderFactory` 将配置接入 iSH transport；`ISHPersistentPluginHostTransport` 支持自定义 executable/arguments/environment；`ACPSubagentClient.runAndWait` 提供超时、取消和非成功 stop reason 的显式结果。
-- **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-acp-new --filter ACPSubagentClientTests` → 7 tests passed（含 catalog 校验与 streamed runAndWait）。
+- **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-acp-new --filter ACPSubagentClientTests` → 7 tests passed（含 catalog 校验与 streamed runAndWait）；全量 `swift test --build-path /tmp/hm-acp-full` → 907 tests、5 skipped、0 failures。
 - **Simulator/iPhone 16 Pro**：尚未运行真实 ACP 子进程；仍需 iSH entrypoint、Jobs 注册、非零退出/重连和真机证据。
 - **剩余动作**：将 catalog 持久化设置接入子 Agent provider 选择；补真实 ACP child 的 initialize/session/new/prompt/cancel/shutdown 全生命周期。
 
