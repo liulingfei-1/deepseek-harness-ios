@@ -189,7 +189,13 @@ enum ConversationCompactor {
         }
 
         let repaired = repairIncompleteToolTurn(messages)
-        let units = makeUnits(repaired)
+        // Mirrors upstream `compaction-tool-result-pruner`: while compaction
+        // runs, tool results beyond the byte budget are replaced by a bounded
+        // head, a middle marker, and a bounded tail. Tool calls, steps, errors
+        // and metadata are preserved — only the text content changes. The full
+        // original stays in the durable session log for exact replay.
+        let pruned = pruneOversizedToolResults(repaired)
+        let units = makeUnits(pruned)
         guard !units.isEmpty else {
             let summary = makeStateSummary(workState: workState, omittedMessageCount: 0)
             return try fittedProjection(
@@ -254,6 +260,27 @@ enum ConversationCompactor {
             maximumUTF8Bytes: maximumUTF8Bytes,
             mustFitMessages: true
         )
+    }
+
+    /// Replaces tool-result text beyond the pruner's byte budget with the
+    /// bounded head/marker/tail form. Only `content` changes; role, tool call
+    /// ids and every other field are preserved, matching upstream's
+    /// "only the text content changes" contract.
+    static func pruneOversizedToolResults(
+        _ messages: [AgentMessage],
+        maxBytes: Int = ToolResultPruner.defaultMaxBytes
+    ) -> [AgentMessage] {
+        guard messages.contains(where: { $0.role == .tool && $0.content.utf8.count > maxBytes }) else {
+            return messages
+        }
+        return messages.map { message in
+            guard message.role == .tool, message.content.utf8.count > maxBytes else {
+                return message
+            }
+            var copy = message
+            copy.content = ToolResultPruner.prune(message.content, maxBytes: maxBytes)
+            return copy
+        }
     }
 
     static func repairIncompleteToolTurn(

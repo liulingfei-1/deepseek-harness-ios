@@ -313,4 +313,52 @@ final class ConversationCompactorTests: XCTestCase {
             tools: []
         )
     }
+
+        /// Mirrors upstream `compaction-tool-result-pruner`: while compaction runs,
+    /// an over-budget tool result enters the projection as the bounded
+    /// head/marker/tail form with every other field preserved, while results
+    /// within budget pass through untouched.
+    func testProjectionPrunesOversizedToolResultsAndKeepsMetadata() throws {
+        let oversizedTool = AgentMessage(
+            role: .tool,
+            content: String(repeating: "R", count: 20_000),
+            toolCallID: "call-1"
+        )
+        let normalTool = AgentMessage(
+            role: .tool,
+            content: "compact result",
+            toolCallID: "call-2"
+        )
+        let messages: [AgentMessage] = [
+            .user("run tools"),
+            .assistant("", toolCalls: [
+                .init(id: "call-1", name: "big", arguments: "{}"),
+                .init(id: "call-2", name: "small", arguments: "{}")
+            ]),
+            oversizedTool,
+            normalTool,
+            .assistant("done")
+        ]
+
+        // Direct pruner contract: content is bounded, other fields untouched.
+        let pruned = ConversationCompactor.pruneOversizedToolResults(messages)
+        let prunedOversized = pruned[2]
+        XCTAssertLessThanOrEqual(prunedOversized.content.utf8.count, ToolResultPruner.defaultMaxBytes)
+        XCTAssertEqual(prunedOversized.toolCallID, "call-1")
+        XCTAssertTrue(prunedOversized.content.contains(ToolResultPruner.middleMarker))
+        XCTAssertEqual(pruned[3].content, "compact result")
+
+        // A projection over the same history carries the pruned form forward.
+        let projection = try ConversationCompactor.project(
+            messages: pruned,
+            workState: ConversationWorkState(),
+            maximumUTF8Bytes: 64 * 1_024
+        )
+        let projectedTool = projection.messages.first { $0.toolCallID == "call-1" }
+        XCTAssertEqual(projectedTool?.toolCallID, "call-1")
+        XCTAssertLessThanOrEqual(
+            projectedTool?.content.utf8.count ?? .max,
+            ToolResultPruner.defaultMaxBytes
+        )
+    }
 }
