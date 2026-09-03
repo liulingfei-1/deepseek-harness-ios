@@ -216,7 +216,7 @@ final class ProviderModelDiscoveryTests: XCTestCase {
         XCTAssertEqual(models.map(\.id), ["gateway-chat", "vision"])
         XCTAssertEqual(models[0].name, "Gateway Chat")
         XCTAssertEqual(models[0].contextWindow, 65_536)
-        XCTAssertEqual(models[1].inputModalities, [.text])
+        XCTAssertEqual(models[1].inputModalities, [.text, .image])
     }
 
     func testModelListingCarriesPerModelReasoningCapabilities() throws {
