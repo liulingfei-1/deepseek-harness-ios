@@ -88,6 +88,16 @@
 - **iPhone 16 Pro**：未用真实 iSH ACP agent 完成 initialize/session/new/prompt/cancel 全生命周期，保留 `VERIFY`。
 - **剩余动作**：在 iSH 中提供 ACP agent entrypoint 并接入 Jobs/provider catalog；补真实进程退出、超时、取消和重连证据。
 
+### PARITY-013 · GitHub webhook envelope 与投递去重（2026-09-04）
+
+- **状态**：VERIFY
+- **上游证据**：桌面 `webhook` / `webhook-github` 包以 delivery ID、event name 和 JSON object payload 投递事件；移动端新增同构的纯解析入口。
+- **移动端变更**：新增 `LocalWebhookEvent`、`LocalWebhookParser.github` 和最多保留 4096 个 delivery ID 的进程内去重 actor；本批次未改变 `LocalStateServer` 仅处理 GET 的网络契约。
+- **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter LocalStateServerTests` → 5 tests passed。
+- **Simulator**：本批次尚待重跑 Xcode arm64 Simulator build。
+- **iPhone 16 Pro**：尚未验证真实 GitHub delivery、前后台生命周期、隧道可达性和重启去重，保留 `VERIFY`。
+- **剩余动作**：实现 HTTP POST body/header 路由、GitHub 签名验证、持久化 delivery state、重试与 Agent/Job 触发；公网 ingress 和 iOS 后台持续监听仍按平台证据标记。
+
 ### PARITY-006 · 子 Agent reasoning effort 参数（2026-09-03）
 
 - **状态**：VERIFY

@@ -98,3 +98,48 @@ final class LocalStateServer: @unchecked Sendable {
         }
     }
 }
+
+/// Minimal GitHub webhook envelope shared with the desktop webhook package.
+/// Parsing is pure so a future tunnel/host can feed the same validated event
+/// into Jobs without coupling the app to a public-ingress service.
+struct LocalWebhookEvent: Codable, Sendable, Equatable {
+    let deliveryID: String
+    let eventName: String
+    let payload: JSONValue
+}
+
+enum LocalWebhookParser {
+    static func github(
+        deliveryID: String,
+        eventName: String,
+        payload: JSONValue
+    ) -> LocalWebhookEvent? {
+        let id = deliveryID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = eventName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty, id.utf8.count <= 256,
+              !name.isEmpty, name.utf8.count <= 128,
+              payload.objectValue != nil else { return nil }
+        return LocalWebhookEvent(deliveryID: id, eventName: name, payload: payload)
+    }
+}
+
+/// Process-lifetime delivery deduplication. The bounded set prevents duplicate
+/// GitHub deliveries from retriggering the same local job.
+actor LocalWebhookDeduplicator {
+    private let maximumIDs = 4_096
+    private var accepted: [String] = []
+    private var known = Set<String>()
+
+    func accept(_ deliveryID: String) -> Bool {
+        guard !known.contains(deliveryID) else { return false }
+        known.insert(deliveryID)
+        accepted.append(deliveryID)
+        if accepted.count > maximumIDs {
+            let count = accepted.count - maximumIDs
+            for _ in 0..<count {
+                known.remove(accepted.removeFirst())
+            }
+        }
+        return true
+    }
+}

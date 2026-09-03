@@ -75,4 +75,24 @@ final class LocalStateServerTests: XCTestCase {
         }
         XCTAssertGreaterThan(assignedPort, 0, "loopback listener must bind an ephemeral port")
     }
+
+    func testGitHubWebhookParserValidatesEnvelopeAndDeduplicates() async {
+        let parsed = LocalWebhookParser.github(
+            deliveryID: "delivery-1",
+            eventName: "push",
+            payload: .object(["ref": .string("refs/heads/main")])
+        )
+        XCTAssertEqual(parsed?.eventName, "push")
+        XCTAssertNil(LocalWebhookParser.github(
+            deliveryID: "",
+            eventName: "push",
+            payload: .object([:])
+        ))
+
+        let deduplicator = LocalWebhookDeduplicator()
+        let first = await deduplicator.accept("delivery-1")
+        let second = await deduplicator.accept("delivery-1")
+        XCTAssertTrue(first)
+        XCTAssertFalse(second)
+    }
 }
