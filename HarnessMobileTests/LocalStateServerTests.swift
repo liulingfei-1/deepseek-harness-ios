@@ -106,6 +106,37 @@ final class LocalStateServerTests: XCTestCase {
         }
     }
 
+    func testLiveHTTPClientPostsWebhookAfterSecretIsConfigured() async throws {
+        let server = LocalStateServer(endpoints: [])
+        XCTAssertNotNil(server)
+        server?.start()
+        defer { server?.stop() }
+        server?.setWebhookSecret("live-secret")
+        var assignedPort: UInt16 = 0
+        for _ in 0..<40 {
+            if let port = server?.port, port > 0 {
+                assignedPort = port
+                break
+            }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        XCTAssertGreaterThan(assignedPort, 0)
+        let payload = #"{"action":"opened"}"#
+        let key = SymmetricKey(data: Data("live-secret".utf8))
+        let digest = HMAC<SHA256>.authenticationCode(for: Data(payload.utf8), using: key)
+        let signature = digest.map { String(format: "%02x", $0) }.joined()
+        let response = try await LocalStateHTTPClient(port: assignedPort).post(
+            path: "/webhook/github",
+            body: payload,
+            headers: [
+                "X-GitHub-Delivery": "live-delivery",
+                "X-GitHub-Event": "issues",
+                "X-Hub-Signature-256": "sha256=\(signature)"
+            ]
+        )
+        XCTAssertTrue(response.contains(#""accepted":true"#))
+    }
+
     func testGitHubWebhookParserValidatesEnvelopeAndDeduplicates() async {
         let parsed = LocalWebhookParser.github(
             deliveryID: "delivery-1",

@@ -53,6 +53,15 @@ struct SettingsView: View {
 
             Section {
                 NavigationLink {
+                    LocalWebhookSettingsView()
+                } label: {
+                    SettingsLinkLabel(title: "GitHub Webhook", systemImage: "arrow.down.circle", tint: .purple)
+                }
+                .accessibilityIdentifier("settings-github-webhook")
+            } header: { Label("事件接入", systemImage: "arrow.down.circle") }
+
+            Section {
+                NavigationLink {
                     AgentProviderBundlesView()
                 } label: {
                     SettingsLinkLabel(title: "Agent 编排 Bundle", systemImage: "arrow.triangle.branch", tint: .indigo)
@@ -339,6 +348,86 @@ private struct WebSearchSettingsView: View {
             do {
                 try await model.deleteSearchProviderAPIKey(providerID: selectedProvider)
                 credentialStatus = .missing
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            isSaving = false
+        }
+    }
+}
+
+private struct LocalWebhookSettingsView: View {
+    @Environment(AppModel.self) private var model
+    @State private var secret = ""
+    @State private var configured = false
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        Form {
+            Section {
+                SecureField("Webhook Secret", text: $secret)
+                    .textContentType(.password)
+                    .accessibilityIdentifier("github-webhook-secret")
+                LabeledContent("签名校验", value: configured ? "已启用" : "未配置")
+                HStack {
+                    Button("保存") { save() }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(secret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
+                    if configured {
+                        Button("删除 Secret", role: .destructive) { remove() }
+                            .disabled(isSaving)
+                    }
+                    if isSaving { ProgressView().controlSize(.small) }
+                }
+            } header: {
+                Text("GitHub 签名")
+            } footer: {
+                Text("设置后，POST /webhook/github 必须携带匹配的 X-Hub-Signature-256。事件仍只投影到本机 Job。")
+            }
+
+            Section {
+                LabeledContent("本机地址", value: "127.0.0.1")
+                Text("iOS 不提供公网持续监听；需要外部入口时请使用用户自行配置的隧道或推送转发，并保留本机事件证据。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("监听范围")
+            }
+        }
+        .harnessCompactListChrome()
+        .navigationTitle("GitHub Webhook")
+        .task { configured = await model.localWebhookSecretConfigured() }
+        .alert("Webhook 设置失败", isPresented: Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        )) {
+            Button("好") { errorMessage = nil }
+        } message: {
+            Text(errorMessage ?? "")
+        }
+    }
+
+    private func save() {
+        isSaving = true
+        Task {
+            do {
+                try await model.saveLocalWebhookSecret(secret)
+                secret = ""
+                configured = true
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            isSaving = false
+        }
+    }
+
+    private func remove() {
+        isSaving = true
+        Task {
+            do {
+                try await model.deleteLocalWebhookSecret()
+                configured = false
             } catch {
                 errorMessage = error.localizedDescription
             }

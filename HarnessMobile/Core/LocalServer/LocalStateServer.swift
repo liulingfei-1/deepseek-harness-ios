@@ -47,7 +47,7 @@ final class LocalStateServer: @unchecked Sendable {
     private let endpoints: [String: Endpoint]
     private let webhookHandlerLock = NSLock()
     private var webhookHandler: (@Sendable (LocalWebhookEvent) -> Void)?
-    private let webhookSecret: String?
+    private var webhookSecret: String?
 
     init?(
         endpoints: [Endpoint],
@@ -94,6 +94,12 @@ final class LocalStateServer: @unchecked Sendable {
     func setWebhookHandler(_ handler: (@Sendable (LocalWebhookEvent) -> Void)?) {
         webhookHandlerLock.lock()
         webhookHandler = handler
+        webhookHandlerLock.unlock()
+    }
+
+    func setWebhookSecret(_ secret: String?) {
+        webhookHandlerLock.lock()
+        webhookSecret = secret?.trimmingCharacters(in: .whitespacesAndNewlines)
         webhookHandlerLock.unlock()
     }
 
@@ -179,12 +185,13 @@ final class LocalStateServer: @unchecked Sendable {
             let request = String(decoding: data, as: UTF8.self)
             self.webhookHandlerLock.lock()
             let webhookHandler = self.webhookHandler
+            let webhookSecret = self.webhookSecret
             self.webhookHandlerLock.unlock()
             let routed = Self.route(
                 request: request,
                 endpoints: self.endpoints,
                 webhookHandler: webhookHandler,
-                webhookSecret: self.webhookSecret
+                webhookSecret: webhookSecret
             )
             let body = routed.body
             let headers = "HTTP/1.1 \(routed.status)\r\n"
@@ -217,11 +224,26 @@ struct LocalStateHTTPClient: Sendable {
     }
 
     func get(path: String) async throws -> String {
+        try await request(path: path, method: "GET", body: nil, headers: [:])
+    }
+
+    func post(path: String, body: String, headers: [String: String] = [:]) async throws -> String {
+        try await request(path: path, method: "POST", body: Data(body.utf8), headers: headers)
+    }
+
+    private func request(
+        path: String,
+        method: String,
+        body: Data?,
+        headers: [String: String]
+    ) async throws -> String {
         guard path.first == "/", !path.contains("?"), !path.contains("#") else {
             throw LocalStateHTTPError.invalidPath
         }
         var request = URLRequest(url: baseURL.appendingPathComponent(String(path.dropFirst())))
-        request.httpMethod = "GET"
+        request.httpMethod = method
+        request.httpBody = body
+        for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
         request.timeoutInterval = 5
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else {

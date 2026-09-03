@@ -743,6 +743,27 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         await refreshVisibleJobs()
     }
 
+    static let localWebhookCredentialOrigin = "https://local.harness-mobile/webhook/github"
+
+    func saveLocalWebhookSecret(_ secret: String) async throws {
+        try await saveCredential(secret, forOrigin: Self.localWebhookCredentialOrigin)
+        localStateServer?.setWebhookSecret(secret)
+    }
+
+    func deleteLocalWebhookSecret() async throws {
+        try await deleteCredential(forOrigin: Self.localWebhookCredentialOrigin)
+        localStateServer?.setWebhookSecret(nil)
+    }
+
+    func localWebhookSecretConfigured() async -> Bool {
+        (try? await readCredential(forOrigin: Self.localWebhookCredentialOrigin)) != nil
+    }
+
+    private func restoreLocalWebhookSecret() async {
+        let secret = try? await readCredential(forOrigin: Self.localWebhookCredentialOrigin)
+        localStateServer?.setWebhookSecret(secret)
+    }
+
 #if DEBUG
     func resetPersistentStateForUITesting() async throws {
         guard !didResetPersistentStateForUITesting else { return }
@@ -848,6 +869,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
             await recordStartupIssue(error, source: "provider_migration")
         }
         await refreshProviderCredentialStatuses()
+        await restoreLocalWebhookSecret()
         await refreshWorkspace()
         await loadHookConfiguration()
         // `latest-image.*` is retained for the local camera_ocr tool, but it
