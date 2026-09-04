@@ -62,6 +62,30 @@ final class LocalStateServerTests: XCTestCase {
         XCTAssertTrue(alias.body.contains("one"))
     }
 
+    func testRouteServesConnectionRPCEnvelopeAndCorrelatesID() throws {
+        let request = "POST /api HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
+            + #"{"type":"client-request","rpcId":"rpc-1","method":"session/status","payload":{}}"#
+        let result = LocalStateServer.route(
+            request: request,
+            endpoints: [:],
+            webhookHandler: nil,
+            rpcHandler: { method, _ in
+                XCTAssertEqual(method, "session/status")
+                return .object(["running": .bool(true)])
+            }
+        )
+        XCTAssertEqual(result.status, 200)
+        let value = try JSONDecoder().decode(JSONValue.self, from: Data(result.body.utf8))
+        XCTAssertEqual(value.objectValue?["type"]?.stringValue, "server-response")
+        XCTAssertEqual(value.objectValue?["rpcId"]?.stringValue, "rpc-1")
+        let ok = try XCTUnwrap(value.objectValue?["result"]?.objectValue?["ok"])
+        XCTAssertEqual(ok, JSONValue.bool(true))
+        let running = try XCTUnwrap(
+            value.objectValue?["result"]?.objectValue?["value"]?.objectValue?["running"]
+        )
+        XCTAssertEqual(running, JSONValue.bool(true))
+    }
+
     func testRouteReturns404ForUnknownPath() {
         let result = LocalStateServer.route(
             request: "GET /nope HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",

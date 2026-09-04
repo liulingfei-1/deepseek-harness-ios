@@ -734,7 +734,22 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
             .init(path: "/sessions", handler: { [localStateSnapshotStore] in localStateSnapshotStore.sessions() }),
             .init(path: "/api/schema", handler: { LocalStateAPISchema.json() }),
             .init(path: "/api/session", handler: { [localStateSnapshotStore] in localStateSnapshotStore.sessions() })
-        ])
+        ], rpcHandler: { [localStateSnapshotStore] method, _ in
+            switch method {
+            case "session/list", "session/status":
+                guard let data = localStateSnapshotStore.sessions().data(using: .utf8),
+                      let value = try? JSONDecoder().decode(JSONValue.self, from: data) else {
+                    throw LocalStateRPCError.invalidProjection
+                }
+                return value
+            case "settings/schema":
+                return .object(["name": .string("settings"), "version": .number(1)])
+            case "workspace/schema":
+                return .object(["name": .string("workspace"), "version": .number(1)])
+            default:
+                throw LocalStateRPCError.methodNotFound(method)
+            }
+        })
         localStateServer?.start()
         localStateServer?.setWebhookHandler { [weak self] event in
             Task { @MainActor [weak self] in

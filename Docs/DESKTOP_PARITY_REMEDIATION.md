@@ -232,6 +232,13 @@
 - **专项验证**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-oauth-full --filter AgentRuntimeTests.testUnauthorizedRequestRefreshesCredentialAndRetriesOnce` → 1 test passed，确认请求 key 序列为 `expired → fresh`。
 - **剩余边界**：provider-specific 浏览器/device-code 授权、真实 401 API、设备网络切换与 iPhone 16 Pro 证据仍为 `VERIFY`。
 
+### PARITY-010 · Connection RPC envelope（2026-09-04）
+
+- **上游核对**：`client/connection` 的 `client-request`/`server-response` envelope 固定 `rpcId`、`method`、`payload` 与 `{ok,value|error}` 结果形状；错误包含 `code`、`message`、`details`。
+- **移动端变更**：`LocalStateServer` 新增 `POST /api` RPC 路由，完成 envelope 解码、rpcId 回传、统一成功/错误编码和 handler 分发；AppModel 接入 `session/list`、`session/status`、`settings/schema`、`workspace/schema` 只读方法，复用现有快照真源。
+- **专项验证**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-local-rpc --filter LocalStateServerTests` → **16 tests passed**，新增 RPC correlation 测试；真实 loopback GET/POST 旧测试继续通过。
+- **剩余边界**：settings/workspace/session 写入 controller、SSE/WebSocket、端口冲突及前后台生命周期仍需补齐；公网绑定不属于移动端部署项。
+
 ### PARITY-006 · 子 Agent reasoning effort 参数（2026-09-03）
 
 - **状态**：VERIFY

@@ -76,6 +76,8 @@ final class LocalStateSnapshotStore: @unchecked Sendable {
 /// list exempts this file because the listener is confined to the loopback
 /// interface and cannot execute or forward anything remotely.
 final class LocalStateServer: @unchecked Sendable {
+    typealias RPCHandler = @Sendable (_ method: String, _ payload: JSONValue) throws -> JSONValue
+
     struct Endpoint: Sendable {
         let path: String
         /// Returns the response body (already JSON-encoded by the provider).
@@ -88,12 +90,14 @@ final class LocalStateServer: @unchecked Sendable {
     private let webhookHandlerLock = NSLock()
     private var webhookHandler: (@Sendable (LocalWebhookEvent) -> Void)?
     private var webhookSecret: String?
+    private let rpcHandler: RPCHandler?
 
     init?(
         endpoints: [Endpoint],
         port: UInt16 = 0,
         webhookHandler: (@Sendable (LocalWebhookEvent) -> Void)? = nil,
-        webhookSecret: String? = nil
+        webhookSecret: String? = nil,
+        rpcHandler: RPCHandler? = nil
     ) {
         guard let listener = try? NWListener(
             using: .tcp,
@@ -106,6 +110,7 @@ final class LocalStateServer: @unchecked Sendable {
         self.endpoints = Dictionary(uniqueKeysWithValues: endpoints.map { ($0.path, $0) })
         self.webhookHandler = webhookHandler
         self.webhookSecret = webhookSecret
+        self.rpcHandler = rpcHandler
     }
 
     var port: UInt16? {
@@ -156,7 +161,8 @@ final class LocalStateServer: @unchecked Sendable {
         request: String,
         endpoints: [String: Endpoint],
         webhookHandler: (@Sendable (LocalWebhookEvent) -> Void)?,
-        webhookSecret: String? = nil
+        webhookSecret: String? = nil,
+        rpcHandler: RPCHandler? = nil
     ) -> (status: Int, body: String) {
         let methodLine = request.split(separator: "\r\n", maxSplits: 1).first.map(String.init)
         guard let methodLine,
@@ -207,6 +213,43 @@ final class LocalStateServer: @unchecked Sendable {
             }
             webhookHandler?(event)
             return (202, #"{"accepted":true}"#)
+        }
+        if tokens[0] == "POST", pathString == "/api" {
+            guard let separator = request.range(of: "\r\n\r\n"),
+                  let message = try? JSONDecoder().decode(
+                      [String: JSONValue].self,
+                      from: Data(request[separator.upperBound...].utf8)
+                  ),
+                  message["type"]?.stringValue == "client-request",
+                  let rpcID = message["rpcId"]?.stringValue,
+                  let method = message["method"]?.stringValue,
+                  !rpcID.isEmpty,
+                  !method.isEmpty else {
+                return Self.rpcErrorResponse(
+                    rpcID: nil,
+                    code: "gateway/invalid-request",
+                    message: "invalid RPC request"
+                )
+            }
+            guard let rpcHandler else {
+                return Self.rpcErrorResponse(
+                    rpcID: rpcID,
+                    code: "gateway/not-found",
+                    message: "RPC method is not registered"
+                )
+            }
+            do {
+                return Self.rpcSuccessResponse(
+                    rpcID: rpcID,
+                    value: try rpcHandler(method, message["payload"] ?? .null)
+                )
+            } catch {
+                return Self.rpcErrorResponse(
+                    rpcID: rpcID,
+                    code: "gateway/internal",
+                    message: error.localizedDescription
+                )
+            }
         }
         guard tokens[0] == "GET" else {
             return (400, #"{"error":"unsupported request"}"#)
@@ -274,7 +317,8 @@ final class LocalStateServer: @unchecked Sendable {
                 request: request,
                 endpoints: self.endpoints,
                 webhookHandler: webhookHandler,
-                webhookSecret: webhookSecret
+                webhookSecret: webhookSecret,
+                rpcHandler: self.rpcHandler
             )
             let body = routed.body
             let headers = "HTTP/1.1 \(routed.status)\r\n"
@@ -288,12 +332,57 @@ final class LocalStateServer: @unchecked Sendable {
             _ = error
         }
     }
+
+    private static func rpcSuccessResponse(rpcID: String, value: JSONValue) -> (status: Int, body: String) {
+        encodeRPC(.object([
+            "type": .string("server-response"),
+            "rpcId": .string(rpcID),
+            "result": .object(["ok": .bool(true), "value": value])
+        ]))
+    }
+
+    private static func rpcErrorResponse(rpcID: String?, code: String, message: String) -> (status: Int, body: String) {
+        var response: [String: JSONValue] = [
+            "type": .string("server-response"),
+            "result": .object([
+                "ok": .bool(false),
+                "error": .object([
+                    "code": .string(code),
+                    "message": .string(message),
+                    "details": .object([:])
+                ])
+            ])
+        ]
+        if let rpcID { response["rpcId"] = .string(rpcID) }
+        return encodeRPC(.object(response))
+    }
+
+    private static func encodeRPC(_ value: JSONValue) -> (status: Int, body: String) {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        guard let data = try? encoder.encode(value) else {
+            return (500, #"{"error":"serialization failure"}"#)
+        }
+        return (200, String(decoding: data, as: UTF8.self))
+    }
 }
 
 enum LocalStateHTTPError: Error, Sendable, Equatable {
     case invalidPath
     case invalidResponse
     case server(status: Int, body: String)
+}
+
+enum LocalStateRPCError: LocalizedError, Sendable, Equatable {
+    case methodNotFound(String)
+    case invalidProjection
+
+    var errorDescription: String? {
+        switch self {
+        case let .methodNotFound(method): return "RPC method not found: \(method)"
+        case .invalidProjection: return "RPC projection is invalid."
+        }
+    }
 }
 
 /// Client seam used by native integrations and tests to exercise the actual

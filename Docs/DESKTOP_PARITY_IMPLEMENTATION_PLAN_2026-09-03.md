@@ -225,7 +225,7 @@ git diff --check
 | PARITY-005 ACP transport | VERIFY | `ISHACPLineTransport` 复用 iSH transport，并新增 `ACPSubagentProviderDescriptor/Catalog`、自定义 command/args/env、`runAndWait`，且 `acp_provider` 已接入 `subagent`/Jobs；ACP/Jobs 专项通过；真实 iSH agent、持久化选择与真机仍待验证 |
 | PARITY-008 Exa/Perplexity | VERIFY | AppModel 统一路由、Keychain origin 存取/删除、显式 provider 选择和 Settings UI 已接入；Exa 映射已按上游丢弃无 highlight 并取首个非空 highlight；Exa 3 tests 通过、Simulator build 通过；真实 API 与真机引用仍待验证 |
 | PARITY-009 agent team | IOS-REPLACEMENT | 现有 workflow tool 提供本机编排、并行/流水线、成员生命周期与可恢复轨迹树；桌面后台 team daemon 机制不适用于 iOS，保留前台语义等价实现 |
-| PARITY-010 LocalStateServer | VERIFY | AppModel 启动 loopback server 并注册 health/status/sessions；新增线程安全快照盒、真实 `LocalStateHTTPClient` GET 与发送完成后再 cancel 的连接修复；LocalStateServer 10 tests 通过；真机 HTTP 仍待验证 |
+| PARITY-010 LocalStateServer | VERIFY | AppModel 启动 loopback server 并注册 health/status/sessions；新增线程安全快照盒、真实 `LocalStateHTTPClient` GET、`POST /api` Connection RPC envelope（session/settings/workspace 只读 methods）与发送完成后再 cancel 的连接修复；LocalStateServer 16 tests 通过；写入 methods、SSE/WebSocket、真机 HTTP 仍待验证 |
 | PARITY-011/012/014 | VERIFY/TODO | PARITY-011 已实现动态 listing、exact resolution、capability cache、OAuth record、RFC 6749 refresh single-flight 与单次 401 token-rotation retry；provider-specific OAuth UI/真实设备仍 VERIFY；PARITY-012/014 仍按下方边界处理 |
 | PARITY-013 webhook | VERIFY | GitHub delivery/event/payload envelope、loopback POST `/webhook/github`、有界去重及跨重启 delivery state 已实现；Settings 可配置/删除 Keychain secret，listener 支持运行时 secret 与真实 POST/HMAC；修复 AppModel sink 初始化时提前 claim delivery 的 bug，Job 投影路径已接通；11 个 LocalStateServer 测试通过；rule/重试/Agent 唤醒仍待实现 |
 

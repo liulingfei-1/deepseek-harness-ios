@@ -61,7 +61,8 @@
 
 ### P4：LocalStateServer 与前端（PARITY-010/014）
 
-- [ ] 完整 controller JSON-RPC envelope、写入方法、端口冲突、前后台启停。
+- [x] 增加 `/api` Connection RPC envelope（`client-request`/`server-response`、rpcId correlation、统一错误形状），接入 session/settings/workspace 的已实现只读方法。
+- [ ] 写入方法、端口冲突、前后台启停。
 - [ ] 将上游 `frontend-static/client-half` 接入现有 WKWebView；UI 状态仍由本地 projection 提供。
 - [ ] Windows PowerShell/win32/ACL 保持 `OUT-OF-SCOPE`，不得伪造 iOS 实现。
 
