@@ -23,7 +23,7 @@
 | Web 搜索 | `web` seam 按配置或唯一可用 provider 选择，结果上限由 seam 执行 | Exa/Perplexity provider、设置和 citation 映射已接线 | `VERIFY` |
 | Webhook | provider-neutral delivery，rule 只内建创建 Session | loopback POST、持久规则、claim/complete/requeue、可选唤醒已接线 | `VERIFY` |
 | E2B | 官方 `e2b` SDK 的共享 Sandbox；`fs-e2b` 与 `subprocess-e2b` 复用同一 sandbox | 无官方 SDK/远端账号配置；iSH 仅能作语义替代 | `IOS-REPLACEMENT/VERIFY` |
-| Credential records | `CredentialRecord = ApiKeyRecord | GrantRecord`；授权 flow 观察到 record commit 才算成功；刷新使用 read-modify-write | 本地只有 API-key Keychain 记录和通用 single-flight，缺 grant/授权记录 | `VERIFY` |
+| Credential records | `CredentialRecord = ApiKeyRecord | GrantRecord`；授权 flow 观察到 record commit 才算成功；刷新使用 read-modify-write | 本地已有 API-key/OAuth Keychain records、single-flight 与手动 grant 录入；缺 provider-specific 授权 flow | `VERIFY` |
 | Provider reload | 上游 route 可在设置变化后无重启生效；模型/凭据按请求解析 | 本地有 profile generation、模型 capability cache；缺 OAuth 生命周期闭环 | `VERIFY` |
 | Local web UI | 桌面 web server/client-half 独立存在 | loopback API/WKWebView 可用，桌面 frontend bundle 尚未接入 | `VERIFY` |
 | Windows host | PowerShell/win32/ACL 依赖 Windows 内核 | iOS 无等价内核能力 | `OUT-OF-SCOPE` |
@@ -83,4 +83,4 @@ git diff --check
 
 ## 5. 当前批次记录
 
-2026-09-04：已用 `agent-reach doctor --json`、`gh search code`、GitHub API 和本地源码/测试核对上游 authorization、credential record、E2B、webhook、ACP 入口。本批完成最小 OAuth record + refresh single-flight，并补齐 OAuth-backed Profile 编辑/删除生命周期；provider-specific authorization UI、401 自动重试和真实授权仍保持 `VERIFY`。
+2026-09-04：已用 `agent-reach doctor --json`、`gh search code`、GitHub API 和本地源码/测试核对上游 authorization、credential record、E2B、webhook、ACP 入口。本批完成最小 OAuth record + refresh single-flight、OAuth-backed Profile 编辑/删除生命周期和设置页手动 grant 录入；provider-specific authorization UI、401 自动重试和真实授权仍保持 `VERIFY`。
