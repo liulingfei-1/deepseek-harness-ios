@@ -7,6 +7,29 @@ import XCTest
 #endif
 
 final class AgentRuntimeTests: XCTestCase {
+    func testUnauthorizedRequestRefreshesCredentialAndRetriesOnce() async throws {
+        let keys = RotatingAPIKeyScript(values: ["expired", "fresh"])
+        let client = UnauthorizedThenSuccessClient()
+        let runtime = AgentRuntime(
+            client: client,
+            registry: LocalToolRegistry(tools: []),
+            approvalHandler: { _ in true },
+            eventHandler: { _ in },
+            apiKeyProvider: { _ in await keys.next() }
+        )
+        var configuration = AgentConfiguration()
+        configuration.retryPolicy = ProviderRetryPolicyConfiguration(mode: .normal, maxRetries: 0)
+
+        try await runtime.run(
+            history: [.user("refresh after unauthorized")],
+            configuration: configuration,
+            apiKey: "initial"
+        )
+
+        let requests = await client.requests
+        XCTAssertEqual(requests.map(\.apiKey), ["expired", "fresh"])
+    }
+
     func testConfiguredHooksRunAcrossSessionPromptAndToolLifecycle() async throws {
         let script = ModelScript(turns: [[
             .toolCallDelta(
@@ -3768,6 +3791,52 @@ private actor LifecycleRetryScript {
     func next() -> Int {
         invocation += 1
         return invocation
+    }
+}
+
+private actor RotatingAPIKeyScript {
+    private var values: [String]
+
+    init(values: [String]) {
+        self.values = values
+    }
+
+    func next() -> String {
+        values.isEmpty ? "fresh" : values.removeFirst()
+    }
+}
+
+private actor UnauthorizedThenSuccessClient: LLMStreamingClient {
+    private(set) var requests: [ModelRequest] = []
+
+    nonisolated func stream(_ request: ModelRequest) -> AsyncThrowingStream<LLMStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                let invocation = await self.record(request)
+                if invocation == 1 {
+                    continuation.finish(
+                        throwing: ModelClientError.httpFailure(
+                            ModelProviderHTTPFailureMetadata(
+                                status: 401,
+                                code: "AUTH",
+                                retryAfterMilliseconds: nil,
+                                requestID: "unauthorized-refresh"
+                            ),
+                            "expired access token"
+                        )
+                    )
+                    return
+                }
+                continuation.yield(.text("refreshed response"))
+                continuation.yield(.finish(.stop))
+                continuation.finish()
+            }
+        }
+    }
+
+    private func record(_ request: ModelRequest) -> Int {
+        requests.append(request)
+        return requests.count
     }
 }
 

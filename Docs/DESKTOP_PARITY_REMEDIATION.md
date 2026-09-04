@@ -225,6 +225,13 @@
 - **构建审计**：Xcode arm64 Simulator 初次构建因测试 `URLProtocol` 被设备审计误报；已将该测试 fixture 加入脚本的测试白名单，未放宽生产网络边界；修复后需重跑完整 build 与固定验收门。
 - **剩余边界**：provider-specific 浏览器/device-code 授权、401 自动重试、真实 OAuth 服务与 iPhone 16 Pro 证据仍为 `VERIFY`。
 
+### PARITY-011 · 401 自动刷新并重试（2026-09-04）
+
+- **上游核对**：provider request loop 将 HTTP failure 交给 retry policy；认证失败本身不是通用 transient retry，只有凭据状态改变时才应重新解析并重发。
+- **移动端变更**：`AgentRuntime` 在收到 401 且存在 `apiKeyProvider` 时重新读取当前 profile credential；仅当 access token 发生轮换才重建同一 `ModelRequest` 并重试一次，避免无变化 token 无限循环。刷新失败或 token 未变化时保留原始认证错误。
+- **专项验证**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-oauth-full --filter AgentRuntimeTests.testUnauthorizedRequestRefreshesCredentialAndRetriesOnce` → 1 test passed，确认请求 key 序列为 `expired → fresh`。
+- **剩余边界**：provider-specific 浏览器/device-code 授权、真实 401 API、设备网络切换与 iPhone 16 Pro 证据仍为 `VERIFY`。
+
 ### PARITY-006 · 子 Agent reasoning effort 参数（2026-09-03）
 
 - **状态**：VERIFY

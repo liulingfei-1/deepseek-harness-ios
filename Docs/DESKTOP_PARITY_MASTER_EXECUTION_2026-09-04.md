@@ -43,7 +43,8 @@
 - [x] 设置页可手动录入 OAuth access/refresh token 与 ISO 8601 过期时间，并随 Profile 保存事务写入。
 - [x] 设置页可选录入 HTTPS token endpoint 与 public client ID；过期 grant 在 provider request credential lookup 中按 RFC 6749 自动刷新并持久化轮换 token。
 - [x] 添加纯 Swift 回归测试：编码 round-trip、过期判断、并发 refresh、旧 API-key 兼容。
-- [ ] provider-specific OAuth authorization UI、401 自动重试和真实授权 flow。
+- [ ] provider-specific OAuth authorization UI 和真实授权 flow。
+- [x] 401 响应在存在 API-key resolver 时重新读取凭据；仅在 access token 实际轮换后对同一请求重试一次。
 - [ ] 真实 OAuth/API/iSH/真机证据取得前保持 `VERIFY`。
 
 ### P2：Provider wire 与真实端点（PARITY-001/002/003/006/008）

@@ -780,6 +780,39 @@ actor AgentRuntime {
                        case .sessionEventPersistenceFailed = runtimeError {
                         throw error
                     }
+                    // A provider may reject an access token that expired
+                    // between request assembly and dispatch. Re-read the
+                    // credential once through the AppModel resolver; when it
+                    // rotated, retry the same request with the new token.
+                    if let failure = ModelRetryPolicy.failure(for: error),
+                       failure.status == 401,
+                       requestAttempt == 0,
+                       apiKeyProvider != nil {
+                        let refreshedKey = try await resolveAPIKey(
+                            for: request.configuration,
+                            initialConfiguration: configuration,
+                            initialAPIKey: request.apiKey
+                        )
+                        if refreshedKey != request.apiKey {
+                            request = ModelRequest(
+                                configuration: request.configuration,
+                                apiKey: refreshedKey,
+                                systemPrompt: request.systemPrompt,
+                                messages: request.messages,
+                                tools: request.tools,
+                                imagePayloads: request.imagePayloads,
+                                route: request.route,
+                                sessionID: request.sessionID,
+                                purpose: request.purpose
+                            )
+                            requestAttempt += 1
+                            accumulator = TurnAccumulator()
+                            finishReason = nil
+                            turnUsage = nil
+                            assistantChunkSeqs.removeAll(keepingCapacity: true)
+                            continue modelRequest
+                        }
+                    }
                     if contextCompactionAttempt == 0,
                        let failure = ModelRetryPolicy.failure(for: error),
                        failure.code == ModelRetryPolicy.contextWindowExceededCode {
