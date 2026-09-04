@@ -806,6 +806,16 @@ git diff --check
 - 对照上游 `host/frontend-static` 的 `GET/HEAD` fallback 约定，`LocalStateServer.route` 现在接受 `HEAD`，返回与 `GET` 相同状态码但空 body；未知路径与 webhook/RPC 行为不变。
 - `LocalStateServerTests.testRouteServesHealthAndStatusEndpoints` 增加 HEAD 回归；该兼容不代表已接入上游 frontend bundle，client-half 仍为 `VERIFY`。
 
+### PAR-110 · Session history page RPC（2026-09-04）
+
+- 状态：VERIFY
+- 上游证据：`packages/api/session-controller/src/history.ts` 的 `SessionHistoryController.page`；请求字段为 `throughSeq`、可选 `beforeSeq`/`maxMessages`，按 user/assistant message 的 append surface 做向前 message-aligned cut，并返回 `records`/`hasMore`。
+- 移动端变更：`AppModel.handleLocalStateRPC` 新增 `session/page`，复用 `SessionTrajectoryRepository.allEvents`；`localSessionPagePayload` 实现 through/before/limit 校验、sourceEventSeqs 分组边界和 v0 event wire envelope；schema 宣传 `page`。
+- 测试命令与真实结果：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter LocalStateServerTests.testSessionPageIsMessageAlignedAndPacksRawWireEvents`：1/1 通过；LocalStateServerTests：23/23 通过。
+- Simulator：沿用最近 arm64 Simulator BUILD SUCCEEDED，本批次未单独重跑 Xcode。
+- iPhone 16 Pro：未取得真实 Desktop client/page 互操作证据，保持 VERIFY。
+- 剩余平台限制或后续动作：移动端暂以 raw `event` records 传输，尚未实现上游 `ChunkRow` assistant delta packing；需接入真实 client transport、分页跳转和真机长会话验证。
+
 ### PAR-107 · Exa/Perplexity transport failure fixtures（2026-09-04）
 
 - 为 `ExaSearchProvider` 与 `PerplexitySearchProvider` 增加可选 `URLProtocol` 注入，仅用于测试复现真实 transport；生产默认路径不变。

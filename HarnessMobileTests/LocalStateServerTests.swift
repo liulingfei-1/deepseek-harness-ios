@@ -369,6 +369,63 @@ final class LocalStateServerTests: XCTestCase {
         XCTAssertEqual(increments[2].objectValue?["workspaceId"], JSONValue.string("a"))
     }
 
+    func testSessionPageIsMessageAlignedAndPacksRawWireEvents() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("session-page-\(UUID().uuidString)", isDirectory: true)
+        let repository = SessionTrajectoryRepository(root: root)
+        let sessionID = UUID()
+        _ = try await repository.append(
+            SessionEventDraft(type: SessionEventVocabulary.turnStart, data: .object(["turn": .number(1)])),
+            sessionID: sessionID
+        )
+        _ = try await repository.append(
+            SessionEventDraft(type: SessionEventVocabulary.userMessage, data: .string("hello")),
+            sessionID: sessionID
+        )
+        _ = try await repository.append(
+            SessionEventDraft(type: SessionEventVocabulary.assistantChunk, data: .object(["text": .string("h")])),
+            sessionID: sessionID
+        )
+        _ = try await repository.append(
+            SessionEventDraft(
+                type: SessionEventVocabulary.assistantMessage,
+                data: .string("hi"),
+                sourceEventSeqs: [2]
+            ),
+            sessionID: sessionID
+        )
+        let events = try await repository.allEvents(sessionID: sessionID)
+        let page = try localSessionPagePayload(
+            sessionID: sessionID,
+            events: events,
+            throughSequence: 3,
+            maxMessages: 1
+        )
+        guard case let .array(records)? = page.objectValue?["records"] else {
+            return XCTFail("page must include records")
+        }
+        XCTAssertEqual(records.map { $0.objectValue?["event"]?.objectValue?["seq"]?.numberValueForTests }, [2, 3])
+        XCTAssertEqual(page.objectValue?["hasMore"], JSONValue.bool(true))
+
+        let older = try localSessionPagePayload(
+            sessionID: sessionID,
+            events: events,
+            throughSequence: 3,
+            beforeSequence: 2,
+            maxMessages: 1
+        )
+        if case let .array(olderRecords)? = older.objectValue?["records"] {
+            XCTAssertEqual(olderRecords.count, 1)
+        } else {
+            XCTFail("older page must include records")
+        }
+        XCTAssertThrowsError(try localSessionPagePayload(
+            sessionID: sessionID,
+            events: events,
+            throughSequence: 99
+        ))
+    }
+
     func testLiveHTTPClientPostsWebhookAfterSecretIsConfigured() async throws {
         let server = LocalStateServer(endpoints: [])
         XCTAssertNotNil(server)

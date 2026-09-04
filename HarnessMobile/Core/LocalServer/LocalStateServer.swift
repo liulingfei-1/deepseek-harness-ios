@@ -21,7 +21,7 @@ struct LocalStateAPISchema: Codable, Sendable, Equatable {
                 name: "session",
                 methods: [
                     "list", "status", "create", "select", "switch", "rename",
-                    "delete", "archive", "restore", "fork", "prompt", "cancel", "follow"
+                    "delete", "archive", "restore", "fork", "prompt", "cancel", "follow", "page"
                 ]
             ),
             LocalStateAPIController(
@@ -577,6 +577,61 @@ enum LocalStateRPCError: LocalizedError, Sendable, Equatable {
         case let .invalidPayload(field): return "RPC payload field is invalid: \(field)"
         }
     }
+}
+
+/// Produces the desktop-compatible backwards, message-aligned history page.
+/// Assistant chunk packing remains raw event records until a lossless mobile
+/// ChunkRow projection exists.
+func localSessionPagePayload(
+    sessionID: UUID,
+    events: [SessionEvent],
+    throughSequence: Int,
+    beforeSequence: Int? = nil,
+    maxMessages: Int? = nil
+) throws -> JSONValue {
+    guard throughSequence >= -1 else { throw LocalStateRPCError.invalidPayload("throughSeq") }
+    if let beforeSequence, beforeSequence < 0 { throw LocalStateRPCError.invalidPayload("beforeSeq") }
+    let messageLimit = maxMessages ?? 50
+    guard messageLimit > 0 else { throw LocalStateRPCError.invalidPayload("maxMessages") }
+    let through: UInt64
+    if throughSequence == -1 {
+        through = UInt64.max
+    } else {
+        through = UInt64(throughSequence)
+        guard let index = Int(exactly: through), index < events.count, events[index].seq == through else {
+            throw LocalStateRPCError.invalidPayload("throughSeq")
+        }
+    }
+    let end = throughSequence == -1 ? 0 : min(Int(through) + 1, beforeSequence ?? Int(through) + 1)
+    var cut = 0
+    var messageCount = 0
+    if end > 0 {
+        for index in stride(from: end - 1, through: 0, by: -1) {
+            let event = events[index]
+            guard (event.type == SessionEventVocabulary.userMessage || event.type == SessionEventVocabulary.assistantMessage),
+                  event.surfaceOp == nil || event.surfaceOp == .append else { continue }
+            messageCount += 1
+            var groupStart = event.seq
+            for source in event.sourceEventSeqs ?? [] where source < groupStart { groupStart = source }
+            if messageCount >= messageLimit { cut = Int(min(groupStart, UInt64(end))); break }
+        }
+    }
+    let records = try events[cut..<end].map { event -> JSONValue in
+        var wire: [String: JSONValue] = [
+            "type": .string(event.type), "seq": .number(Double(event.seq)),
+            "time": .number(Double(event.time)), "data": event.data
+        ]
+        if event.ignorable == true { wire["ignorable"] = .bool(true) }
+        if let sources = event.sourceEventSeqs { wire["sourceEventSeqs"] = .array(sources.map { .number(Double($0)) }) }
+        if let operation = event.surfaceOp {
+            wire["surfaceOp"] = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(operation))
+        }
+        return .object(["type": .string("event"), "event": .object(wire)])
+    }
+    return .object([
+        "sessionId": .string(sessionID.uuidString.lowercased()), "records": .array(records),
+        "hasMore": .bool(cut > 0), "throughSeq": .number(throughSequence == -1 ? -1 : Double(through))
+    ])
 }
 
 /// Client seam used by native integrations and tests to exercise the actual

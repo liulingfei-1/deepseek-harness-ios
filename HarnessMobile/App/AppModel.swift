@@ -999,6 +999,50 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                 "events": try encodedValue(events),
                 "hasMore": .bool(false)
             ])
+        case "session/page":
+            let id = try sessionID()
+            guard case let .number(rawThrough)? = fields["throughSeq"],
+                  rawThrough.isFinite,
+                  rawThrough.rounded(.down) == rawThrough,
+                  rawThrough >= -1,
+                  rawThrough <= Double(Int.max) else {
+                throw LocalStateRPCError.invalidPayload("throughSeq")
+            }
+            let through = Int(rawThrough)
+            let before: Int?
+            if let rawBefore = fields["beforeSeq"] {
+                guard case let .number(value) = rawBefore,
+                      value.isFinite,
+                      value.rounded(.down) == value,
+                      value >= 0,
+                      value <= Double(Int.max) else {
+                    throw LocalStateRPCError.invalidPayload("beforeSeq")
+                }
+                before = Int(value)
+            } else {
+                before = nil
+            }
+            let maxMessages: Int?
+            if let rawMax = fields["maxMessages"] {
+                guard case let .number(value) = rawMax,
+                      value.isFinite,
+                      value.rounded(.down) == value,
+                      value > 0,
+                      value <= Double(Int.max) else {
+                    throw LocalStateRPCError.invalidPayload("maxMessages")
+                }
+                maxMessages = Int(value)
+            } else {
+                maxMessages = nil
+            }
+            let events = try await trajectoryRepository.allEvents(sessionID: id)
+            return try localSessionPagePayload(
+                sessionID: id,
+                events: events,
+                throughSequence: through,
+                beforeSequence: before,
+                maxMessages: maxMessages
+            )
         case "settings/schema":
             return .object([
                 "name": .string("settings"),
