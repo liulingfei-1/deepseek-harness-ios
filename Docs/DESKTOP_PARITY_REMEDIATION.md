@@ -246,7 +246,7 @@
 - **专项验证**：`./Scripts/verify-upstreams.sh` → **Upstream lock verification passed**；`UpstreamCompatibilityFixtureTests`、`CompactionCrossVersionFixtureTests`、`RC2CompatibilityFixtureTests`、`WorkspaceInstructionTransitionTests` → **14 tests passed**；`./Scripts/check-upstream-parity.sh` 输出最新 package inventory。
 - **剩余边界**：上游大量新增/重构包仍需逐包映射到移动端；锁定最新 commit 不等于所有包已实现，未接入项继续按 `VERIFY`、`IOS-REPLACEMENT` 或 `OUT-OF-SCOPE` 标记。
 
-- **最新固定门复跑**：上游 fixture 重锚后 `swift test --build-path /tmp/hm-upstream-latest-full` → **939 tests, 5 skipped, 0 failures**；Xcode arm64 Simulator build、`LocalStateServerTests`（16）、`npm run check`、Node smoke、`verify-upstreams.sh`、`check-upstream-parity.sh`、`audit-no-remote-execution.sh` 与 `git diff --check` 均通过。
+- **最新固定门复跑**：上游 fixture 重锚后 `swift test --build-path /tmp/hm-upstream-latest-full` → **940 tests, 5 skipped, 0 failures**；Xcode arm64 Simulator build、`LocalStateServerTests`（17）、`npm run check`、Node smoke、`verify-upstreams.sh`、`check-upstream-parity.sh`、`audit-no-remote-execution.sh` 与 `git diff --check` 均通过。
 
 ### PARITY-010 · 异步 Session controller RPC（2026-09-04）
 
