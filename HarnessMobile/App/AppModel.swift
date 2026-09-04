@@ -752,7 +752,8 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                     "version": .number(1),
                     "methods": .array([
                         .string("describe"), .string("provider/list"), .string("provider/active"),
-                        .string("provider/activate"), .string("provider/remove")
+                        .string("provider/activate"), .string("provider/remove"),
+                        .string("mutate"), .string("update"), .string("replace")
                     ])
                 ])
             case "workspace/schema":
@@ -816,6 +817,13 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
             } catch {
                 throw LocalStateRPCError.invalidProjection
             }
+        }
+        func requiredRevision() throws -> Int {
+            guard case let .number(value) = fields["expectedRevision"],
+                  value.isFinite, value >= 0, value <= Double(Int.max) else {
+                throw LocalStateRPCError.invalidPayload("expectedRevision")
+            }
+            return Int(value.rounded(.down))
         }
         func currentProjection() async throws -> JSONValue {
             let summaries = try await sessionStore.listSessions()
@@ -966,10 +974,14 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                 ])
             ])
         case "settings/describe", "settings/provider/list":
-            return .object([
+            var result: [String: JSONValue] = [
                 "activeProfileId": providerDirectory.activeProfileID.map { .string($0) } ?? .null,
                 "profiles": .array(providerDirectory.profiles.map(providerProjection))
-            ])
+            ]
+            if let snapshot = ishPluginSettingsSnapshot {
+                result["namespaces"] = try encodedValue(snapshot)
+            }
+            return .object(result)
         case "settings/provider/active":
             guard let profile = providerDirectory.activeProfile else { return .null }
             return providerProjection(profile)
@@ -986,6 +998,50 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                 "activeProfileId": providerDirectory.activeProfileID.map { .string($0) } ?? .null,
                 "profiles": .array(providerDirectory.profiles.map(providerProjection))
             ])
+        case "settings/mutate":
+            let namespace = try requiredString("namespace")
+            let revision = try requiredRevision()
+            guard case let .array(rawOps) = fields["operations"] else {
+                throw LocalStateRPCError.invalidPayload("operations")
+            }
+            let data = try JSONEncoder().encode(rawOps)
+            let operations = try JSONDecoder().decode(
+                [ISHPluginSettingsPathOperation].self,
+                from: data
+            )
+            return try await encodedValue(
+                mutateISHPluginSettings(
+                    namespace: namespace,
+                    operations: operations,
+                    expectedRevision: revision
+                )
+            )
+        case "settings/update":
+            let namespace = try requiredString("namespace")
+            let revision = try requiredRevision()
+            guard let patch = fields["patch"]?.objectValue else {
+                throw LocalStateRPCError.invalidPayload("patch")
+            }
+            return try await encodedValue(
+                updateISHPluginSettings(
+                    namespace: namespace,
+                    patch: patch,
+                    expectedRevision: revision
+                )
+            )
+        case "settings/replace":
+            let namespace = try requiredString("namespace")
+            let revision = try requiredRevision()
+            guard let section = fields["section"]?.objectValue else {
+                throw LocalStateRPCError.invalidPayload("section")
+            }
+            return try await encodedValue(
+                replaceISHPluginSettings(
+                    namespace: namespace,
+                    section: section,
+                    expectedRevision: revision
+                )
+            )
         case "workspace/schema":
             return .object([
                 "name": .string("workspace"),

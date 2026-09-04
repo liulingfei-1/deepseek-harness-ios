@@ -129,7 +129,7 @@ final class LocalStateServerTests: XCTestCase {
                 return .object([
                     "methods": .array([
                         .string("mount/setAccess"), .string("mount/remove"),
-                        .string("session/follow")
+                        .string("session/follow"), .string("settings/mutate")
                     ])
                 ])
             }
@@ -141,7 +141,8 @@ final class LocalStateServerTests: XCTestCase {
         XCTAssertEqual(
             resultValue["methods"],
             JSONValue.array([
-                .string("mount/setAccess"), .string("mount/remove"), .string("session/follow")
+                .string("mount/setAccess"), .string("mount/remove"),
+                .string("session/follow"), .string("settings/mutate")
             ])
         )
     }

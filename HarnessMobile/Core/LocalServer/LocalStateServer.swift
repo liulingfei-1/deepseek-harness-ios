@@ -28,7 +28,7 @@ struct LocalStateAPISchema: Codable, Sendable, Equatable {
                 name: "settings",
                 methods: [
                     "schema", "describe", "provider/list", "provider/active",
-                    "provider/activate", "provider/remove"
+                    "provider/activate", "provider/remove", "mutate", "update", "replace"
                 ]
             ),
             LocalStateAPIController(

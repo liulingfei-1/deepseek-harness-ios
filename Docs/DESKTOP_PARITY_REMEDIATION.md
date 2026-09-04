@@ -258,7 +258,7 @@
 ### PARITY-010 · Controller mutation 与 follow 增量窗口（2026-09-04）
 
 - **上游核对**：上游 `session-controller` 的 `follow` 先发带 cursor 的 snapshot，再发连续事件；`workspace-controller` 与 `settings-controller` 均提供写入 Remote。源码核对路径为 `packages/api/session-controller/src/history.ts`、`packages/api/workspace-controller/src/index.ts`、`packages/api/settings-controller/src/index.ts`。
-- **移动端变更**：`LocalStateAPISchema` 与 AppModel schema 同步声明 `session/follow`、`settings/provider/remove`、`workspace/mount/setAccess`、`workspace/mount/remove`；follow RPC 从 canonical `SessionPersistence` 返回 streamID、next cursor 和未交接事件窗口，mutation 复用既有 ProviderProfile/WorkspaceStore 事务。
+- **移动端变更**：`LocalStateAPISchema` 与 AppModel schema 同步声明 `session/follow`、`settings/provider/remove`、Host-backed `settings/mutate|update|replace`、`workspace/mount/setAccess`、`workspace/mount/remove`；follow RPC 从 canonical `SessionPersistence` 返回 streamID、next cursor 和未交接事件窗口，mutation 复用既有 ProviderProfile/WorkspaceStore/ISHPluginHost 事务。
 - **专项验证**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-controller-mutations --filter LocalStateServerTests` → **19 tests passed**；新增 schema mutation/follow 回归。
 - **剩余边界**：当前 follow 是同一 RPC envelope 的增量窗口，不是上游 WebSocket/SSE 长流；真实 carrier、断线重连、前后台启停和 iPhone 16 Pro 证据仍为 `VERIFY`。
 

@@ -61,7 +61,7 @@ git diff --check
 - [x] 增加异步 RPC handler 与 `LocalStateHTTPClient.callRPC`；复用 AppModel 的 SessionStore/UI 生产路径，接入 session create/select/rename/delete/archive/restore/fork/prompt/cancel。
 - [x] 新增真实 loopback async RPC 回归；`LocalStateServerTests` 现为 19 项。
 - [x] `/api` 的 settings/workspace schema 与只读投影已接入：provider/list、provider/active、workspace/list/files/mounts；不把凭据值放入投影。
-- [x] 增加可验证的 controller mutation：`settings/provider/remove`、`workspace/mount/setAccess`、`workspace/mount/remove`；`session/follow` 返回带 streamID、cursor 与事件窗口的增量快照，复用 canonical trajectory。
+- [x] 增加可验证的 controller mutation：`settings/provider/remove`、通用 Host-backed `settings/mutate|update|replace`、`workspace/mount/setAccess`、`workspace/mount/remove`；`session/follow` 返回带 streamID、cursor 与事件窗口的增量快照，复用 canonical trajectory。
 
 ### PARITY-003 本批次逐步修改清单
 

@@ -62,7 +62,7 @@
 ### P4：LocalStateServer 与前端（PARITY-010/014）
 
 - [x] 增加 `/api` Connection RPC envelope（`client-request`/`server-response`、rpcId correlation、统一错误形状），接入 session mutation 与 settings/workspace 只读投影。
-- [x] settings/workspace 的现有本机 mutation（provider remove、mount access/remove）与 `session/follow` 增量窗口 RPC。
+- [x] settings/workspace 的现有本机 mutation（provider remove、Host-backed settings mutate/update/replace、mount access/remove）与 `session/follow` 增量窗口 RPC。
 - [ ] 真正的 session follow carrier、SSE/WebSocket、端口冲突、前后台启停。
 - [ ] 将上游 `frontend-static/client-half` 接入现有 WKWebView；UI 状态仍由本地 projection 提供。
 - [ ] Windows PowerShell/win32/ACL 保持 `OUT-OF-SCOPE`，不得伪造 iOS 实现。
