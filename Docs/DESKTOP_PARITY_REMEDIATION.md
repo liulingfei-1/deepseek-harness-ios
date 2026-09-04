@@ -821,8 +821,8 @@ git diff --check
 - 状态：VERIFY
 - 上游证据：`packages/api/session-controller/src/list.ts` `search`；查询规范化（非空、NUL/500 UTF-16 限制）、只返回可见 Session、按 Session 去重，结果上限 20、snippet 上限 240 code points。
 - 移动端变更：`AppModel.handleLocalStateRPC` 新增 `session/search`，先重建本地 FTS read model，再取 21 条候选并过滤当前 SessionStore；`localSessionSearchPayload` 负责去重、截断和 `hasMore`，schema 宣传 `search`。
-- 测试命令与真实结果：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter LocalStateServerTests.testSessionSearchPayloadDeduplicatesAndBoundsSnippets`：1/1 通过；完整 SwiftPM 基线此前 951/5/0。
-- Simulator：需在本批次收尾门复跑；无真机搜索交互证据前保持 VERIFY。
+- 测试命令与真实结果：专项 `LocalStateServerTests.testSessionSearchPayloadDeduplicatesAndBoundsSnippets`：1/1 通过；本批次完整 SwiftPM：953 tests、5 skipped、0 failures。
+- Simulator：本批次 arm64 Simulator `BUILD SUCCEEDED`；无真机搜索交互证据前保持 VERIFY。
 - 剩余平台限制或后续动作：本地 FTS 与上游分页 provider 的 stale-cursor/取消重试语义仍未完全同构，需真实 Desktop client 与长查询负载验证。
 
 ### PAR-112 · Session model catalog RPC（2026-09-04）
@@ -830,8 +830,8 @@ git diff --check
 - 状态：VERIFY
 - 上游证据：`packages/api/session-controller/src/index.ts` `modelCatalog` 与 `types.ts` `ModelCatalog`；返回默认路由、可路由 provider、分组模型、reasoning metadata 和失败项。
 - 移动端变更：`session/modelCatalog` 接入 `AppModel`，复用当前 `ProviderProfileDirectory`；`localSessionModelCatalogPayload` 输出 provider groups、模型名称/描述、reasoning efforts/default 与默认路由，schema 宣传 `modelCatalog`。
-- 测试命令与真实结果：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter LocalStateServerTests.testSessionModelCatalogPayloadExposesRoutableProfiles`：1/1 通过。
-- Simulator：本批次尚未单独重跑 Xcode；需收尾门复跑。
+- 测试命令与真实结果：专项 `LocalStateServerTests.testSessionModelCatalogPayloadExposesRoutableProfiles`：1/1 通过；本批次完整 SwiftPM：953 tests、5 skipped、0 failures。
+- Simulator：本批次 arm64 Simulator `BUILD SUCCEEDED`。
 - iPhone 16 Pro：未取得真实 provider reload/catalog 互操作证据，保持 VERIFY。
 - 剩余平台限制或后续动作：当前 catalog 只投影已保存 profiles，不主动执行上游 provider listModels/reload，也未承载失败诊断与 OAuth 生命周期。
 
