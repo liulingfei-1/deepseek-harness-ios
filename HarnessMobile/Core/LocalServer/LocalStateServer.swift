@@ -21,8 +21,12 @@ struct LocalStateAPISchema: Codable, Sendable, Equatable {
                 name: "session",
                 methods: [
                     "list", "status", "create", "select", "switch", "rename",
-                    "delete", "archive", "restore", "fork", "prompt", "cancel", "follow", "page", "search", "modelCatalog", "updateQueue", "attachment", "control"
+                    "delete", "archive", "restore", "fork", "prompt", "cancel", "follow", "page", "search", "modelCatalog", "selectModel", "updateQueue", "attachment", "control"
                 ]
+            ),
+            LocalStateAPIController(
+                name: "skills",
+                methods: ["list"]
             ),
             LocalStateAPIController(
                 name: "settings",

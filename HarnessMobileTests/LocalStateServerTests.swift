@@ -62,7 +62,9 @@ final class LocalStateServerTests: XCTestCase {
                 && $0.methods.contains("list")
                 && $0.methods.contains("create")
                 && $0.methods.contains("prompt")
+                && $0.methods.contains("selectModel")
         })
+        XCTAssertTrue(decoded.controllers.contains { $0.name == "skills" && $0.methods == ["list"] })
 
         let alias = LocalStateServer.route(
             request: "GET /api/session HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",

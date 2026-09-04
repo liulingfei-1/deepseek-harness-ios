@@ -28,6 +28,7 @@
 | Local web UI | 桌面 web server/client-half 独立存在 | loopback API/WKWebView 可用，桌面 frontend bundle 尚未接入；`LocalStateHTTPClient` 已暴露 connecting/connected/disconnected 与 monotone generation | `VERIFY` |
 | Session attachment | `session.attachment(sessionId, attachmentId)` 先做 Session 轨迹引用授权，再返回 `ImageAttachmentRef + base64`；未引用返回 `session/attachment-invalid` | 已接入本地 `session/attachment` RPC，复用 canonical trajectory 与 `WorkspaceStore.readAttachment`，返回媒体类型、字节数、像素尺寸和 base64；专项回归通过 | `VERIFY` |
 | Session control stream | 上游 `SessionControlController.control()` 首帧 baseline，随后推送 queue/jobs/projection replacement，支持 AbortSignal 结束 | 已接入 loopback `session/control` SSE/chunked stream；baseline 覆盖 queue/jobs/projection，jobs 来自本地 `HarnessJobRegistry`，queue/jobs/基础运行状态 replacement 由 `SessionRunRegistry` + 250ms 轮询产生；原生事件订阅和 generation 语义仍缺 | `VERIFY` |
+| Session model/skill controls | 上游 `session/selectModel` 与独立 `skills/list` Remote | 本地复用会话模型配置与 `MobileSkillRegistry`，新增对应 RPC/schema 与 Session 存在性校验 | `VERIFY` |
 | Windows host | PowerShell/win32/ACL 依赖 Windows 内核 | iOS 无等价内核能力 | `OUT-OF-SCOPE` |
 
 ## 3. 逐项执行顺序
@@ -70,6 +71,7 @@
 - [ ] 原生事件订阅（当前为 250ms persistence polling bridge）、客户端 generation/online-offline 状态、AbortSignal generation、WebSocket、端口冲突、前后台启停和 iPhone 16 Pro 证据。
 - [x] 新增 `session/page` RPC：按 `throughSeq`/`beforeSeq`/`maxMessages` 做 message-aligned backwards pagination，复用 canonical trajectory 并输出 raw event records；专项 JSONL 回归通过。
 - [x] 新增 `session/search` 与 `session/modelCatalog` RPC：复用本地 FTS/Profile 真源，输出有界去重 snippets、默认 provider/model、reasoning metadata；953 项 SwiftPM 与 arm64 Simulator 构建通过。
+- [x] 对照上游 `session-controller` 的 Remote 表面补齐 `session/selectModel` 与独立 `skills/list`；模型选择复用既有 Profile/Reasoning 校验和持久化，技能目录只返回 user-invocable 元数据。
 - [ ] 将上游 `frontend-static/client-half` 接入现有 WKWebView；UI 状态仍由本地 projection 提供。
 - [x] 增加 `session/attachment`：按 Session 轨迹中的 `imageAttachments` 做引用授权，读取本地 durable image 并返回 desktop 兼容元数据/base64；未引用或读取失败拒绝，专项回归通过。
 - [ ] 用上游 `session-models.host.spec.ts` 的完整 attachment fixture 做逐字段 wire 对照；真实设备图片渲染证据取得前保持 `VERIFY`。

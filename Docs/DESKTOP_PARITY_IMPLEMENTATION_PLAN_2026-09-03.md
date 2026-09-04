@@ -245,3 +245,9 @@ git diff --check
 1. 对照 `workspace-controller` 的 `types.ts`、`commands.ts`、`feed.ts`，实现本地持久化 Workspace identity、标题、目录、Session 顺序和归档集合。
 2. 将 `workspace/create|rename|delete|insertBefore|insertSessionBefore|archiveSession` 注册到 `/api`，create 对同一路径幂等解析，delete 保留目录与 Session。
 3. `WorkspaceRegistryTests` 2/2 通过；follow 已有 SSE/chunked carrier，但上游 baseline/增量/取消语义、原生事件订阅和断线重连仍未完整承载，当前保持 `VERIFY`。
+
+### 2026-09-04 增量：Session model selection + skill catalog
+
+1. 对照 `session-controller/src/index.ts` 与 `skill-catalog.ts`，确认模型选择是 `session/selectModel`，技能目录是独立 `skills/list` Remote。
+2. 复用 `ProviderProfile.configuration(model:reasoningMode:)`、`setSessionModelConfiguration` 和 `MobileSkillRegistry`，接入 `/api` RPC 与机器可读 schema；技能只返回 user-invocable 元数据。
+3. `LocalStateServerTests.testAPISchemaAndSessionAliasExposeControllerSurface` 通过；真实 preset-scoped skill registry、Desktop client 和真机仍为 `VERIFY`。

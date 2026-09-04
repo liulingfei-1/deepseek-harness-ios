@@ -986,6 +986,79 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                 activeProfileID: providerDirectory.activeProfileID,
                 failures: refreshedFailures
             )
+        case "session/selectModel":
+            let requestedID = try sessionID()
+            guard try await sessionStore.listSessions().contains(where: { $0.id == requestedID }) else {
+                throw LocalStateRPCError.sessionNotFound(requestedID)
+            }
+            if requestedID != activeSessionID {
+                await switchConversation(to: requestedID)
+            }
+            let model = try requiredString("model")
+            let selectedReasoning: ReasoningMode?
+            if let rawReasoning = fields["reasoningEffort"]?.stringValue {
+                guard let parsed = ReasoningMode(rawValue: rawReasoning) else {
+                    throw LocalStateRPCError.invalidPayload("reasoningEffort")
+                }
+                selectedReasoning = parsed
+            } else if fields["reasoningEffort"] != nil {
+                throw LocalStateRPCError.invalidPayload("reasoningEffort")
+            } else {
+                selectedReasoning = nil
+            }
+            let selectedProfile: ProviderProfile?
+            if let provider = fields["provider"]?.stringValue,
+               !provider.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                guard let profile = providerProfile(named: provider) else {
+                    throw AppCommandError.unknownProvider(provider)
+                }
+                selectedProfile = profile
+            } else if fields["provider"] != nil {
+                throw LocalStateRPCError.invalidPayload("provider")
+            } else {
+                selectedProfile = providerDirectory.profile(matching: effectiveConfiguration)
+            }
+            var draft = effectiveConfiguration
+            if let selectedProfile {
+                draft = selectedProfile.configuration(
+                    model: model,
+                    reasoningMode: selectedReasoning
+                )
+            } else {
+                draft.model = model
+                if let selectedReasoning {
+                    draft.reasoningMode = selectedReasoning
+                }
+            }
+            try await setSessionModelConfiguration(draft)
+            try await recordModelSelection(draft, reasoning: selectedReasoning)
+            return .object([
+                "selected": .object([
+                    "provider": .string(draft.providerID.rawValue),
+                    "model": .string(draft.model),
+                    "reasoningEffort": draft.reasoningMode == .providerDefault
+                        ? .null : .string(draft.reasoningMode.rawValue)
+                ])
+            ])
+        case "skills/list":
+            let requestedID = try sessionID()
+            guard try await sessionStore.listSessions().contains(where: { $0.id == requestedID }) else {
+                throw LocalStateRPCError.sessionNotFound(requestedID)
+            }
+            let skills = (try await skillRegistry.catalog()).filter { $0.invocation.userInvocable }
+            return .object([
+                "skills": .array(skills.map { skill in
+                    var value: [String: JSONValue] = [
+                        "name": .string(skill.name),
+                        "description": .string(skill.description),
+                        "modelInvocable": .bool(skill.invocation.modelInvocable)
+                    ]
+                    if let whenToUse = skill.whenToUse {
+                        value["whenToUse"] = .string(whenToUse)
+                    }
+                    return .object(value)
+                })
+            ])
         case "session/attachment":
             let id = try sessionID()
             guard let rawAttachmentID = fields["attachmentId"]?.stringValue,

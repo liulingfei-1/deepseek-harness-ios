@@ -877,6 +877,14 @@ git diff --check
 - 自动化证据：现有 `AppModelModelDiscoveryTests` 覆盖强制刷新、临时凭据隔离和 capability 合并；本批次通过编译和既有专项测试。
 - 剩余动作：补真实 provider endpoint / OAuth-backed refresh 与 Desktop client 互操作证据；未取得前保持 `VERIFY`。
 
+### PAR-118 · Session model selection + skill catalog RPC（2026-09-04）
+
+- 状态：`VERIFY`
+- 上游证据：`packages/api/session-controller/src/index.ts` 的 `selectModel` Remote，以及 `src/skill-catalog.ts` 的独立 `skills.list` Remote；技能响应只包含 user-invocable 元数据，不加载正文。
+- 移动端变更：`LocalStateAPISchema` 新增 `session/selectModel` 与 `skills/list`；`AppModel.handleLocalStateRPC` 复用 `ProviderProfile`/`setSessionModelConfiguration`/`recordModelSelection` 完成会话模型选择并持久化，复用 `MobileSkillRegistry` 返回 user-invocable 技能元数据，并校验 Session 存在。
+- 自动化证据：`LocalStateServerTests.testAPISchemaAndSessionAliasExposeControllerSurface` 通过；完整 SwiftPM/Xcode/Plugin Host/Node smoke/审计门需在本批次提交前复跑。
+- 剩余动作：上游 preset-scoped skill registry、真实 Desktop client 互操作和真机证据仍待补齐，保持 `VERIFY`。
+
 ### PAR-107 · Exa/Perplexity transport failure fixtures（2026-09-04）
 
 - 为 `ExaSearchProvider` 与 `PerplexitySearchProvider` 增加可选 `URLProtocol` 注入，仅用于测试复现真实 transport；生产默认路径不变。
