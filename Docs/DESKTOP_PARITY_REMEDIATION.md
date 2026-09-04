@@ -215,6 +215,8 @@
 
 2026-09-04 追加：Profile 保存在 API Key 留空时现在会检查同源 OAuth record；删除 Profile 同时删除 API-key 与 OAuth record，避免 OAuth 凭据被误判为缺失或残留。新增 `AppModelProviderProfileTests.testOAuthCredentialCanBackProfileSaveAndIsDeletedWithProfile` 覆盖该生产路径。provider-specific authorization UI、401 自动重试、真实授权服务和设备证据仍为 `VERIFY`。
 
+2026-09-04 追加：`SetupView` 增加手动 OAuth grant 入口（access token、可选 refresh token、ISO 8601 过期时间）；`AppModel.saveProviderProfile(...oauthCredential:)` 在创建或编辑时写入 OAuth record，空 API Key 不再阻断新 Profile 的 OAuth 配置。真实 provider-specific 浏览器/device-code 授权与 401 自动刷新仍为 `VERIFY`。
+
 ### PARITY-006 · 子 Agent reasoning effort 参数（2026-09-03）
 
 - **状态**：VERIFY

@@ -40,6 +40,7 @@
 - [x] access token 只在请求读取 seam 短暂返回；refresh metadata 不进入配置、轨迹、诊断或 UI 文本。
 - [x] provider request credential lookup 可读取 OAuth access token；profile generation reload 复用既有路径。
 - [x] 编辑 Profile 时允许已有 OAuth grant 作为凭据；删除 Profile 同时清理 API-key 与 OAuth record。
+- [x] 设置页可手动录入 OAuth access/refresh token 与 ISO 8601 过期时间，并随 Profile 保存事务写入。
 - [x] 添加纯 Swift 回归测试：编码 round-trip、过期判断、并发 refresh、旧 API-key 兼容。
 - [ ] provider-specific OAuth authorization UI、401 自动重试和真实授权 flow。
 - [ ] 真实 OAuth/API/iSH/真机证据取得前保持 `VERIFY`。

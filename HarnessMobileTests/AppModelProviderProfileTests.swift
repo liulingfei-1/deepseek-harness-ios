@@ -162,6 +162,23 @@ final class AppModelProviderProfileTests: XCTestCase {
             expectedOrigin: origin
         )
         XCTAssertNil(removedCredential)
+
+        let newProfile = ProviderProfile.catalogDefault(for: .openAI)
+        let newOrigin = try newProfile.configuration().credentialOrigin()
+        try await model.saveProviderProfile(
+            newProfile,
+            apiKey: "",
+            makeActive: true,
+            oauthCredential: ProviderOAuthCredential(accessToken: "new-oauth")
+        )
+        let newResolvedCredential = try await model.apiKey(for: newProfile.configuration())
+        XCTAssertEqual(newResolvedCredential, "new-oauth")
+        try await model.removeProviderProfile(id: newProfile.id)
+        let newRemovedCredential = try await fixture.credentialStore.readOAuthCredential(
+            for: newProfile.credentialReference,
+            expectedOrigin: newOrigin
+        )
+        XCTAssertNil(newRemovedCredential)
     }
 
     func testRemovingCompactionProviderAtomicallyReturnsSummaryRouteToInherited() async throws {

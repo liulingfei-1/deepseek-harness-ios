@@ -1040,7 +1040,24 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         makeActive: Bool,
         existingProfileID: String? = nil
     ) async throws {
+        try await saveProviderProfile(
+            profile,
+            apiKey: apiKey,
+            makeActive: makeActive,
+            existingProfileID: existingProfileID,
+            oauthCredential: nil
+        )
+    }
+
+    func saveProviderProfile(
+        _ profile: ProviderProfile,
+        apiKey: String,
+        makeActive: Bool,
+        existingProfileID: String? = nil,
+        oauthCredential: ProviderOAuthCredential?
+    ) async throws {
         let validated = try profile.validated()
+        let validatedOAuthCredential = try oauthCredential?.validated()
         if makeActive {
             _ = try validated.configuration().validated()
         }
@@ -1076,7 +1093,10 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
             oldKey = nil
         }
 
-        if oldOrigin != nil, oldOrigin != newOrigin, normalizedKey.isEmpty {
+        if oldOrigin != nil,
+           oldOrigin != newOrigin,
+           normalizedKey.isEmpty,
+           validatedOAuthCredential == nil {
             throw CredentialStoreError.keyRequiredForOriginChange
         }
         if normalizedKey.isEmpty {
@@ -1088,7 +1108,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                 for: validated.credentialReference,
                 expectedOrigin: newOrigin
             ) != nil
-            guard hasAPIKey || hasOAuthCredential else {
+            guard hasAPIKey || hasOAuthCredential || validatedOAuthCredential != nil else {
                 throw CredentialStoreError.emptyCredential
             }
         }
@@ -1097,6 +1117,14 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         if wroteCredential {
             try await credentialStore.saveAPIKey(
                 normalizedKey,
+                for: validated.credentialReference,
+                origin: newOrigin
+            )
+        }
+        let wroteOAuthCredential = validatedOAuthCredential != nil
+        if let validatedOAuthCredential {
+            try await credentialStore.saveOAuthCredential(
+                validatedOAuthCredential,
                 for: validated.credentialReference,
                 origin: newOrigin
             )
@@ -1143,6 +1171,23 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                     )
                 } else {
                     try? await credentialStore.deleteAPIKey(for: validated.credentialReference)
+                }
+            }
+            if wroteOAuthCredential {
+                if let existing, let oldOrigin,
+                   let oldOAuth = try? await credentialStore.readOAuthCredential(
+                    for: existing.credentialReference,
+                    expectedOrigin: oldOrigin
+                   ) {
+                    try? await credentialStore.saveOAuthCredential(
+                        oldOAuth,
+                        for: existing.credentialReference,
+                        origin: oldOrigin
+                    )
+                } else {
+                    try? await credentialStore.deleteOAuthCredential(
+                        for: validated.credentialReference
+                    )
                 }
             }
             throw error

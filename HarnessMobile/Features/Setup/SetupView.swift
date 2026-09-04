@@ -19,6 +19,9 @@ struct SetupView: View {
     @State private var displayName = ""
     @State private var isCustomProfile = false
     @State private var apiKey = ""
+    @State private var oauthAccessToken = ""
+    @State private var oauthRefreshToken = ""
+    @State private var oauthExpiresAt = ""
     @State private var catalog = SetupModelCatalog.builtIn(for: AgentConfiguration())
     @State private var isDiscoveringModels = false
     @State private var isSaving = false
@@ -343,13 +346,29 @@ struct SetupView: View {
             .autocorrectionDisabled()
             .focused($focusedField, equals: .apiKey)
             .disabled(isDiscoveringModels)
+
+            DisclosureGroup("OAuth grant（高级）") {
+                SecureField("Access token", text: $oauthAccessToken)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                SecureField("Refresh token（可选）", text: $oauthRefreshToken)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                TextField("过期时间 ISO 8601（可选）", text: $oauthExpiresAt)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Text("填写 access token 后保存即可作为本 Profile 的凭据；不填写则保留已有 grant。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .disabled(isDiscoveringModels)
         } header: {
             Text("连接")
         } footer: {
             Text(
                 mode == .onboarding
-                    ? "API Key 只存本机 Keychain；模型请求发往所选服务商，Agent Loop 和工具仍在 iPhone 本机执行。"
-                    : "API Key 只写入该 Provider ID 的本机 Keychain 项，并绑定当前 HTTPS 域名和端口。模型推理走所选服务商，Agent Loop 和工具仍在这台 iPhone 内执行。"
+                    ? "API Key 或 OAuth grant 只存本机 Keychain；模型请求发往所选服务商，Agent Loop 和工具仍在 iPhone 本机执行。"
+                    : "API Key 或 OAuth grant 只写入该 Provider ID 的本机 Keychain 项，并绑定当前 HTTPS 域名和端口。模型推理走所选服务商，Agent Loop 和工具仍在这台 iPhone 内执行。"
             )
         }
     }
@@ -507,7 +526,7 @@ struct SetupView: View {
     private var securitySection: some View {
         Section {
             Label(
-                "Key 仅保存在本机 Keychain，不进入会话、日志或工具环境。",
+                "API Key 与 OAuth grant 仅保存在本机 Keychain，不进入会话、日志或工具环境。",
                 systemImage: "lock.shield"
             )
             Label(
@@ -544,6 +563,9 @@ struct SetupView: View {
         draft.profileID = nil
         draft.credentialReference = nil
         apiKey = ""
+        oauthAccessToken = ""
+        oauthRefreshToken = ""
+        oauthExpiresAt = ""
         catalog = .stored(for: profile)
         modelDiscoveryError = nil
         inlineError = nil
@@ -597,6 +619,33 @@ struct SetupView: View {
         return normalized.isEmpty ? nil : normalized
     }
 
+    private func makeOAuthCredential() throws -> ProviderOAuthCredential? {
+        let access = oauthAccessToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        let refresh = oauthRefreshToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        let expiry = oauthExpiresAt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !access.isEmpty else {
+            guard refresh.isEmpty, expiry.isEmpty else {
+                throw SetupOAuthError.accessTokenRequired
+            }
+            return nil
+        }
+        let expiresAt: Date?
+        if expiry.isEmpty {
+            expiresAt = nil
+        } else {
+            let formatter = ISO8601DateFormatter()
+            guard let parsed = formatter.date(from: expiry) else {
+                throw SetupOAuthError.invalidExpiry
+            }
+            expiresAt = parsed
+        }
+        return ProviderOAuthCredential(
+            accessToken: access,
+            refreshToken: refresh.isEmpty ? nil : refresh,
+            expiresAt: expiresAt
+        )
+    }
+
     private func save() {
         guard !isSaving else { return }
         isSaving = true
@@ -626,15 +675,20 @@ struct SetupView: View {
                     maxOutputTokens: draft.maxOutputTokens,
                     isCustom: isCustomProfile
                 )
+                let oauthCredential = try makeOAuthCredential()
                 try await model.saveProviderProfile(
                     profile,
                     apiKey: apiKey,
                     makeActive: makeActiveAfterSave,
                     existingProfileID: existingProfile?.id == routeID
                         ? existingProfile?.id
-                        : nil
+                        : nil,
+                    oauthCredential: oauthCredential
                 )
                 apiKey = ""
+                oauthAccessToken = ""
+                oauthRefreshToken = ""
+                oauthExpiresAt = ""
                 if mode != .onboarding {
                     dismiss()
                 }
@@ -670,6 +724,10 @@ struct SetupView: View {
         displayName = profile.displayName
         isCustomProfile = profile.isCustom
         draft = profile.configuration()
+        apiKey = ""
+        oauthAccessToken = ""
+        oauthRefreshToken = ""
+        oauthExpiresAt = ""
         if isCreatingProfile {
             draft.profileID = nil
             draft.credentialReference = nil
@@ -911,5 +969,19 @@ private struct ModelSelectionRow: View {
             parts.append("最大输出 \(maxOutputTokens.formatted())")
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+}
+
+private enum SetupOAuthError: LocalizedError {
+    case accessTokenRequired
+    case invalidExpiry
+
+    var errorDescription: String? {
+        switch self {
+        case .accessTokenRequired:
+            "填写 refresh token 或过期时间前，请先填写 access token。"
+        case .invalidExpiry:
+            "OAuth 过期时间必须是 ISO 8601 格式。"
+        }
     }
 }
