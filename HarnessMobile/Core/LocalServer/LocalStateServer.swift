@@ -21,7 +21,7 @@ struct LocalStateAPISchema: Codable, Sendable, Equatable {
                 name: "session",
                 methods: [
                     "list", "status", "create", "select", "switch", "rename",
-                    "delete", "archive", "restore", "fork", "prompt", "cancel", "follow", "page", "search", "modelCatalog", "updateQueue"
+                    "delete", "archive", "restore", "fork", "prompt", "cancel", "follow", "page", "search", "modelCatalog", "updateQueue", "attachment"
                 ]
             ),
             LocalStateAPIController(
@@ -404,11 +404,20 @@ final class LocalStateServer: @unchecked Sendable {
                             value: try await asyncRPCHandler(rpcRequest.method, rpcRequest.payload)
                         )
                     } catch {
-                        routed = Self.rpcErrorResponse(
-                            rpcID: rpcRequest.rpcID,
-                            code: "gateway/internal",
-                            message: error.localizedDescription
-                        )
+                        let mapped: (code: String, message: String)
+                        if let rpcError = error as? LocalStateRPCError {
+                            switch rpcError {
+                            case let .sessionNotFound(sessionID):
+                                mapped = ("session/not-found", "Session \(sessionID.uuidString) was not found.")
+                            case let .attachmentInvalid(reason):
+                                mapped = ("session/attachment-invalid", reason)
+                            default:
+                                mapped = ("gateway/internal", rpcError.localizedDescription)
+                            }
+                        } else {
+                            mapped = ("gateway/internal", error.localizedDescription)
+                        }
+                        routed = Self.rpcErrorResponse(rpcID: rpcRequest.rpcID, code: mapped.code, message: mapped.message)
                     }
                     Self.send(routed, on: connection)
                 }
@@ -569,14 +578,65 @@ enum LocalStateRPCError: LocalizedError, Sendable, Equatable {
     case methodNotFound(String)
     case invalidProjection
     case invalidPayload(String)
+    case sessionNotFound(UUID)
+    case attachmentInvalid(String)
 
     var errorDescription: String? {
         switch self {
         case let .methodNotFound(method): return "RPC method not found: \(method)"
         case .invalidProjection: return "RPC projection is invalid."
         case let .invalidPayload(field): return "RPC payload field is invalid: \(field)"
+        case let .sessionNotFound(sessionID): return "Session \(sessionID.uuidString) was not found."
+        case let .attachmentInvalid(reason): return reason
         }
     }
+}
+
+/// Finds a durable image reference in the canonical session event stream.
+/// The event payloads intentionally have several historical shapes, so this
+/// walks JSON values and only decodes the stable `imageAttachments` entries.
+func localReferencedImage(
+    in events: [SessionEvent],
+    attachmentID: UUID
+) -> AgentImageAttachmentRef? {
+    func scan(_ value: JSONValue) -> AgentImageAttachmentRef? {
+        if let object = value.objectValue {
+            if case let .array(items)? = object["imageAttachments"] {
+                for item in items {
+                    guard let fields = item.objectValue,
+                          let rawID = fields["id"]?.stringValue,
+                          UUID(uuidString: rawID) == attachmentID,
+                          let path = fields["path"]?.stringValue,
+                          let mimeType = fields["mimeType"]?.stringValue else { continue }
+                    let byteCount = fields["byteCount"].flatMap { value -> Int? in
+                        guard case let .number(number) = value,
+                              number.isFinite,
+                              number >= 0,
+                              number <= Double(Int.max) else { return nil }
+                        return Int(number)
+                    } ?? 0
+                    return AgentImageAttachmentRef(
+                        id: attachmentID,
+                        path: path,
+                        mimeType: mimeType,
+                        byteCount: byteCount
+                    )
+                }
+            }
+            for child in object.values {
+                if let found = scan(child) { return found }
+            }
+        } else if case let .array(items) = value {
+            for item in items {
+                if let found = scan(item) { return found }
+            }
+        }
+        return nil
+    }
+    for event in events {
+        if let found = scan(event.data) { return found }
+    }
+    return nil
 }
 
 /// Produces the desktop-compatible backwards, message-aligned history page.

@@ -74,6 +74,33 @@ final class LocalStateServerTests: XCTestCase {
         XCTAssertTrue(alias.body.contains("one"))
     }
 
+    func testReferencedImageRequiresSessionEventReference() {
+        let id = UUID()
+        let ref = AgentImageAttachmentRef(
+            id: id,
+            path: "Attachments/\(id.uuidString).png",
+            mimeType: "image/png",
+            byteCount: 3
+        )
+        let event = try? SessionEvent(
+            type: SessionEventVocabulary.userMessage,
+            seq: 0,
+            time: 0,
+            data: .object([
+                "imageAttachments": .array([
+                    .object([
+                        "id": .string(id.uuidString.lowercased()),
+                        "path": .string(ref.path),
+                        "mimeType": .string(ref.mimeType),
+                        "byteCount": .number(3)
+                    ])
+                ])
+            ])
+        )
+        XCTAssertEqual(localReferencedImage(in: [event].compactMap { $0 }, attachmentID: id), ref)
+        XCTAssertNil(localReferencedImage(in: [event].compactMap { $0 }, attachmentID: UUID()))
+    }
+
     func testRouteServesConnectionRPCEnvelopeAndCorrelatesID() throws {
         let request = "POST /api HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
             + #"{"type":"client-request","rpcId":"rpc-1","method":"session/status","payload":{}}"#

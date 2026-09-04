@@ -26,6 +26,7 @@
 | Credential records | `CredentialRecord = ApiKeyRecord | GrantRecord`；授权 flow 观察到 record commit 才算成功；刷新使用 read-modify-write | 本地已有 API-key/OAuth Keychain records、single-flight、RFC 6749 refresh client 与手动 grant 录入；缺 provider-specific 授权 flow/401 retry | `VERIFY` |
 | Provider reload | 上游 route 可在设置变化后无重启生效；模型/凭据按请求解析 | 本地有 profile generation、模型 capability cache；缺 OAuth 生命周期闭环 | `VERIFY` |
 | Local web UI | 桌面 web server/client-half 独立存在 | loopback API/WKWebView 可用，桌面 frontend bundle 尚未接入 | `VERIFY` |
+| Session attachment | `session.attachment(sessionId, attachmentId)` 先做 Session 轨迹引用授权，再返回 `ImageAttachmentRef + base64`；未引用返回 `session/attachment-invalid` | 已接入本地 `session/attachment` RPC，复用 canonical trajectory 与 `WorkspaceStore.readAttachment`，返回媒体类型、字节数、像素尺寸和 base64；专项回归通过 | `VERIFY` |
 | Windows host | PowerShell/win32/ACL 依赖 Windows 内核 | iOS 无等价内核能力 | `OUT-OF-SCOPE` |
 
 ## 3. 逐项执行顺序
@@ -69,6 +70,8 @@
 - [x] 新增 `session/page` RPC：按 `throughSeq`/`beforeSeq`/`maxMessages` 做 message-aligned backwards pagination，复用 canonical trajectory 并输出 raw event records；专项 JSONL 回归通过。
 - [x] 新增 `session/search` 与 `session/modelCatalog` RPC：复用本地 FTS/Profile 真源，输出有界去重 snippets、默认 provider/model、reasoning metadata；953 项 SwiftPM 与 arm64 Simulator 构建通过。
 - [ ] 将上游 `frontend-static/client-half` 接入现有 WKWebView；UI 状态仍由本地 projection 提供。
+- [x] 增加 `session/attachment`：按 Session 轨迹中的 `imageAttachments` 做引用授权，读取本地 durable image 并返回 desktop 兼容元数据/base64；未引用或读取失败拒绝，专项回归通过。
+- [ ] 用上游 `session-models.host.spec.ts` 的完整 attachment fixture 做逐字段 wire 对照；真实设备图片渲染证据取得前保持 `VERIFY`。
 - [x] loopback route 补齐上游静态宿主的 `HEAD` 请求语义（200 + 空 body），并加入路由回归。
 - [ ] Windows PowerShell/win32/ACL 保持 `OUT-OF-SCOPE`，不得伪造 iOS 实现。
 

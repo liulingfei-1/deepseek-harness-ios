@@ -1,3 +1,4 @@
+@preconcurrency import ImageIO
 import Foundation
 import Observation
 import UIKit
@@ -948,6 +949,44 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                 profiles: providerDirectory.profiles,
                 activeProfileID: providerDirectory.activeProfileID
             )
+        case "session/attachment":
+            let id = try sessionID()
+            guard let rawAttachmentID = fields["attachmentId"]?.stringValue,
+                  let attachmentID = UUID(uuidString: rawAttachmentID) else {
+                throw LocalStateRPCError.invalidPayload("attachmentId")
+            }
+            guard try await sessionStore.listSessions().contains(where: { $0.id == id }) else {
+                throw LocalStateRPCError.sessionNotFound(id)
+            }
+            let events = try await trajectoryRepository.allEvents(sessionID: id)
+            guard let ref = localReferencedImage(in: events, attachmentID: attachmentID) else {
+                throw LocalStateRPCError.attachmentInvalid("Image is not referenced by this session.")
+            }
+            let data: Data
+            do {
+                data = try await workspaceStore.readAttachment(ref)
+            } catch {
+                throw LocalStateRPCError.attachmentInvalid("Unable to read image attachment.")
+            }
+            let dimensions: (width: Int, height: Int) = {
+                guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+                      let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+                      let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
+                      let height = properties[kCGImagePropertyPixelHeight] as? NSNumber else {
+                    return (0, 0)
+                }
+                return (width.intValue, height.intValue)
+            }()
+            return .object([
+                "attachment": .object([
+                    "attachmentId": .string(ref.id.uuidString.lowercased()),
+                    "mediaType": .string(ref.mimeType),
+                    "bytes": .number(Double(data.count)),
+                    "width": .number(Double(dimensions.width)),
+                    "height": .number(Double(dimensions.height))
+                ]),
+                "data": .string(data.base64EncodedString())
+            ])
         case "session/create":
             let title = fields["title"]?.stringValue ?? "新会话"
             await createConversation(title: title)

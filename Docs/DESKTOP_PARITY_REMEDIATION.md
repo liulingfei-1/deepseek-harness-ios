@@ -844,6 +844,15 @@ git diff --check
 - iPhone 16 Pro：未取得真实运行中队列编辑/steer 证据，保持 VERIFY。
 - 剩余平台限制或后续动作：当前 edit 采用本地 text 字段，尚未接受上游完整 `ContentBlock[]`（图片编辑应明确拒绝）；需补 live RPC fixture、队列错误码和客户端互操作测试。
 
+### PAR-114 · Session attachment RPC（2026-09-04）
+
+- 状态：`VERIFY`
+- 上游证据：`packages/api/session-controller/src/commands.ts` `attachment`；先从该 Session 的 canonical log 找到被引用的图片，再调用 attachment store，返回 `attachment` 元数据与 base64 `data`；未引用为 `ATTACHMENT_NOT_REFERENCED`。
+- 移动端变更：`LocalStateAPISchema` 宣传 `session/attachment`；`AppModel.handleLocalStateRPC` 读取完整轨迹，经 `localReferencedImage` 做 UUID 引用授权，复用 `WorkspaceStore.readAttachment`，用 ImageIO 计算像素尺寸并返回 `attachmentId/mediaType/bytes/width/height/data`。新增 `LocalStateServerTests.testReferencedImageRequiresSessionEventReference`。
+- 测试命令与真实结果：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter LocalStateServerTests`：26/26 通过。
+- iPhone 16 Pro /真实 Desktop client：尚未取得，保持 `VERIFY`。
+- 剩余动作：用上游 `commands-queue-attachment.host.spec.ts` 和 `session-models.host.spec.ts` 完成跨实现字段/错误码对照，并取得真机图片读回与 UI 渲染证据。
+
 ### PAR-107 · Exa/Perplexity transport failure fixtures（2026-09-04）
 
 - 为 `ExaSearchProvider` 与 `PerplexitySearchProvider` 增加可选 `URLProtocol` 注入，仅用于测试复现真实 transport；生产默认路径不变。
