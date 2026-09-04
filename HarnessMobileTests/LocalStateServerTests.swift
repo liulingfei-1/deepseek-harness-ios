@@ -115,6 +115,37 @@ final class LocalStateServerTests: XCTestCase {
         )
     }
 
+    func testRPCSchemaAdvertisesControllerMutationsAndFollow() throws {
+        let request = "POST /api HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
+            + #"{"type":"client-request","rpcId":"schema-2","method":"workspace/schema","payload":{}}"#
+        let result = LocalStateServer.route(
+            request: request,
+            endpoints: [:],
+            webhookHandler: nil,
+            rpcHandler: { method, _ in
+                guard method == "workspace/schema" else {
+                    throw LocalStateRPCError.methodNotFound(method)
+                }
+                return .object([
+                    "methods": .array([
+                        .string("mount/setAccess"), .string("mount/remove"),
+                        .string("session/follow")
+                    ])
+                ])
+            }
+        )
+        let value = try JSONDecoder().decode(JSONValue.self, from: Data(result.body.utf8))
+        let resultValue = try XCTUnwrap(
+            value.objectValue?["result"]?.objectValue?["value"]?.objectValue
+        )
+        XCTAssertEqual(
+            resultValue["methods"],
+            JSONValue.array([
+                .string("mount/setAccess"), .string("mount/remove"), .string("session/follow")
+            ])
+        )
+    }
+
     func testRouteReturns404ForUnknownPath() {
         let result = LocalStateServer.route(
             request: "GET /nope HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",

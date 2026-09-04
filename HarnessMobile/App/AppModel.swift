@@ -752,14 +752,17 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                     "version": .number(1),
                     "methods": .array([
                         .string("describe"), .string("provider/list"), .string("provider/active"),
-                        .string("provider/activate")
+                        .string("provider/activate"), .string("provider/remove")
                     ])
                 ])
             case "workspace/schema":
                 return .object([
                     "name": .string("workspace"),
                     "version": .number(1),
-                    "methods": .array([.string("list"), .string("files"), .string("mounts")])
+                    "methods": .array([
+                        .string("list"), .string("files"), .string("mounts"),
+                        .string("mount/setAccess"), .string("mount/remove")
+                    ])
                 ])
             default:
                 throw LocalStateRPCError.methodNotFound(method)
@@ -798,6 +801,22 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
             }
             return id
         }
+        func mountID() throws -> UUID {
+            guard let id = UUID(uuidString: try requiredString("mountId")) else {
+                throw LocalStateRPCError.invalidPayload("mountId")
+            }
+            return id
+        }
+        func encodedValue<T: Encodable>(_ value: T) throws -> JSONValue {
+            do {
+                return try JSONDecoder().decode(
+                    JSONValue.self,
+                    from: JSONEncoder().encode(value)
+                )
+            } catch {
+                throw LocalStateRPCError.invalidProjection
+            }
+        }
         func currentProjection() async throws -> JSONValue {
             let summaries = try await sessionStore.listSessions()
             let rows: [JSONValue] = summaries.map { summary in
@@ -832,7 +851,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                 "models": .array(profile.models.map { model in
                     .object([
                         "id": .string(model.id),
-                        "name": .string(model.name),
+                        "name": .string(model.name ?? model.id),
                         "contextWindow": model.contextWindow.map { .number(Double($0)) } ?? .null,
                         "maxOutputTokens": model.maxOutputTokens.map { .number(Double($0)) } ?? .null
                     ])
@@ -915,13 +934,35 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         case "session/cancel":
             cancelRun()
             return .object(["accepted": .bool(true)])
+        case "session/follow":
+            let id = try sessionID()
+            let since: Int
+            if case let .number(value) = fields["sinceSequence"] {
+                guard value.isFinite, value >= 0, value <= Double(Int.max) else {
+                    throw LocalStateRPCError.invalidPayload("sinceSequence")
+                }
+                since = Int(value.rounded(.down))
+            } else {
+                since = 0
+            }
+            let snapshot = try await trajectoryRepository.persistenceSnapshot(sessionID: id)
+            let events = snapshot.snapshot.events.filter { Int($0.seq) >= since }
+            return .object([
+                "type": .string("snapshot"),
+                "sessionId": .string(id.uuidString.lowercased()),
+                "streamID": .string(snapshot.revision.streamID),
+                "cursor": .number(Double(snapshot.revision.nextSequence)),
+                "fromSequence": .number(Double(since)),
+                "events": try encodedValue(events),
+                "hasMore": .bool(false)
+            ])
         case "settings/schema":
             return .object([
                 "name": .string("settings"),
                 "version": .number(1),
                 "methods": .array([
                     .string("describe"), .string("provider/list"), .string("provider/active"),
-                    .string("provider/activate")
+                    .string("provider/activate"), .string("provider/remove")
                 ])
             ])
         case "settings/describe", "settings/provider/list":
@@ -938,13 +979,39 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
             return .object([
                 "activeProfileId": providerDirectory.activeProfileID.map { .string($0) } ?? .null
             ])
+        case "settings/provider/remove":
+            let id = try requiredString("profileId")
+            try await removeProviderProfile(id: id)
+            return .object([
+                "activeProfileId": providerDirectory.activeProfileID.map { .string($0) } ?? .null,
+                "profiles": .array(providerDirectory.profiles.map(providerProjection))
+            ])
         case "workspace/schema":
             return .object([
                 "name": .string("workspace"),
                 "version": .number(1),
-                "methods": .array([.string("list"), .string("files"), .string("mounts")])
+                "methods": .array([
+                    .string("list"), .string("files"), .string("mounts"),
+                    .string("mount/setAccess"), .string("mount/remove")
+                ])
             ])
         case "workspace/list", "workspace/files", "workspace/mounts":
+            return try await workspaceProjection()
+        case "workspace/mount/setAccess":
+            let id = try mountID()
+            guard let writable = fields["writable"]?.booleanValue else {
+                throw LocalStateRPCError.invalidPayload("writable")
+            }
+            try await workspaceStore.setMountAccess(
+                id: id,
+                access: writable ? .readWrite : .readOnly
+            )
+            await refreshWorkspace()
+            return try await workspaceProjection()
+        case "workspace/mount/remove":
+            let id = try mountID()
+            try await workspaceStore.removeMount(id: id)
+            await refreshWorkspace()
             return try await workspaceProjection()
         default:
             throw LocalStateRPCError.methodNotFound(method)

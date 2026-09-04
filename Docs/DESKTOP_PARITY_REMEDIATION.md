@@ -246,14 +246,21 @@
 - **专项验证**：`./Scripts/verify-upstreams.sh` → **Upstream lock verification passed**；`UpstreamCompatibilityFixtureTests`、`CompactionCrossVersionFixtureTests`、`RC2CompatibilityFixtureTests`、`WorkspaceInstructionTransitionTests` → **14 tests passed**；`./Scripts/check-upstream-parity.sh` 输出最新 package inventory。
 - **剩余边界**：上游大量新增/重构包仍需逐包映射到移动端；锁定最新 commit 不等于所有包已实现，未接入项继续按 `VERIFY`、`IOS-REPLACEMENT` 或 `OUT-OF-SCOPE` 标记。
 
-- **最新固定门复跑**：上游 fixture 重锚后 `swift test --build-path /tmp/hm-upstream-latest-full` → **940 tests, 5 skipped, 0 failures**；Xcode arm64 Simulator build、`LocalStateServerTests`（17）、`npm run check`、Node smoke、`verify-upstreams.sh`、`check-upstream-parity.sh`、`audit-no-remote-execution.sh` 与 `git diff --check` 均通过。
+- **最新固定门复跑**：controller mutation 批次 `swift test --build-path /tmp/hm-final-controller-mutations` → **942 tests, 5 skipped, 0 failures**；Xcode arm64 Simulator build、`LocalStateServerTests`（19）、`npm run check`、Node smoke、`verify-upstreams.sh`、`check-upstream-parity.sh`、`audit-no-remote-execution.sh` 与 `git diff --check` 均通过。
 
 ### PARITY-010 · 异步 Session controller RPC（2026-09-04）
 
 - **上游核对**：最新 `packages/api/session-controller` 的 remote contract 包含 create、rename、fork、prompt、cancel 等异步命令；本地先复用现有 `AppModel` SessionStore/UI 方法，不复制第二套持久化。
 - **移动端变更**：`LocalStateServer` 新增异步 RPC handler；`LocalStateHTTPClient.callRPC` 解析 `{type:"server-response",rpcId,result:{ok,value|error}}`；AppModel 接入 Session mutation subset，以及 settings/workspace 的只读 schema/projection，schema 同步声明方法。
-- **专项验证**：真实 `URLSession` loopback async RPC 测试通过；`LocalStateServerTests` **17 tests**；完整 SwiftPM **940 tests, 5 skipped, 0 failures**。
-- **剩余边界**：workspace/settings 写入、session follow 增量流、SSE/WebSocket、端口冲突与前后台生命周期仍未完成，继续保持 `VERIFY`。
+- **专项验证**：真实 `URLSession` loopback async RPC 测试通过；`LocalStateServerTests` **19 tests**；完整 SwiftPM **942 tests, 5 skipped, 0 failures**。
+- **剩余边界**：真正的 session follow carrier、SSE/WebSocket、端口冲突与前后台生命周期仍未完成，继续保持 `VERIFY`。
+
+### PARITY-010 · Controller mutation 与 follow 增量窗口（2026-09-04）
+
+- **上游核对**：上游 `session-controller` 的 `follow` 先发带 cursor 的 snapshot，再发连续事件；`workspace-controller` 与 `settings-controller` 均提供写入 Remote。源码核对路径为 `packages/api/session-controller/src/history.ts`、`packages/api/workspace-controller/src/index.ts`、`packages/api/settings-controller/src/index.ts`。
+- **移动端变更**：`LocalStateAPISchema` 与 AppModel schema 同步声明 `session/follow`、`settings/provider/remove`、`workspace/mount/setAccess`、`workspace/mount/remove`；follow RPC 从 canonical `SessionPersistence` 返回 streamID、next cursor 和未交接事件窗口，mutation 复用既有 ProviderProfile/WorkspaceStore 事务。
+- **专项验证**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-controller-mutations --filter LocalStateServerTests` → **19 tests passed**；新增 schema mutation/follow 回归。
+- **剩余边界**：当前 follow 是同一 RPC envelope 的增量窗口，不是上游 WebSocket/SSE 长流；真实 carrier、断线重连、前后台启停和 iPhone 16 Pro 证据仍为 `VERIFY`。
 
 ### PARITY-006 · 子 Agent reasoning effort 参数（2026-09-03）
 

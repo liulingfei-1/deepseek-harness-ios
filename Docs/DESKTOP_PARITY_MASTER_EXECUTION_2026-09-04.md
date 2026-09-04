@@ -62,7 +62,8 @@
 ### P4：LocalStateServer 与前端（PARITY-010/014）
 
 - [x] 增加 `/api` Connection RPC envelope（`client-request`/`server-response`、rpcId correlation、统一错误形状），接入 session mutation 与 settings/workspace 只读投影。
-- [ ] settings/workspace 写入方法、session follow 增量流、SSE/WebSocket、端口冲突、前后台启停。
+- [x] settings/workspace 的现有本机 mutation（provider remove、mount access/remove）与 `session/follow` 增量窗口 RPC。
+- [ ] 真正的 session follow carrier、SSE/WebSocket、端口冲突、前后台启停。
 - [ ] 将上游 `frontend-static/client-half` 接入现有 WKWebView；UI 状态仍由本地 projection 提供。
 - [ ] Windows PowerShell/win32/ACL 保持 `OUT-OF-SCOPE`，不得伪造 iOS 实现。
 
@@ -86,4 +87,4 @@ git diff --check
 
 ## 5. 当前批次记录
 
-2026-09-04：已用 `agent-reach doctor --json`、`gh search code`、GitHub API 和本地源码/测试核对上游 authorization、credential record、E2B、webhook、ACP、client connection 入口；并将 upstream checkout/lock 对齐到 master `76fda729799fe9b3848dbe2c211d4b231032b81e`。当前批次完成 OAuth record + refresh single-flight、RFC 6749 自动刷新、401 token-rotation retry、OAuth-backed Profile 生命周期、手动 grant 录入、异步 Session controller RPC 及 settings/workspace 只读 projection；provider-specific authorization UI、settings/workspace 写入、follow/SSE/WebSocket、真实授权和设备/API 证据仍保持 `VERIFY`。
+2026-09-04：已用 `agent-reach doctor --json`、`gh search code`、GitHub API 和本地源码/测试核对上游 authorization、credential record、E2B、webhook、ACP、client connection 入口；并将 upstream checkout/lock 对齐到 master `76fda729799fe9b3848dbe2c211d4b231032b81e`。当前批次完成 OAuth record + refresh single-flight、RFC 6749 自动刷新、401 token-rotation retry、OAuth-backed Profile 生命周期、手动 grant 录入、异步 Session controller RPC、provider/workspace mutation 和 `session/follow` 增量窗口 projection；真正 follow stream/SSE/WebSocket、provider-specific authorization UI、真实授权和设备/API 证据仍保持 `VERIFY`。

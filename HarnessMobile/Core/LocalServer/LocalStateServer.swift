@@ -21,16 +21,22 @@ struct LocalStateAPISchema: Codable, Sendable, Equatable {
                 name: "session",
                 methods: [
                     "list", "status", "create", "select", "switch", "rename",
-                    "delete", "archive", "restore", "fork", "prompt", "cancel"
+                    "delete", "archive", "restore", "fork", "prompt", "cancel", "follow"
                 ]
             ),
             LocalStateAPIController(
                 name: "settings",
-                methods: ["schema"]
+                methods: [
+                    "schema", "describe", "provider/list", "provider/active",
+                    "provider/activate", "provider/remove"
+                ]
             ),
             LocalStateAPIController(
                 name: "workspace",
-                methods: ["schema"]
+                methods: [
+                    "schema", "list", "files", "mounts",
+                    "mount/setAccess", "mount/remove"
+                ]
             )
         ]
     )
