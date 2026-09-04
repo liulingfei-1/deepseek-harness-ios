@@ -64,8 +64,8 @@
 
 - [x] 增加 `/api` Connection RPC envelope（`client-request`/`server-response`、rpcId correlation、统一错误形状），接入 session mutation 与 settings/workspace 只读投影。
 - [x] settings/workspace 的现有本机 mutation（provider remove、Host-backed settings mutate/update/replace、mount access/remove）与 `session/follow` 增量窗口 RPC。
-- [x] session/workspace follow 的 SSE/chunked carrier 与 `URLSession` stream client；session 首帧 snapshot、后续事件 cursor 已有 live loopback 回归；workspace 首帧 baseline、后续 upsert/remove/order/archived 增量已有纯函数回归。
-- [ ] 原生事件订阅（当前为 250ms persistence polling bridge）、AbortSignal/断线重连 generation、WebSocket、端口冲突、前后台启停和 iPhone 16 Pro 证据。
+- [x] session/workspace follow 的 SSE/chunked carrier 与 `URLSession` stream client；session 首帧 snapshot、后续事件 cursor 已有 live loopback 回归；workspace 首帧 baseline、后续 upsert/remove/order/archived 增量已有纯函数回归；客户端可选指数退避重连并续传 session cursor。
+- [ ] 原生事件订阅（当前为 250ms persistence polling bridge）、客户端 generation/online-offline 状态、AbortSignal generation、WebSocket、端口冲突、前后台启停和 iPhone 16 Pro 证据。
 - [ ] 将上游 `frontend-static/client-half` 接入现有 WKWebView；UI 状态仍由本地 projection 提供。
 - [ ] Windows PowerShell/win32/ACL 保持 `OUT-OF-SCOPE`，不得伪造 iOS 实现。
 
@@ -91,4 +91,4 @@ git diff --check
 
 2026-09-04：已用 `agent-reach doctor --json`、`gh search code`、GitHub API 和本地源码/测试核对上游 authorization、credential record、E2B、webhook、ACP、client connection 入口；并将 upstream checkout/lock 对齐到 master `76fda729799fe9b3848dbe2c211d4b231032b81e`。当前批次完成 OAuth record + refresh single-flight、RFC 6749 自动刷新、401 token-rotation retry、OAuth-backed Profile 生命周期、手动 grant 录入、异步 Session controller RPC、provider/workspace mutation 和 `session/follow` 增量窗口 projection；真正 follow stream/SSE/WebSocket、provider-specific authorization UI、真实授权和设备/API 证据仍保持 `VERIFY`。
 
-2026-09-04 Workspace registry：根据上游 `workspace-controller` 的 types/commands/feed 实现，本地新增可持久化 Workspace registry 及 `create|rename|delete|insertBefore|insertSessionBefore|archiveSession` RPC。创建同一路径幂等解析，删除保留目录与 Session；专项 `WorkspaceRegistryTests` 2/2 通过。随后补上 `session/follow`/`workspace/follow` 的 SSE/chunked carrier、snapshot-first 客户端和 session 增量事件回归，并将 workspace follow 投影为 baseline + upsert/remove/order/archived 增量；当前事件源仍是 250ms persistence polling bridge，AbortSignal generation、断线重连和真机生命周期仍未完全承载，继续标记 `VERIFY`。
+2026-09-04 Workspace registry：根据上游 `workspace-controller` 的 types/commands/feed 实现，本地新增可持久化 Workspace registry 及 `create|rename|delete|insertBefore|insertSessionBefore|archiveSession` RPC。创建同一路径幂等解析，删除保留目录与 Session；专项 `WorkspaceRegistryTests` 2/2 通过。随后补上 `session/follow`/`workspace/follow` 的 SSE/chunked carrier、snapshot-first 客户端和 session 增量事件回归，并将 workspace follow 投影为 baseline + upsert/remove/order/archived 增量；客户端可选指数退避重连并续传 session cursor。当前事件源仍是 250ms persistence polling bridge，客户端 generation 状态、AbortSignal generation 和真机生命周期仍未完全承载，继续标记 `VERIFY`。

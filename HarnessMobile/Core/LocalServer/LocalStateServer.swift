@@ -630,42 +630,69 @@ struct LocalStateHTTPClient: Sendable {
     func callRPCStream(
         rpcID: String = UUID().uuidString.lowercased(),
         method: String,
-        payload: JSONValue = .object([:])
+        payload: JSONValue = .object([:]),
+        reconnect: Bool = false,
+        maximumReconnectAttempts: Int = 5
     ) -> AsyncThrowingStream<JSONValue, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
+                var nextPayload = payload
+                var reconnectAttempt = 0
                 do {
-                    let body = try JSONEncoder().encode([
-                        "type": JSONValue.string("client-request"),
-                        "rpcId": JSONValue.string(rpcID),
-                        "method": JSONValue.string(method),
-                        "payload": payload
-                    ])
-                    var request = URLRequest(url: baseURL.appendingPathComponent("api"))
-                    request.httpMethod = "POST"
-                    request.httpBody = body
-                    request.timeoutInterval = 86_400
-                    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                    request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-                    let (bytes, response) = try await URLSession.shared.bytes(for: request)
-                    guard let http = response as? HTTPURLResponse,
-                          (200..<300).contains(http.statusCode) else {
-                        throw LocalStateHTTPError.invalidResponse
-                    }
-                    for try await line in bytes.lines {
-                        guard line.hasPrefix("data: ") else { continue }
-                        let data = Data(line.dropFirst(6).utf8)
-                        guard let envelope = try? JSONDecoder().decode(JSONValue.self, from: data),
-                              envelope.objectValue?["type"]?.stringValue == "server-response",
-                              envelope.objectValue?["rpcId"]?.stringValue == rpcID,
-                              let result = envelope.objectValue?["result"] else {
-                            throw LocalStateHTTPError.invalidResponse
+                    while !Task.isCancelled {
+                        do {
+                            let body = try JSONEncoder().encode([
+                                "type": JSONValue.string("client-request"),
+                                "rpcId": JSONValue.string(rpcID),
+                                "method": JSONValue.string(method),
+                                "payload": nextPayload
+                            ])
+                            var request = URLRequest(url: baseURL.appendingPathComponent("api"))
+                            request.httpMethod = "POST"
+                            request.httpBody = body
+                            request.timeoutInterval = 86_400
+                            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                            request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+                            let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                            guard let http = response as? HTTPURLResponse,
+                                  (200..<300).contains(http.statusCode) else {
+                                throw LocalStateHTTPError.invalidResponse
+                            }
+                            for try await line in bytes.lines {
+                                guard line.hasPrefix("data: ") else { continue }
+                                let data = Data(line.dropFirst(6).utf8)
+                                guard let envelope = try? JSONDecoder().decode(JSONValue.self, from: data),
+                                      envelope.objectValue?["type"]?.stringValue == "server-response",
+                                      envelope.objectValue?["rpcId"]?.stringValue == rpcID,
+                                      let result = envelope.objectValue?["result"] else {
+                                    throw LocalStateHTTPError.invalidResponse
+                                }
+                                guard result.objectValue?["ok"]?.booleanValue == true,
+                                      let value = result.objectValue?["value"] else {
+                                    throw LocalStateHTTPError.invalidResponse
+                                }
+                                continuation.yield(value)
+                                if method == "session/follow",
+                                   case let .number(cursor)? = value.objectValue?["cursor"] {
+                                    var fields = nextPayload.objectValue ?? [:]
+                                    fields["sinceSequence"] = .number(cursor)
+                                    nextPayload = .object(fields)
+                                }
+                            }
+                            guard reconnect else {
+                                continuation.finish()
+                                return
+                            }
+                        } catch {
+                            guard reconnect, !Task.isCancelled else { throw error }
                         }
-                        guard result.objectValue?["ok"]?.booleanValue == true,
-                              let value = result.objectValue?["value"] else {
-                            throw LocalStateHTTPError.invalidResponse
+                        reconnectAttempt += 1
+                        guard reconnectAttempt <= max(0, maximumReconnectAttempts) else {
+                            continuation.finish()
+                            return
                         }
-                        continuation.yield(value)
+                        let delay = min(10_000, 500 * (1 << min(reconnectAttempt - 1, 4)))
+                        try await Task.sleep(for: .milliseconds(delay))
                     }
                     continuation.finish()
                 } catch {

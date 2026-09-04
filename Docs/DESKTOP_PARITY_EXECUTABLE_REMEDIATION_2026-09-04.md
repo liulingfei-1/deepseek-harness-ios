@@ -69,10 +69,11 @@ git diff --check
 - [x] 接入 `workspace/create|rename|delete|insertBefore|insertSessionBefore|archiveSession` RPC；`create` 对已注册目录按桌面语义幂等返回既有 Workspace，删除仅移除注册不删除目录或 Session。
 - [x] 新增 `WorkspaceRegistryTests` 覆盖创建/幂等解析、重命名、排序、Session 归档、冷启动重载、无效路径与标题错误；专项 2/2 通过。
 - [x] `LocalStateServer` 在 `/api` 上增加 `text/event-stream` + HTTP chunked carrier；仅路由 `session/follow` 与 `workspace/follow`，沿用 `server-response`/`rpcId` envelope。
-- [x] `LocalStateHTTPClient.callRPCStream` 支持长超时、SSE data frame 解码、取消时终止请求；首帧保持 snapshot，后续 session 事件带 cursor/sessionID。
+- [x] `LocalStateHTTPClient.callRPCStream` 支持长超时、SSE data frame 解码、取消时终止请求；首帧保持 snapshot，后续 session 事件带 cursor/sessionID；可选重连按 500ms/1s/2s/4s/8s 退避并续传 `sinceSequence`。
 - [x] AppModel 复用 canonical trajectory/workspace projection；新增 250ms polling bridge 与 live URLSession 回归（`testLiveHTTPClientReceivesSnapshotFirstSSEStream`）。
 - [x] workspace stream 现按上游 `baseline` + `upsert/remove/order/archived` 增量词汇投影，首帧完整 baseline，后续仅发送有变化的工作区/顺序/归档帧；纯函数回归覆盖新增、更新、删除、排序和归档。
-- [ ] 事件源仍非上游原生 AsyncIterable/event subscription；AbortSignal generation、断线重连 generation、前后台生命周期、端口冲突和 iPhone 16 Pro 证据待后续，继续保持 `VERIFY`。
+- [x] `LocalStateHTTPClient` 两代 loopback stream 真实回归验证重连与 session cursor 续传（`maximumReconnectAttempts=1`）。
+- [ ] 事件源仍非上游原生 AsyncIterable/event subscription；客户端 generation 状态/online-offline、AbortSignal generation、前后台生命周期、端口冲突和 iPhone 16 Pro 证据待后续，继续保持 `VERIFY`。
 
 ### PARITY-003 本批次逐步修改清单
 

@@ -283,6 +283,49 @@ final class LocalStateServerTests: XCTestCase {
         XCTAssertEqual(values[1].objectValue?["type"], .string("event"))
     }
 
+    func testLiveHTTPClientReconnectsAndResumesSessionCursor() async throws {
+        let counter = ReconnectingStreamCounter()
+        let server = LocalStateServer(
+            endpoints: [],
+            streamRPCHandler: { method, payload in
+                XCTAssertEqual(method, "session/follow")
+                let generation = await counter.next()
+                let cursor = payload.objectValue?["sinceSequence"]?.numberValueForTests ?? 0
+                return AsyncThrowingStream { continuation in
+                    continuation.yield(.object([
+                        "type": .string("snapshot"),
+                        "generation": .number(Double(generation)),
+                        "cursor": .number(cursor + 1)
+                    ]))
+                    continuation.finish()
+                }
+            }
+        )
+        XCTAssertNotNil(server)
+        server?.start()
+        defer { server?.stop() }
+        var assignedPort: UInt16 = 0
+        for _ in 0..<40 {
+            if let port = server?.port, port > 0 {
+                assignedPort = port
+                break
+            }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        XCTAssertGreaterThan(assignedPort, 0)
+        let stream = LocalStateHTTPClient(port: assignedPort).callRPCStream(
+            method: "session/follow",
+            payload: .object(["sessionId": .string("session-1")]),
+            reconnect: true,
+            maximumReconnectAttempts: 1
+        )
+        var values: [JSONValue] = []
+        for try await value in stream { values.append(value) }
+        XCTAssertEqual(values.count, 2)
+        XCTAssertEqual(values.map { $0.objectValue?["generation"]?.numberValueForTests }, [1, 2])
+        XCTAssertEqual(values.map { $0.objectValue?["cursor"]?.numberValueForTests }, [1, 2])
+    }
+
     func testWorkspaceFollowFramesEmitBaselineAndOrderedIncrements() throws {
         let first = JSONValue.object([
             "workspaces": .array([
@@ -494,5 +537,21 @@ final class LocalStateServerTests: XCTestCase {
             webhookSecret: "test-secret"
         )
         XCTAssertEqual(rejected.status, 401)
+    }
+}
+
+private actor ReconnectingStreamCounter {
+    private var value = 0
+
+    func next() -> Int {
+        value += 1
+        return value
+    }
+}
+
+private extension JSONValue {
+    var numberValueForTests: Double? {
+        guard case let .number(value) = self else { return nil }
+        return value
     }
 }

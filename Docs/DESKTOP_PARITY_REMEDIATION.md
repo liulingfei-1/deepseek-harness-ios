@@ -792,11 +792,17 @@ git diff --check
 
 - 对照上游 `client/connection` 与 `api/{session,workspace}-controller`，为 loopback `/api` 增加 `session/follow`、`workspace/follow` 的 `text/event-stream` + HTTP chunked carrier；保留 `server-response`/`rpcId` envelope。
 - `LocalStateHTTPClient.callRPCStream` 通过 `URLSession.bytes` 解码 SSE data frame，支持长连接取消；AppModel 首帧 snapshot，session 后续帧携带 cursor/sessionID，workspace 复用 workspace projection。
-- 生产事件源暂为 250ms persistence polling bridge；workspace follow 已投影为 baseline + upsert/remove/order/archived 增量并有纯函数回归。live loopback 回归 `LocalStateServerTests.testLiveHTTPClientReceivesSnapshotFirstSSEStream` 通过，完整 SwiftPM 945 tests、5 skipped、0 failures，Xcode arm64 Simulator BUILD SUCCEEDED，Plugin Host/Node smoke/两项审计通过。
-- 状态：`VERIFY`。仍缺上游原生 AsyncIterable/event subscription、workspace baseline/increment、断线重连 generation、WebSocket、端口冲突、前后台生命周期及 iPhone 16 Pro 真机证据。
+- 生产事件源暂为 250ms persistence polling bridge；workspace follow 已投影为 baseline + upsert/remove/order/archived 增量并有纯函数回归。live loopback 回归 `LocalStateServerTests.testLiveHTTPClientReceivesSnapshotFirstSSEStream` 通过，完整 SwiftPM 950 tests、5 skipped、0 failures，Xcode arm64 Simulator BUILD SUCCEEDED，Plugin Host/Node smoke/两项审计通过。
+- 状态：`VERIFY`。仍缺上游原生 AsyncIterable/event subscription、客户端 generation/online-offline 状态、WebSocket、端口冲突、前后台生命周期及 iPhone 16 Pro 真机证据。
+
+### PAR-108 · Follow reconnect cursor resume（2026-09-04）
+
+- `LocalStateHTTPClient.callRPCStream` 增加可选 `reconnect` 与 `maximumReconnectAttempts`；每代连接结束后按 500ms、1s、2s、4s、8s 退避，session follow 从最近 `cursor` 更新 `sinceSequence`，workspace follow 每代仍以 baseline 开始。
+- `LocalStateServerTests.testLiveHTTPClientReconnectsAndResumesSessionCursor` 真实启动 loopback server，验证两代连接及 cursor `[1, 2]` 续传；专项和完整 SwiftPM 950 tests、5 skipped、0 failures 均通过。
+- 状态：`VERIFY`。尚未实现完整上游 `ConnectionController` generation 可观察状态、online/offline 事件、AbortSignal 级联、前后台生命周期和真机网络切换证据。
 
 ### PAR-107 · Exa/Perplexity transport failure fixtures（2026-09-04）
 
 - 为 `ExaSearchProvider` 与 `PerplexitySearchProvider` 增加可选 `URLProtocol` 注入，仅用于测试复现真实 transport；生产默认路径不变。
 - 回归覆盖 Exa 429、Perplexity 401、Perplexity timeout，断言 provider-specific endpoint 错误或 `WebFetchError.timedOut`，并保留原有 citation/highlight 映射测试。
-- 专项 `ExaSearchProviderTests|PerplexitySearchProviderTests` 9 项通过；真实 endpoint、重试/断网恢复、Keychain/UI 与 iPhone 16 Pro 仍为 `VERIFY`。
+- 专项 `ExaSearchProviderTests|PerplexitySearchProviderTests` 9 项通过；完整 SwiftPM 950 tests、5 skipped、0 failures；真实 endpoint、重试/断网恢复、Keychain/UI 与 iPhone 16 Pro 仍为 `VERIFY`。
