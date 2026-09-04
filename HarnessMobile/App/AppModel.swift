@@ -1044,7 +1044,21 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
             }
             switch kind {
             case "edit":
-                let text = action["text"]?.stringValue ?? ""
+                let text: String
+                if case let .array(content)? = action["content"] {
+                    var parts: [String] = []
+                    for block in content {
+                        guard let object = block.objectValue,
+                              object["type"]?.stringValue == "text",
+                              let value = object["text"]?.stringValue else {
+                            throw LocalStateRPCError.attachmentInvalid("queue edits accept text content only")
+                        }
+                        parts.append(value)
+                    }
+                    text = parts.joined()
+                } else {
+                    text = action["text"]?.stringValue ?? ""
+                }
                 guard !text.isEmpty else { throw LocalStateRPCError.invalidPayload("action.text") }
                 guard try await sessionRunRegistry.updateQueuedInput(
                     id: itemID, text: text, for: identity

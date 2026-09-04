@@ -839,7 +839,7 @@ git diff --check
 
 - 状态：VERIFY
 - 上游证据：`packages/api/session-controller/src/commands.ts` `updateQueue`；支持 `edit`/`remove`/`steer`，并要求目标仍在 live Agent inbox，steer 仅允许运行中的 next-turn 项。
-- 移动端变更：新增 `session/updateQueue`，校验 Session/item/action，复用 `SessionRunRegistry.updateQueuedInput/removeQueuedInput/steerQueuedInput`，成功后持久化 inbox 与 Session；schema 宣传 `updateQueue`。
+- 移动端变更：新增 `session/updateQueue`，校验 Session/item/action，复用 `SessionRunRegistry.updateQueuedInput/removeQueuedInput/steerQueuedInput`，成功后持久化 inbox 与 Session；edit 现在同时接受上游 `content: [{type:"text",text}]` 和本地兼容 `text` 字段，非文本 block 拒绝；schema 宣传 `updateQueue`。
 - 测试命令与真实结果：arm64 Simulator `BUILD SUCCEEDED`；队列状态机既有专项测试通过，本批次未伪造 live AppModel RPC 证据。
 - iPhone 16 Pro：未取得真实运行中队列编辑/steer 证据，保持 VERIFY。
 - 剩余平台限制或后续动作：当前 edit 采用本地 text 字段，尚未接受上游完整 `ContentBlock[]`（图片编辑应明确拒绝）；需补 live RPC fixture、队列错误码和客户端互操作测试。
