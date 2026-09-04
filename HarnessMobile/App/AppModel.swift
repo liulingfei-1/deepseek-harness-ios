@@ -943,6 +943,11 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
             let hits = try await sessionQueryReadModel.searchSessions(query: query, limit: 21)
             let visible = Set(try await sessionStore.listSessions().map(\.id))
             return localSessionSearchPayload(hits: hits, visibleSessionIDs: visible)
+        case "session/modelCatalog":
+            return localSessionModelCatalogPayload(
+                profiles: providerDirectory.profiles,
+                activeProfileID: providerDirectory.activeProfileID
+            )
         case "session/create":
             let title = fields["title"]?.stringValue ?? "新会话"
             await createConversation(title: title)

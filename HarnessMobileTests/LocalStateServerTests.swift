@@ -461,6 +461,29 @@ final class LocalStateServerTests: XCTestCase {
         XCTAssertEqual(payload.objectValue?["hasMore"], JSONValue.bool(true))
     }
 
+    func testSessionModelCatalogPayloadExposesRoutableProfiles() {
+        let profile = ProviderProfile.catalogDefault(for: .deepSeekOfficial)
+        let payload = localSessionModelCatalogPayload(
+            profiles: [profile],
+            activeProfileID: profile.id
+        )
+        XCTAssertEqual(payload.objectValue?["default"]?.objectValue?["provider"], .string("deepseek-official"))
+        guard case let .array(routable)? = payload.objectValue?["routableProviders"] else {
+            return XCTFail("catalog must include routable providers")
+        }
+        XCTAssertEqual(routable, [.string("deepseek-official")])
+        guard case let .array(groups)? = payload.objectValue?["groups"],
+              let first = groups.first?.objectValue else {
+            return XCTFail("catalog must include provider group")
+        }
+        XCTAssertEqual(first["id"], .string(profile.id))
+        if case let .array(models)? = first["models"] {
+            XCTAssertFalse(models.isEmpty)
+        } else {
+            XCTFail("catalog group must include models")
+        }
+    }
+
     func testLiveHTTPClientPostsWebhookAfterSecretIsConfigured() async throws {
         let server = LocalStateServer(endpoints: [])
         XCTAssertNotNil(server)

@@ -21,7 +21,7 @@ struct LocalStateAPISchema: Codable, Sendable, Equatable {
                 name: "session",
                 methods: [
                     "list", "status", "create", "select", "switch", "rename",
-                    "delete", "archive", "restore", "fork", "prompt", "cancel", "follow", "page", "search"
+                    "delete", "archive", "restore", "fork", "prompt", "cancel", "follow", "page", "search", "modelCatalog"
                 ]
             ),
             LocalStateAPIController(
@@ -640,6 +640,48 @@ func localSessionSearchPayload(
             ])
         }),
         "hasMore": .bool(accepted.count > limit)
+    ])
+}
+
+func localSessionModelCatalogPayload(
+    profiles: [ProviderProfile],
+    activeProfileID: String?
+) -> JSONValue {
+    let groups: [JSONValue] = profiles.map { profile in
+        .object([
+            "id": .string(profile.id), "name": .string(profile.displayName),
+            "models": .array(profile.models.map { model in
+                var value: [String: JSONValue] = [
+                    "id": .string(model.id), "name": .string(model.name ?? model.id)
+                ]
+                if let description = model.description { value["description"] = .string(description) }
+                if let modes = model.reasoningModes, !modes.isEmpty {
+                    var reasoning: [String: JSONValue] = [
+                        "efforts": .array(modes.filter { $0 != .providerDefault }.map {
+                            .object(["id": .string($0.rawValue), "name": .string($0.title)])
+                        })
+                    ]
+                    if let defaultEffort = model.defaultReasoningMode,
+                       defaultEffort != .providerDefault {
+                        reasoning["defaultEffort"] = .string(defaultEffort.rawValue)
+                    }
+                    value["reasoning"] = .object(reasoning)
+                }
+                return .object(value)
+            })
+        ])
+    }
+    let selected = profiles.first { $0.id == activeProfileID } ?? profiles.first
+    let fallback = selected ?? ProviderProfile.catalogDefault(for: .deepSeekOfficial)
+    return .object([
+        "default": .object([
+            "provider": .string(fallback.providerID.rawValue),
+            "model": .string(fallback.defaultModel),
+            "reasoningEffort": fallback.reasoningMode == .providerDefault
+                ? .null : .string(fallback.reasoningMode.rawValue)
+        ]),
+        "routableProviders": .array(profiles.map { .string($0.providerID.rawValue) }),
+        "groups": .array(groups), "failures": .array([])
     ])
 }
 

@@ -46,6 +46,7 @@ git diff --check
 | PARITY-013 | provider-neutral webhook rule registry；规则返回可选 Session request | loopback POST → parse/HMAC → durable dedup → rule → Job/可选 wake | VERIFY | 当前批次已补通用 provider 路由、持久规则、重试、可选唤醒；仍缺公网隧道、后台持续监听、真机 |
 | PARITY-015 | Session controller `page`：按消息边界向前分页并返回 raw/chunk records | `AppModel.handleLocalStateRPC` → `SessionTrajectoryRepository.allEvents` → `localSessionPagePayload` | VERIFY | `session/page` 已接入并有真实 JSONL 回归；chunkrow 压缩已覆盖 text/reasoning/tool-call 基础形状，完整 fixture/client/真机仍待验证 |
 | PARITY-016 | Session controller `search`：可见会话内容检索、去重与有界 snippet | `AppModel.handleLocalStateRPC` → `SessionQueryReadModel` → `localSessionSearchPayload` | VERIFY | 已接入 FTS rebuild/search、20 条结果上限和 snippet 截断回归；stale-cursor/真实 client/真机仍待验证 |
+| PARITY-017 | Session controller `modelCatalog`：默认路由、provider groups 与 reasoning metadata | `AppModel.handleLocalStateRPC` → `ProviderProfileDirectory` → `localSessionModelCatalogPayload` | VERIFY | 已接入 profile-backed catalog RPC 与回归；主动 reload、失败诊断、真实 provider/真机仍待验证 |
 | PARITY-014 | frontend-static/client-half、Windows host 包 | loopback route 已补 `GET/HEAD` 兼容；WKWebView 可承载但桌面 bundle 未接入 | OUT-OF-SCOPE/VERIFY | 打包并接入真实 bundle；Windows PowerShell/win32/ACL 保持平台不适用 |
 
 ### PARITY-002 本批次逐步修改清单
