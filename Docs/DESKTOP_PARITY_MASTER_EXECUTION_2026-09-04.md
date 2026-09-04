@@ -50,7 +50,8 @@
 ### P2：Provider wire 与真实端点（PARITY-001/002/003/006/008）
 
 - [ ] 为 DeepSeek、OpenAI、Anthropic、OpenRouter、Exa、Perplexity 保存锁定 wire fixtures。
-- [ ] 用 URLProtocol/本机 loopback 验证 401/403/413/429/5xx、超时、断网恢复和重试回放。
+- [x] Exa/Perplexity transport 用注入式 URLProtocol 验证 401/429/timeout 映射；DeepSeek/通用 provider 已有 401/403/413/429/5xx fixtures。
+- [ ] 完成所有 provider 的断网恢复和重试回放，并以真实 endpoint 与 iPhone 16 Pro 运行证据将相应项改为 `DONE`。
 - [ ] 真实 endpoint 与 iPhone 16 Pro 运行后再把相应项改为 `DONE`。
 
 ### P3：ACP/Hooks/后台（PARITY-004/005/007/013）

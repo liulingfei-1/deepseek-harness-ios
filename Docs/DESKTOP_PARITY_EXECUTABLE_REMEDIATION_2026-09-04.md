@@ -38,7 +38,7 @@ git diff --check
 - [ ] 真实 iSH ACP 子进程、EOF/非零退出、重连、后台恢复和 iPhone 16 Pro 证据；未取得前保持 `VERIFY`。
 | PARITY-006 | provider/model/reasoning capability 由 runtime 查询 | `ModelProviderCatalog`、`ModelDiscoveryCache` | VERIFY | 真实多 provider capability cache 与 reload |
 | PARITY-007 | Claude `SubagentStart/Stop` 与 Codex hook 生命周期 | `HookProtocol` + AppModel child activation | VERIFY | iSH/ACP 真机超时与取消轨迹 |
-| PARITY-008 | Exa/Perplexity provider adapter 与 citation 映射 | `ExaSearchProvider`、`PerplexitySearchProvider` | VERIFY | 401/429/timeout、真实 citation、Keychain/UI 真机 |
+| PARITY-008 | Exa/Perplexity provider adapter 与 citation 映射 | `ExaSearchProvider`、`PerplexitySearchProvider` | VERIFY | 已补注入式 URLProtocol 对 401/429/timeout 的错误映射回归；仍缺真实 citation、Keychain/UI 与真机 |
 | PARITY-009 | team/workflow 为独立成员状态与恢复 | `LocalWorkflowTool`、`WorkflowRunTree` | IOS-REPLACEMENT | 多成员长时并发与恢复真机 |
 | PARITY-010 | webserver status/session 路由与异步 connection RPC | loopback `LocalStateServer` + `URLSession` client | VERIFY | 已接入 session mutation RPC（create/select/rename/delete/archive/restore/fork/prompt/cancel/follow 增量窗口）、provider remove、workspace mount access/remove，并新增 `session/follow`/`workspace/follow` 的 SSE/chunked carrier 与 snapshot-first 客户端；事件源仍为 persistence polling，仍缺原生事件订阅、端口冲突、前后台和真机 |
 | PARITY-011 | provider catalog 支持动态 listModels/resolveModelInfo/reload | Swift provider profiles + model discovery | VERIFY | 统一 capability snapshot/cache；OAuth 仅在完整授权生命周期可用时注册 |

@@ -24,7 +24,8 @@ struct PerplexitySearchProvider: WebSearchProvider {
         baseURL: String = Self.defaultBaseURL,
         model: String = Self.defaultModel,
         maxTokens: Int = Self.defaultMaxTokens,
-        timeout: TimeInterval = 60
+        timeout: TimeInterval = 60,
+        protocolClasses: [AnyClass]? = nil
     ) {
         self.identifier = Self.identifierValue
         self.approvalResources = []
@@ -32,7 +33,7 @@ struct PerplexitySearchProvider: WebSearchProvider {
         self.baseURL = baseURL
         self.model = model
         self.maxTokens = maxTokens
-        self.client = WebSearchHTTPClient(timeout: timeout)
+        self.client = WebSearchHTTPClient(timeout: timeout, protocolClasses: protocolClasses)
     }
 
     func search(query: String, maximumResults: Int) async throws -> [WebSearchProviderSource] {

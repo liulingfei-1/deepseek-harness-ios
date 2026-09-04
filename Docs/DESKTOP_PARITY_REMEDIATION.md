@@ -794,3 +794,9 @@ git diff --check
 - `LocalStateHTTPClient.callRPCStream` 通过 `URLSession.bytes` 解码 SSE data frame，支持长连接取消；AppModel 首帧 snapshot，session 后续帧携带 cursor/sessionID，workspace 复用 workspace projection。
 - 生产事件源暂为 250ms persistence polling bridge；workspace follow 已投影为 baseline + upsert/remove/order/archived 增量并有纯函数回归。live loopback 回归 `LocalStateServerTests.testLiveHTTPClientReceivesSnapshotFirstSSEStream` 通过，完整 SwiftPM 945 tests、5 skipped、0 failures，Xcode arm64 Simulator BUILD SUCCEEDED，Plugin Host/Node smoke/两项审计通过。
 - 状态：`VERIFY`。仍缺上游原生 AsyncIterable/event subscription、workspace baseline/increment、断线重连 generation、WebSocket、端口冲突、前后台生命周期及 iPhone 16 Pro 真机证据。
+
+### PAR-107 · Exa/Perplexity transport failure fixtures（2026-09-04）
+
+- 为 `ExaSearchProvider` 与 `PerplexitySearchProvider` 增加可选 `URLProtocol` 注入，仅用于测试复现真实 transport；生产默认路径不变。
+- 回归覆盖 Exa 429、Perplexity 401、Perplexity timeout，断言 provider-specific endpoint 错误或 `WebFetchError.timedOut`，并保留原有 citation/highlight 映射测试。
+- 专项 `ExaSearchProviderTests|PerplexitySearchProviderTests` 9 项通过；真实 endpoint、重试/断网恢复、Keychain/UI 与 iPhone 16 Pro 仍为 `VERIFY`。

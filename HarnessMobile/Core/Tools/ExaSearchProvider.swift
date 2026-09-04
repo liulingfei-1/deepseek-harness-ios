@@ -23,7 +23,8 @@ struct ExaSearchProvider: WebSearchProvider {
         baseURL: String = Self.defaultBaseURL,
         searchType: String = Self.defaultSearchType,
         highlightsPerResult: Int = Self.defaultHighlightsPerResult,
-        timeout: TimeInterval = 60
+        timeout: TimeInterval = 60,
+        protocolClasses: [AnyClass]? = nil
     ) {
         self.identifier = Self.identifierValue
         self.approvalResources = []
@@ -31,7 +32,7 @@ struct ExaSearchProvider: WebSearchProvider {
         self.baseURL = baseURL
         self.searchType = searchType
         self.highlightsPerResult = highlightsPerResult
-        self.client = WebSearchHTTPClient(timeout: timeout)
+        self.client = WebSearchHTTPClient(timeout: timeout, protocolClasses: protocolClasses)
     }
 
     func search(query: String, maximumResults: Int) async throws -> [WebSearchProviderSource] {

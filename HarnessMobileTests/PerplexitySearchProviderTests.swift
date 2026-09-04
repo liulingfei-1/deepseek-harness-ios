@@ -10,6 +10,11 @@ import XCTest
 /// `web-search-perplexity`: `search_results[]` are primary; bare
 /// `citations[]` URLs are the fallback when search results are absent.
 final class PerplexitySearchProviderTests: XCTestCase {
+    override func tearDown() {
+        SearchProviderURLProtocolStub.handler = nil
+        super.tearDown()
+    }
+
     func testSearchResultsCarryTitleAndSnippet() {
         // Perplexity attaches these to the completion response's top level.
         let response: JSONValue = .object([
@@ -44,5 +49,41 @@ final class PerplexitySearchProviderTests: XCTestCase {
 
     func testNeitherSourceYieldsEmpty() {
         XCTAssertEqual(PerplexitySearchMapper.sources(from: .object([:])), [])
+    }
+
+    func testTransportMapsUnauthorizedStatus() async throws {
+        SearchProviderURLProtocolStub.handler = { request in
+            let response = try XCTUnwrap(HTTPURLResponse(
+                url: try XCTUnwrap(request.url), statusCode: 401,
+                httpVersion: "HTTP/1.1", headerFields: nil
+            ))
+            return (response, Data("unauthorized".utf8))
+        }
+        let provider = PerplexitySearchProvider(
+            resolveApiKey: { "perplexity-test" },
+            baseURL: "https://perplexity.test",
+            protocolClasses: [SearchProviderURLProtocolStub.self]
+        )
+        do {
+            _ = try await provider.search(query: "swift", maximumResults: 3)
+            XCTFail("expected 401")
+        } catch let error as PerplexitySearchError {
+            XCTAssertEqual(error, .endpoint(status: 401, detail: "端点 https://perplexity.test 返回 401：unauthorized"))
+        }
+    }
+
+    func testTransportMapsTimeout() async throws {
+        SearchProviderURLProtocolStub.handler = { _ in throw URLError(.timedOut) }
+        let provider = PerplexitySearchProvider(
+            resolveApiKey: { "perplexity-test" },
+            baseURL: "https://perplexity.test",
+            protocolClasses: [SearchProviderURLProtocolStub.self]
+        )
+        do {
+            _ = try await provider.search(query: "swift", maximumResults: 3)
+            XCTFail("expected timeout")
+        } catch let error as WebFetchError {
+            XCTAssertEqual(error, .timedOut)
+        }
     }
 }

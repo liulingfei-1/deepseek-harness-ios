@@ -125,6 +125,10 @@ scan_files() {
       # In-process URLProtocol fixture for RFC 6749 OAuth refresh request
       # encoding/decoding. Production OAuth refresh I/O stays in Core/Network.
       outside-network:*/HarnessMobileTests/ProviderRequestLifecycleTests.swift) continue ;;
+      # In-process URLProtocol fixtures for Exa/Perplexity provider status and
+      # timeout contracts; production search I/O stays in Core/Tools/WebFetchTool.
+      outside-network:*/HarnessMobileTests/ExaSearchProviderTests.swift) continue ;;
+      outside-network:*/HarnessMobileTests/PerplexitySearchProviderTests.swift) continue ;;
       outside-network:*/HarnessMobileTests/HarnessLLMSessionRegistryTests.swift) continue ;;
       outside-network:*/HarnessMobileTests/SessionTrajectoryRepositoryTests.swift) continue ;;
       outside-network:*/HarnessMobileTests/MCPClientTests.swift) continue ;;
