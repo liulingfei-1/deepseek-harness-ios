@@ -408,6 +408,41 @@ final class LocalStateServerTests: XCTestCase {
         XCTAssertEqual(values[0].objectValue?["type"], .string("baseline"))
     }
 
+    func testRPCStreamPublishesConnectionStatesAndGeneration() async throws {
+        let server = LocalStateServer(
+            endpoints: [],
+            streamRPCHandler: { _, _ in
+                AsyncThrowingStream { continuation in
+                    continuation.yield(.object(["type": .string("baseline")]))
+                    continuation.finish()
+                }
+            }
+        )
+        XCTAssertNotNil(server)
+        server?.start()
+        defer { server?.stop() }
+        var assignedPort: UInt16 = 0
+        for _ in 0..<40 {
+            if let port = server?.port, port > 0 {
+                assignedPort = port
+                break
+            }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        let states = ConnectionStateRecorder()
+        let stream = LocalStateHTTPClient(port: assignedPort).callRPCStream(
+            method: "session/control",
+            onStateChange: { snapshot in
+                Task { await states.append(snapshot) }
+            }
+        )
+        for try await _ in stream { }
+        try await Task.sleep(for: .milliseconds(25))
+        let snapshots = await states.values()
+        XCTAssertEqual(snapshots.map(\.state), [.connecting, .connected, .disconnected])
+        XCTAssertEqual(snapshots.map(\.generation), [0, 1, 1])
+    }
+
     func testLiveHTTPClientReconnectsAndResumesSessionCursor() async throws {
         let counter = ReconnectingStreamCounter()
         let server = LocalStateServer(
@@ -777,6 +812,18 @@ final class LocalStateServerTests: XCTestCase {
             webhookSecret: "test-secret"
         )
         XCTAssertEqual(rejected.status, 401)
+    }
+}
+
+private actor ConnectionStateRecorder {
+    private var snapshots: [LocalStateHTTPClient.ConnectionSnapshot] = []
+
+    func append(_ snapshot: LocalStateHTTPClient.ConnectionSnapshot) {
+        snapshots.append(snapshot)
+    }
+
+    func values() -> [LocalStateHTTPClient.ConnectionSnapshot] {
+        snapshots
     }
 }
 

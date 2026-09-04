@@ -25,7 +25,7 @@
 | E2B | 官方 `e2b` SDK 的共享 Sandbox；`fs-e2b` 与 `subprocess-e2b` 复用同一 sandbox | 无官方 SDK/远端账号配置；iSH 仅能作语义替代 | `IOS-REPLACEMENT/VERIFY` |
 | Credential records | `CredentialRecord = ApiKeyRecord | GrantRecord`；授权 flow 观察到 record commit 才算成功；刷新使用 read-modify-write | 本地已有 API-key/OAuth Keychain records、single-flight、RFC 6749 refresh client 与手动 grant 录入；缺 provider-specific 授权 flow/401 retry | `VERIFY` |
 | Provider reload | 上游 route 可在设置变化后无重启生效；模型/凭据按请求解析 | 本地有 profile generation、模型 capability cache；缺 OAuth 生命周期闭环 | `VERIFY` |
-| Local web UI | 桌面 web server/client-half 独立存在 | loopback API/WKWebView 可用，桌面 frontend bundle 尚未接入 | `VERIFY` |
+| Local web UI | 桌面 web server/client-half 独立存在 | loopback API/WKWebView 可用，桌面 frontend bundle 尚未接入；`LocalStateHTTPClient` 已暴露 connecting/connected/disconnected 与 monotone generation | `VERIFY` |
 | Session attachment | `session.attachment(sessionId, attachmentId)` 先做 Session 轨迹引用授权，再返回 `ImageAttachmentRef + base64`；未引用返回 `session/attachment-invalid` | 已接入本地 `session/attachment` RPC，复用 canonical trajectory 与 `WorkspaceStore.readAttachment`，返回媒体类型、字节数、像素尺寸和 base64；专项回归通过 | `VERIFY` |
 | Session control stream | 上游 `SessionControlController.control()` 首帧 baseline，随后推送 queue/jobs/projection replacement，支持 AbortSignal 结束 | 已接入 loopback `session/control` SSE/chunked stream；baseline 覆盖 queue/jobs/projection，jobs 来自本地 `HarnessJobRegistry`，queue/jobs/基础运行状态 replacement 由 `SessionRunRegistry` + 250ms 轮询产生；原生事件订阅和 generation 语义仍缺 | `VERIFY` |
 | Windows host | PowerShell/win32/ACL 依赖 Windows 内核 | iOS 无等价内核能力 | `OUT-OF-SCOPE` |

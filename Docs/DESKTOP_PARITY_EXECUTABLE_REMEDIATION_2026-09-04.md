@@ -50,6 +50,7 @@ git diff --check
 | PARITY-018 | Session controller `updateQueue`：编辑、移除、steer 挂起输入 | `AppModel.handleLocalStateRPC` → `SessionRunRegistry` → `SessionRunState` | VERIFY | 已接入 action 路由并复用现有持久化；需 live Agent queue、错误码、真实 Desktop client/真机验证 |
 | PARITY-019 | Session controller `attachment`：按会话引用读取图片 | `session/attachment` → canonical trajectory reference check → `WorkspaceStore.readAttachment` → metadata/base64 | VERIFY | 已实现 UUID 引用授权、读取和像素尺寸投影；完整上游 fixture 与真机图片渲染仍待验证 |
 | PARITY-020 | Host-wide `SessionControlController.control()` baseline + live replacement stream | `session/control` stream → queues/jobs/projections baseline and updates | VERIFY | 已接入 baseline 与 queue/jobs/基础 projection replacement 的 loopback SSE/chunked bridge；原生事件源和 AbortSignal/generation 语义仍待补齐 |
+| PARITY-021 | Client connection state/generation | `LocalStateHTTPClient.callRPCStream` → connecting/connected/disconnected callbacks + monotone generation | VERIFY | 已实现并回归；WKWebView online/offline、retry jitter、AbortSignal cascade 和真实 Desktop client 互操作仍待补齐 |
 | PARITY-014 | frontend-static/client-half、Windows host 包 | loopback route 已补 `GET/HEAD` 兼容；WKWebView 可承载但桌面 bundle 未接入 | OUT-OF-SCOPE/VERIFY | 打包并接入真实 bundle；Windows PowerShell/win32/ACL 保持平台不适用 |
 
 ### PARITY-002 本批次逐步修改清单

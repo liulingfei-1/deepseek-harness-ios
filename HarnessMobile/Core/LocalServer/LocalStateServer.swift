@@ -978,6 +978,17 @@ private func localChunkRun(kind: String, events: [SessionEvent]) throws -> JSONV
 struct LocalStateHTTPClient: Sendable {
     let baseURL: URL
 
+    enum ConnectionState: String, Sendable, Equatable {
+        case connecting
+        case connected
+        case disconnected
+    }
+
+    struct ConnectionSnapshot: Sendable, Equatable {
+        let state: ConnectionState
+        let generation: Int
+    }
+
     init(port: UInt16) {
         baseURL = URL(string: "http://127.0.0.1:\(port)")!
     }
@@ -1027,14 +1038,24 @@ struct LocalStateHTTPClient: Sendable {
         method: String,
         payload: JSONValue = .object([:]),
         reconnect: Bool = false,
-        maximumReconnectAttempts: Int = 5
+        maximumReconnectAttempts: Int = 5,
+        onStateChange: (@Sendable (ConnectionSnapshot) -> Void)? = nil
     ) -> AsyncThrowingStream<JSONValue, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 var nextPayload = payload
                 var reconnectAttempt = 0
+                var generation = 0
+                var lastState: ConnectionState?
+                func emit(_ state: ConnectionState) {
+                    guard lastState != state || state == .connected else { return }
+                    lastState = state
+                    if state == .connected { generation += 1 }
+                    onStateChange?(ConnectionSnapshot(state: state, generation: generation))
+                }
                 do {
                     while !Task.isCancelled {
+                        emit(.connecting)
                         do {
                             let body = try JSONEncoder().encode([
                                 "type": JSONValue.string("client-request"),
@@ -1053,6 +1074,7 @@ struct LocalStateHTTPClient: Sendable {
                                   (200..<300).contains(http.statusCode) else {
                                 throw LocalStateHTTPError.invalidResponse
                             }
+                            emit(.connected)
                             for try await line in bytes.lines {
                                 guard line.hasPrefix("data: ") else { continue }
                                 let data = Data(line.dropFirst(6).utf8)
@@ -1075,10 +1097,12 @@ struct LocalStateHTTPClient: Sendable {
                                 }
                             }
                             guard reconnect else {
+                                emit(.disconnected)
                                 continuation.finish()
                                 return
                             }
                         } catch {
+                            emit(.disconnected)
                             guard reconnect, !Task.isCancelled else { throw error }
                         }
                         reconnectAttempt += 1
@@ -1089,8 +1113,10 @@ struct LocalStateHTTPClient: Sendable {
                         let delay = min(10_000, 500 * (1 << min(reconnectAttempt - 1, 4)))
                         try await Task.sleep(for: .milliseconds(delay))
                     }
+                    emit(.disconnected)
                     continuation.finish()
                 } catch {
+                    emit(.disconnected)
                     if !Task.isCancelled { continuation.finish(throwing: error) }
                 }
             }

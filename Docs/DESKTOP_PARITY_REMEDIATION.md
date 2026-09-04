@@ -861,6 +861,14 @@ git diff --check
 - 测试命令与真实结果：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter LocalStateServerTests.testLiveHTTPClientReceivesSessionControlBaseline|LocalStateServerTests.testSessionControlFramesEmitBaselineAndQueueReplacement`：2/2 通过。
 - 剩余动作：接入 durable jobs、projection event bus、原生事件订阅和 generation/AbortSignal 语义，再用上游 `control-queue.host.spec.ts` 做逐帧对照；真机/真实 Desktop client 互操作前保持 `VERIFY`。
 
+### PAR-116 · Loopback client connection state（2026-09-04）
+
+- 状态：`VERIFY`
+- 上游证据：`packages/client/connection/src/client/connection.ts`；连接状态为 `connecting`/`connected`/`disconnected`，成功建立 generation 单调递增，断线和停止撤回当前 generation。
+- 移动端变更：`LocalStateHTTPClient.callRPCStream` 增加 `onStateChange` 回调，按一次连接尝试发出 connecting/connected/disconnected，connected 时 generation 单调递增；follow/control 共用该 client seam。
+- 测试命令与真实结果：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter LocalStateServerTests.testRPCStreamPublishesConnectionStatesAndGeneration`：1/1 通过。
+- 剩余动作：将状态接入实际 WKWebView client、网络 online/offline 事件、重试抖动和 AbortSignal 级联，并以真实 Desktop client/真机验证。
+
 ### PAR-107 · Exa/Perplexity transport failure fixtures（2026-09-04）
 
 - 为 `ExaSearchProvider` 与 `PerplexitySearchProvider` 增加可选 `URLProtocol` 注入，仅用于测试复现真实 transport；生产默认路径不变。
