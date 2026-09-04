@@ -14,7 +14,7 @@
 
 | 项目 | 已验证值 |
 |---|---|
-| 移动端 HEAD | `9e33cd43` |
+| 移动端 HEAD（本分支最新） | `947e7671` |
 | 当前移动端锁定上游 | `76fda729799fe9b3848dbe2c211d4b231032b81e` / GitHub master（2026-09-03） |
 | 最新上游仓库 | `deepseek-ai/deepseek-harness` |
 | 最新上游 HEAD | `76fda729799fe9b3848dbe2c211d4b231032b81e`（2026-09-03） |

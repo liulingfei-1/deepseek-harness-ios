@@ -3,7 +3,7 @@
 ### PARITY-PLAN-2026-09-03 · 全量逐项实施计划
 
 - **状态**：ACTIVE
-- **证据**：新增 `Docs/DESKTOP_PARITY_IMPLEMENTATION_PLAN_2026-09-03.md`，基于移动端 HEAD `9e33cd43`、锁定上游 `dsh-v0.1.1-rc.2` 与最新上游 `76fda729799fe9b3848dbe2c211d4b231032b81e` 的源码/运行审计。
+- **证据**：新增 `Docs/DESKTOP_PARITY_IMPLEMENTATION_PLAN_2026-09-03.md`，记录审计起点与当前分支 `947e7671`；基于最新上游 `76fda729799fe9b3848dbe2c211d4b231032b81e` 的源码/运行审计。
 - **范围**：请求扩展、session log、telemetry、turn outline、ACP、子 Agent 路由、hooks、Exa/Perplexity、agent team、LocalStateServer、`llm-pi-ai`、e2b/webhook 与平台发行形态共 14 项。
 - **执行规则**：每项按上游核对 → 生产接线 → 专项测试 → Simulator/真机证据 → 回写本日志顺序推进；源码、测试和设备结果优先于控制文档。
 - **当前结果**：计划文档已创建；源码改造从 PARITY-001 开始，尚未宣称任何新增项完成。
