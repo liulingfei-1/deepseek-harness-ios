@@ -945,9 +945,41 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
             let visible = Set(try await sessionStore.listSessions().map(\.id))
             return localSessionSearchPayload(hits: hits, visibleSessionIDs: visible)
         case "session/modelCatalog":
+            var refreshedFailures: [JSONValue] = []
+            if fields["refresh"] == .bool(true) {
+                let requestedID = fields["profileId"]?.stringValue
+                let targets = providerDirectory.profiles.filter { profile in
+                    requestedID == nil || requestedID == profile.id
+                }
+                var nextDirectory = providerDirectory
+                for profile in targets where profile.descriptor.supportsRemoteModelDiscovery {
+                    do {
+                        let snapshot = try await discoverModels(for: profile.configuration(), forceRefresh: true)
+                        var refreshed = profile
+                        refreshed.models = snapshot.models
+                        if !refreshed.models.contains(where: { $0.id == refreshed.defaultModel }),
+                           let first = refreshed.models.first {
+                            refreshed.defaultModel = first.id
+                        }
+                        nextDirectory.upsert(refreshed, makeActive: nextDirectory.activeProfileID == refreshed.id)
+                    } catch {
+                        refreshedFailures.append(.object([
+                            "profileId": .string(profile.id),
+                            "message": .string(error.localizedDescription)
+                        ]))
+                    }
+                }
+                if nextDirectory != providerDirectory {
+                    try settingsStore.save(nextDirectory)
+                    providerDirectory = nextDirectory
+                    for profile in targets { advanceProviderRouteGeneration(for: profile.id) }
+                    await refreshProviderCredentialStatuses()
+                }
+            }
             return localSessionModelCatalogPayload(
                 profiles: providerDirectory.profiles,
-                activeProfileID: providerDirectory.activeProfileID
+                activeProfileID: providerDirectory.activeProfileID,
+                failures: refreshedFailures
             )
         case "session/attachment":
             let id = try sessionID()

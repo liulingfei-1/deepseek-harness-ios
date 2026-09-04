@@ -801,7 +801,8 @@ func localSessionSearchPayload(
 
 func localSessionModelCatalogPayload(
     profiles: [ProviderProfile],
-    activeProfileID: String?
+    activeProfileID: String?,
+    failures: [JSONValue] = []
 ) -> JSONValue {
     let groups: [JSONValue] = profiles.map { profile in
         .object([
@@ -837,7 +838,7 @@ func localSessionModelCatalogPayload(
                 ? .null : .string(fallback.reasoningMode.rawValue)
         ]),
         "routableProviders": .array(profiles.map { .string($0.providerID.rawValue) }),
-        "groups": .array(groups), "failures": .array([])
+        "groups": .array(groups), "failures": .array(failures)
     ])
 }
 

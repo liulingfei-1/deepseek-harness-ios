@@ -869,6 +869,14 @@ git diff --check
 - 测试命令与真实结果：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter LocalStateServerTests.testRPCStreamPublishesConnectionStatesAndGeneration`：1/1 通过。
 - 剩余动作：将状态接入实际 WKWebView client、网络 online/offline 事件、重试抖动和 AbortSignal 级联，并以真实 Desktop client/真机验证。
 
+### PAR-117 · Provider model catalog refresh（2026-09-04）
+
+- 状态：`VERIFY`
+- 上游证据：`packages/api/session-controller/src/catalog.ts`；model catalog 每次按当前 provider route 解析，可在 provider reload 后无重启刷新。
+- 移动端变更：`session/modelCatalog` 接受 `refresh: true` 及可选 `profileId`，调用既有 `ModelCatalogDiscovering.discoverModels(forceRefresh: true)`，将成功目录写回 `ProviderProfileDirectory`、提升 profile route generation，并将失败项返回 `failures`。
+- 自动化证据：现有 `AppModelModelDiscoveryTests` 覆盖强制刷新、临时凭据隔离和 capability 合并；本批次通过编译和既有专项测试。
+- 剩余动作：补真实 provider endpoint / OAuth-backed refresh 与 Desktop client 互操作证据；未取得前保持 `VERIFY`。
+
 ### PAR-107 · Exa/Perplexity transport failure fixtures（2026-09-04）
 
 - 为 `ExaSearchProvider` 与 `PerplexitySearchProvider` 增加可选 `URLProtocol` 注入，仅用于测试复现真实 transport；生产默认路径不变。
