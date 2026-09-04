@@ -991,6 +991,39 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         case "session/cancel":
             cancelRun()
             return .object(["accepted": .bool(true)])
+        case "session/updateQueue":
+            let id = try sessionID()
+            guard let rawItemID = fields["itemId"]?.stringValue,
+                  let itemID = UUID(uuidString: rawItemID),
+                  let identity = selectedRunPresentation?.identity,
+                  identity.sessionID == id else {
+                throw LocalStateRPCError.invalidPayload("itemId")
+            }
+            guard let action = fields["action"]?.objectValue,
+                  let kind = action["kind"]?.stringValue else {
+                throw LocalStateRPCError.invalidPayload("action")
+            }
+            switch kind {
+            case "edit":
+                let text = action["text"]?.stringValue ?? ""
+                guard !text.isEmpty else { throw LocalStateRPCError.invalidPayload("action.text") }
+                guard try await sessionRunRegistry.updateQueuedInput(
+                    id: itemID, text: text, for: identity
+                ) else { throw LocalStateRPCError.invalidPayload("itemId") }
+            case "remove":
+                guard try await sessionRunRegistry.removeQueuedInput(id: itemID, for: identity) else {
+                    throw LocalStateRPCError.invalidPayload("itemId")
+                }
+            case "steer":
+                guard try await sessionRunRegistry.steerQueuedInput(id: itemID, for: identity) else {
+                    throw LocalStateRPCError.invalidPayload("itemId")
+                }
+            default:
+                throw LocalStateRPCError.invalidPayload("action.kind")
+            }
+            await persistSelectedRunInbox(identity: identity)
+            await persistSession()
+            return .object(["accepted": .bool(true)])
         case "session/follow":
             let id = try sessionID()
             let since: Int
