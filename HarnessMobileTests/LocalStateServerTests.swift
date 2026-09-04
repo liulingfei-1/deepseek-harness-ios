@@ -101,6 +101,57 @@ final class LocalStateServerTests: XCTestCase {
         XCTAssertNil(localReferencedImage(in: [event].compactMap { $0 }, attachmentID: UUID()))
     }
 
+    func testSessionControlFramesEmitBaselineAndQueueReplacement() throws {
+        let sessionID = UUID()
+        let summary = ConversationSessionSummary(
+            id: sessionID,
+            title: "control",
+            messageCount: 0,
+            createdAt: .now,
+            updatedAt: .now,
+            revision: 0,
+            archivedAt: nil,
+            forkedFromSessionID: nil,
+            queuedInputCount: 1,
+            isResumable: true
+        )
+        let identity = RunIdentity(sessionID: sessionID, runID: UUID(), generation: 1)
+        var presentation = SessionRunPresentation(identity: identity)
+        presentation.queuedInputs = [try QueuedAgentInput(text: "next")]
+        let run = SessionRunSnapshot(
+            identity: identity,
+            trajectorySessionID: sessionID,
+            phase: .running,
+            createdGeneration: 1,
+            backgroundLeaseTokens: [],
+            presentation: presentation
+        )
+        let baseline = localSessionControlBaseline(
+            sessions: [summary],
+            aggregate: SessionRunAggregateSnapshot(runs: [run])
+        )
+        XCTAssertEqual(baseline.objectValue?["type"], .string("baseline"))
+        var emptyPresentation = SessionRunPresentation(identity: identity)
+        emptyPresentation.queuedInputs = []
+        let changed = localSessionControlBaseline(
+            sessions: [summary],
+            aggregate: SessionRunAggregateSnapshot(runs: [
+                SessionRunSnapshot(
+                    identity: identity,
+                    trajectorySessionID: sessionID,
+                    phase: .running,
+                    createdGeneration: 1,
+                    backgroundLeaseTokens: [],
+                    presentation: emptyPresentation
+                )
+            ])
+        )
+        let frames = localSessionControlFrames(previous: baseline, current: changed)
+        XCTAssertEqual(frames.count, 1)
+        XCTAssertEqual(frames[0].objectValue?["type"], .string("queue"))
+        XCTAssertEqual(frames[0].objectValue?["sessionId"], .string(sessionID.uuidString.lowercased()))
+    }
+
     func testRouteServesConnectionRPCEnvelopeAndCorrelatesID() throws {
         let request = "POST /api HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
             + #"{"type":"client-request","rpcId":"rpc-1","method":"session/status","payload":{}}"#
@@ -315,6 +366,46 @@ final class LocalStateServerTests: XCTestCase {
         XCTAssertEqual(values.count, 2)
         XCTAssertEqual(values[0].objectValue?["type"], .string("snapshot"))
         XCTAssertEqual(values[1].objectValue?["type"], .string("event"))
+    }
+
+    func testLiveHTTPClientReceivesSessionControlBaseline() async throws {
+        let server = LocalStateServer(
+            endpoints: [],
+            streamRPCHandler: { method, _ in
+                XCTAssertEqual(method, "session/control")
+                return AsyncThrowingStream { continuation in
+                    continuation.yield(.object([
+                        "type": .string("baseline"),
+                        "value": .object([
+                            "queues": .object([:]),
+                            "jobs": .object([:]),
+                            "projections": .object([:])
+                        ])
+                    ]))
+                    continuation.finish()
+                }
+            }
+        )
+        XCTAssertNotNil(server)
+        server?.start()
+        defer { server?.stop() }
+        var assignedPort: UInt16 = 0
+        for _ in 0..<40 {
+            if let port = server?.port, port > 0 {
+                assignedPort = port
+                break
+            }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        XCTAssertGreaterThan(assignedPort, 0)
+        let stream = LocalStateHTTPClient(port: assignedPort).callRPCStream(
+            rpcID: "control-1",
+            method: "session/control"
+        )
+        var values: [JSONValue] = []
+        for try await value in stream { values.append(value) }
+        XCTAssertEqual(values.count, 1)
+        XCTAssertEqual(values[0].objectValue?["type"], .string("baseline"))
     }
 
     func testLiveHTTPClientReconnectsAndResumesSessionCursor() async throws {

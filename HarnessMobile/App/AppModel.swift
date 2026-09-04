@@ -1289,13 +1289,29 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         method: String,
         payload: JSONValue
     ) async throws -> AsyncThrowingStream<JSONValue, Error> {
-        guard method == "session/follow" || method == "workspace/follow" else {
+        guard method == "session/follow" || method == "workspace/follow" || method == "session/control" else {
             throw LocalStateRPCError.methodNotFound(method)
         }
         return AsyncThrowingStream { continuation in
             let task = Task { @MainActor [weak self] in
                 do {
-                    if method == "workspace/follow" {
+                    if method == "session/control" {
+                        var previous: JSONValue?
+                        while !Task.isCancelled {
+                            guard let self else { break }
+                            let summaries = try await self.sessionStore.listSessions()
+                            let aggregate = await self.sessionRunRegistry.aggregate()
+                            let current = localSessionControlBaseline(
+                                sessions: summaries,
+                                aggregate: aggregate
+                            )
+                            for frame in localSessionControlFrames(previous: previous, current: current) {
+                                continuation.yield(frame)
+                            }
+                            previous = current
+                            try await Task.sleep(for: .milliseconds(250))
+                        }
+                    } else if method == "workspace/follow" {
                         var previous: JSONValue?
                         while !Task.isCancelled {
                             guard let self else { break }

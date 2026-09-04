@@ -21,7 +21,7 @@ struct LocalStateAPISchema: Codable, Sendable, Equatable {
                 name: "session",
                 methods: [
                     "list", "status", "create", "select", "switch", "rename",
-                    "delete", "archive", "restore", "fork", "prompt", "cancel", "follow", "page", "search", "modelCatalog", "updateQueue", "attachment"
+                    "delete", "archive", "restore", "fork", "prompt", "cancel", "follow", "page", "search", "modelCatalog", "updateQueue", "attachment", "control"
                 ]
             ),
             LocalStateAPIController(
@@ -390,7 +390,9 @@ final class LocalStateServer: @unchecked Sendable {
             self.webhookHandlerLock.unlock()
             if let streamRPCHandler = self.streamRPCHandler,
                let rpcRequest = Self.rpcRequest(in: request),
-               rpcRequest.method == "session/follow" || rpcRequest.method == "workspace/follow" {
+               rpcRequest.method == "session/follow"
+                || rpcRequest.method == "workspace/follow"
+                || rpcRequest.method == "session/control" {
                 self.stream(rpcRequest, using: streamRPCHandler, on: connection)
                 return
             }
@@ -590,6 +592,76 @@ enum LocalStateRPCError: LocalizedError, Sendable, Equatable {
         case let .attachmentInvalid(reason): return reason
         }
     }
+}
+
+func localSessionControlBaseline(
+    sessions: [ConversationSessionSummary],
+    aggregate: SessionRunAggregateSnapshot
+) -> JSONValue {
+    var queues: [String: JSONValue] = [:]
+    var projections: [String: JSONValue] = [:]
+    for session in sessions {
+        let id = session.id.uuidString.lowercased()
+        let presentation = aggregate.runs.first { $0.identity.sessionID == session.id }?.presentation
+        let items = presentation?.queuedInputs.map { input in
+            JSONValue.object([
+                "id": .string(input.id.uuidString.lowercased()),
+                "placement": .string(input.disposition == .steer ? "steering" : "queued"),
+                "message": .object([
+                    "id": .string(input.id.uuidString.lowercased()),
+                    "content": .array([.object([
+                        "type": .string("text"),
+                        "text": .string(input.text)
+                    ])])
+                ])
+            ])
+        } ?? []
+        queues[id] = .array(items)
+        projections[id] = .object([
+            "asOfSeq": .number(0),
+            "values": .object([:])
+        ])
+    }
+    return .object([
+        "type": .string("baseline"),
+        "value": .object([
+            "queues": .object(queues),
+            "jobs": .object([:]),
+            "projections": .object(projections)
+        ])
+    ])
+}
+
+func localSessionControlFrames(previous: JSONValue?, current: JSONValue) -> [JSONValue] {
+    guard let previous, let oldValue = previous.objectValue?["value"]?.objectValue,
+          let newValue = current.objectValue?["value"]?.objectValue else {
+        return [current]
+    }
+    var frames: [JSONValue] = []
+    let oldQueues = oldValue["queues"]?.objectValue ?? [:]
+    let newQueues = newValue["queues"]?.objectValue ?? [:]
+    for sessionID in newQueues.keys.sorted() where oldQueues[sessionID] != newQueues[sessionID] {
+        frames.append(.object([
+            "type": .string("queue"),
+            "sessionId": .string(sessionID),
+            "items": newQueues[sessionID] ?? .array([])
+        ]))
+    }
+    let oldProjections = oldValue["projections"]?.objectValue ?? [:]
+    let newProjections = newValue["projections"]?.objectValue ?? [:]
+    for sessionID in newProjections.keys.sorted() {
+        guard oldProjections[sessionID] != newProjections[sessionID],
+              let projection = newProjections[sessionID]?.objectValue,
+              let values = projection["values"] else { continue }
+        frames.append(.object([
+            "type": .string("projection"),
+            "sessionId": .string(sessionID),
+            "key": .string("state"),
+            "value": values,
+            "seq": projection["asOfSeq"] ?? .number(0)
+        ]))
+    }
+    return frames
 }
 
 /// Finds a durable image reference in the canonical session event stream.

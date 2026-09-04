@@ -27,7 +27,7 @@
 | Provider reload | 上游 route 可在设置变化后无重启生效；模型/凭据按请求解析 | 本地有 profile generation、模型 capability cache；缺 OAuth 生命周期闭环 | `VERIFY` |
 | Local web UI | 桌面 web server/client-half 独立存在 | loopback API/WKWebView 可用，桌面 frontend bundle 尚未接入 | `VERIFY` |
 | Session attachment | `session.attachment(sessionId, attachmentId)` 先做 Session 轨迹引用授权，再返回 `ImageAttachmentRef + base64`；未引用返回 `session/attachment-invalid` | 已接入本地 `session/attachment` RPC，复用 canonical trajectory 与 `WorkspaceStore.readAttachment`，返回媒体类型、字节数、像素尺寸和 base64；专项回归通过 | `VERIFY` |
-| Session control stream | 上游 `SessionControlController.control()` 首帧 baseline，随后推送 queue/jobs/projection replacement，支持 AbortSignal 结束 | 尚未接入 host-wide control stream；本地只有按 Session 的 follow 轮询流，队列/状态可从 `SessionRunRegistry` 读取但未统一成上游 frame | `TODO` |
+| Session control stream | 上游 `SessionControlController.control()` 首帧 baseline，随后推送 queue/jobs/projection replacement，支持 AbortSignal 结束 | 已接入 loopback `session/control` SSE/chunked stream；baseline 覆盖 Session queue/projection 外壳，queue replacement 由 `SessionRunRegistry` 250ms 轮询产生；jobs、完整 projection replacement、原生事件订阅和 generation 语义仍缺 | `VERIFY` |
 | Windows host | PowerShell/win32/ACL 依赖 Windows 内核 | iOS 无等价内核能力 | `OUT-OF-SCOPE` |
 
 ## 3. 逐项执行顺序
@@ -73,7 +73,8 @@
 - [ ] 将上游 `frontend-static/client-half` 接入现有 WKWebView；UI 状态仍由本地 projection 提供。
 - [x] 增加 `session/attachment`：按 Session 轨迹中的 `imageAttachments` 做引用授权，读取本地 durable image 并返回 desktop 兼容元数据/base64；未引用或读取失败拒绝，专项回归通过。
 - [ ] 用上游 `session-models.host.spec.ts` 的完整 attachment fixture 做逐字段 wire 对照；真实设备图片渲染证据取得前保持 `VERIFY`。
-- [ ] 实现 `session/control` host-wide baseline + queue/jobs/projection replacement stream；接入客户端取消/generation，补上游 `control-queue.host.spec.ts` 对照测试。
+- [x] 接入 `session/control` host-wide baseline 与 queue replacement stream，并增加 loopback SSE 回归。
+- [ ] 补齐 jobs/projection replacement、原生事件订阅、AbortSignal/generation 与上游 `control-queue.host.spec.ts` 逐帧对照。
 - [x] loopback route 补齐上游静态宿主的 `HEAD` 请求语义（200 + 空 body），并加入路由回归。
 - [ ] Windows PowerShell/win32/ACL 保持 `OUT-OF-SCOPE`，不得伪造 iOS 实现。
 
