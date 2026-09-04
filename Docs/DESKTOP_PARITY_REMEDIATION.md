@@ -873,7 +873,7 @@ git diff --check
 
 - 状态：`VERIFY`
 - 上游证据：`packages/api/session-controller/src/catalog.ts`；model catalog 每次按当前 provider route 解析，可在 provider reload 后无重启刷新。
-- 移动端变更：`session/modelCatalog` 接受 `refresh: true` 及可选 `profileId`，调用既有 `ModelCatalogDiscovering.discoverModels(forceRefresh: true)`，将成功目录写回 `ProviderProfileDirectory`、提升 profile route generation，并将失败项返回 `failures`。
+- 移动端变更：`session/modelCatalog` 接受 `refresh: true` 及可选 `profileId`，调用既有 `ModelCatalogDiscovering.discoverModels(forceRefresh: true)`，将成功目录写回 `ProviderProfileDirectory`、仅提升成功 profile 的 route generation，并将失败项返回 `failures`；未知 `profileId` 拒绝。
 - 自动化证据：现有 `AppModelModelDiscoveryTests` 覆盖强制刷新、临时凭据隔离和 capability 合并；本批次通过编译和既有专项测试。
 - 剩余动作：补真实 provider endpoint / OAuth-backed refresh 与 Desktop client 互操作证据；未取得前保持 `VERIFY`。
 

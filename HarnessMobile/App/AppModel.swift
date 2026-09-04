@@ -951,7 +951,11 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                 let targets = providerDirectory.profiles.filter { profile in
                     requestedID == nil || requestedID == profile.id
                 }
+                if let requestedID, targets.isEmpty {
+                    throw LocalStateRPCError.invalidPayload("profileId")
+                }
                 var nextDirectory = providerDirectory
+                var refreshedIDs = Set<String>()
                 for profile in targets where profile.descriptor.supportsRemoteModelDiscovery {
                     do {
                         let snapshot = try await discoverModels(for: profile.configuration(), forceRefresh: true)
@@ -962,6 +966,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                             refreshed.defaultModel = first.id
                         }
                         nextDirectory.upsert(refreshed, makeActive: nextDirectory.activeProfileID == refreshed.id)
+                        refreshedIDs.insert(profile.id)
                     } catch {
                         refreshedFailures.append(.object([
                             "profileId": .string(profile.id),
@@ -972,7 +977,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                 if nextDirectory != providerDirectory {
                     try settingsStore.save(nextDirectory)
                     providerDirectory = nextDirectory
-                    for profile in targets { advanceProviderRouteGeneration(for: profile.id) }
+                    for profileID in refreshedIDs { advanceProviderRouteGeneration(for: profileID) }
                     await refreshProviderCredentialStatuses()
                 }
             }
