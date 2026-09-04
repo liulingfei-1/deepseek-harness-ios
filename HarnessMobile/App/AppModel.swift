@@ -934,6 +934,15 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                 "running": .bool(isRunning),
                 "resumable": .bool(hasResumableRun)
             ])
+        case "session/search":
+            let query = try requiredString("query").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !query.isEmpty, query.utf16.count <= 500, !query.contains("\0") else {
+                throw LocalStateRPCError.invalidPayload("query")
+            }
+            _ = try await sessionQueryReadModel.rebuild(persistence: trajectoryRepository)
+            let hits = try await sessionQueryReadModel.searchSessions(query: query, limit: 21)
+            let visible = Set(try await sessionStore.listSessions().map(\.id))
+            return localSessionSearchPayload(hits: hits, visibleSessionIDs: visible)
         case "session/create":
             let title = fields["title"]?.stringValue ?? "新会话"
             await createConversation(title: title)

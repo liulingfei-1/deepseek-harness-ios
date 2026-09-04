@@ -438,6 +438,29 @@ final class LocalStateServerTests: XCTestCase {
         ))
     }
 
+    func testSessionSearchPayloadDeduplicatesAndBoundsSnippets() {
+        let first = UUID()
+        let second = UUID()
+        let record = { (id: UUID, title: String) in
+            SessionQuerySessionRecord(
+                id: id, title: title, createdAt: 0, updatedAt: 1,
+                indexedThroughSequence: 1, eventCount: 1, searchableEventCount: 1
+            )
+        }
+        let hits = [
+            SessionQuerySessionHit(session: record(first, "first"), matchCount: 2, matchedEventSequence: 1, snippet: String(repeating: "x", count: 300)),
+            SessionQuerySessionHit(session: record(first, "first"), matchCount: 1, matchedEventSequence: 0, snippet: "duplicate"),
+            SessionQuerySessionHit(session: record(second, "second"), matchCount: 1, matchedEventSequence: 2, snippet: "ok")
+        ]
+        let payload = localSessionSearchPayload(hits: hits, visibleSessionIDs: [first, second], limit: 1)
+        guard case let .array(items)? = payload.objectValue?["items"] else {
+            return XCTFail("search payload must contain items")
+        }
+        XCTAssertEqual(items.count, 1)
+        XCTAssertEqual(items[0].objectValue?["snippet"]?.stringValue?.count, 240)
+        XCTAssertEqual(payload.objectValue?["hasMore"], JSONValue.bool(true))
+    }
+
     func testLiveHTTPClientPostsWebhookAfterSecretIsConfigured() async throws {
         let server = LocalStateServer(endpoints: [])
         XCTAssertNotNil(server)

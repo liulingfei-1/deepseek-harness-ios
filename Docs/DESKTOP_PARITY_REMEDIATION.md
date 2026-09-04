@@ -816,6 +816,15 @@ git diff --check
 - iPhone 16 Pro：未取得真实 Desktop client/page 互操作证据，保持 VERIFY。
 - 剩余平台限制或后续动作：需以完整上游 chunk-row fixture 做跨实现解码比对，并接入真实 client transport、分页跳转和真机长会话验证。
 
+### PAR-111 · Session search RPC（2026-09-04）
+
+- 状态：VERIFY
+- 上游证据：`packages/api/session-controller/src/list.ts` `search`；查询规范化（非空、NUL/500 UTF-16 限制）、只返回可见 Session、按 Session 去重，结果上限 20、snippet 上限 240 code points。
+- 移动端变更：`AppModel.handleLocalStateRPC` 新增 `session/search`，先重建本地 FTS read model，再取 21 条候选并过滤当前 SessionStore；`localSessionSearchPayload` 负责去重、截断和 `hasMore`，schema 宣传 `search`。
+- 测试命令与真实结果：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter LocalStateServerTests.testSessionSearchPayloadDeduplicatesAndBoundsSnippets`：1/1 通过；完整 SwiftPM 基线此前 951/5/0。
+- Simulator：需在本批次收尾门复跑；无真机搜索交互证据前保持 VERIFY。
+- 剩余平台限制或后续动作：本地 FTS 与上游分页 provider 的 stale-cursor/取消重试语义仍未完全同构，需真实 Desktop client 与长查询负载验证。
+
 ### PAR-107 · Exa/Perplexity transport failure fixtures（2026-09-04）
 
 - 为 `ExaSearchProvider` 与 `PerplexitySearchProvider` 增加可选 `URLProtocol` 注入，仅用于测试复现真实 transport；生产默认路径不变。

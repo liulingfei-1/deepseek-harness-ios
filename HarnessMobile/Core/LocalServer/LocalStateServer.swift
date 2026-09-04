@@ -21,7 +21,7 @@ struct LocalStateAPISchema: Codable, Sendable, Equatable {
                 name: "session",
                 methods: [
                     "list", "status", "create", "select", "switch", "rename",
-                    "delete", "archive", "restore", "fork", "prompt", "cancel", "follow", "page"
+                    "delete", "archive", "restore", "fork", "prompt", "cancel", "follow", "page", "search"
                 ]
             ),
             LocalStateAPIController(
@@ -620,6 +620,26 @@ func localSessionPagePayload(
     return .object([
         "sessionId": .string(sessionID.uuidString.lowercased()), "records": .array(records),
         "hasMore": .bool(cut > 0), "throughSeq": .number(throughSequence == -1 ? -1 : Double(through))
+    ])
+}
+
+func localSessionSearchPayload(
+    hits: [SessionQuerySessionHit],
+    visibleSessionIDs: Set<UUID>,
+    limit: Int = 20
+) -> JSONValue {
+    var seen = Set<UUID>()
+    let accepted = hits.filter { hit in
+        visibleSessionIDs.contains(hit.session.id) && seen.insert(hit.session.id).inserted
+    }
+    return .object([
+        "items": .array(accepted.prefix(limit).map { hit in
+            .object([
+                "sessionId": .string(hit.session.id.uuidString.lowercased()),
+                "snippet": .string(String(hit.snippet.prefix(240)))
+            ])
+        }),
+        "hasMore": .bool(accepted.count > limit)
     ])
 }
 
