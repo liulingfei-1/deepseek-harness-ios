@@ -40,7 +40,7 @@ git diff --check
 | PARITY-007 | Claude `SubagentStart/Stop` 与 Codex hook 生命周期 | `HookProtocol` + AppModel child activation | VERIFY | iSH/ACP 真机超时与取消轨迹 |
 | PARITY-008 | Exa/Perplexity provider adapter 与 citation 映射 | `ExaSearchProvider`、`PerplexitySearchProvider` | VERIFY | 401/429/timeout、真实 citation、Keychain/UI 真机 |
 | PARITY-009 | team/workflow 为独立成员状态与恢复 | `LocalWorkflowTool`、`WorkflowRunTree` | IOS-REPLACEMENT | 多成员长时并发与恢复真机 |
-| PARITY-010 | webserver status/session 路由 | loopback `LocalStateServer` + `URLSession` client | VERIFY | controller schema、端口冲突、前后台和真机 |
+| PARITY-010 | webserver status/session 路由与异步 connection RPC | loopback `LocalStateServer` + `URLSession` client | VERIFY | 已接入 session mutation RPC（create/select/rename/delete/archive/restore/fork/prompt/cancel）；仍缺 workspace/settings 写入、follow/SSE/WebSocket、端口冲突、前后台和真机 |
 | PARITY-011 | provider catalog 支持动态 listModels/resolveModelInfo/reload | Swift provider profiles + model discovery | VERIFY | 统一 capability snapshot/cache；OAuth 仅在完整授权生命周期可用时注册 |
 | PARITY-012 | E2B 包通过官方 npm SDK `Sandbox.create`，含 fs/subprocess provider | 无 E2B SDK；本机 iSH 可作为语义替代 | IOS-REPLACEMENT/VERIFY | 先保存上游 fixture 与账号配置契约；没有可靠 REST 契约不得猜 endpoint |
 | PARITY-013 | provider-neutral webhook rule registry；规则返回可选 Session request | loopback POST → parse/HMAC → durable dedup → rule → Job/可选 wake | VERIFY | 当前批次已补通用 provider 路由、持久规则、重试、可选唤醒；仍缺公网隧道、后台持续监听、真机 |
@@ -58,13 +58,15 @@ git diff --check
 
 - [x] 修复 `LocalStateServer` 单次 `NWConnection.receive` 导致的分片 HTTP 请求误报 400；现在按 header 与 `Content-Length` 聚合完整请求后再路由。
 - [x] 真实 `URLSession` loopback webhook 回归通过，保留 64 KiB 请求上限。
+- [x] 增加异步 RPC handler 与 `LocalStateHTTPClient.callRPC`；复用 AppModel 的 SessionStore/UI 生产路径，接入 session create/select/rename/delete/archive/restore/fork/prompt/cancel。
+- [x] 新增真实 loopback async RPC 回归；`LocalStateServerTests` 现为 17 项。
 
 ### PARITY-003 本批次逐步修改清单
 
 - [x] `SessionTelemetrySink` 增加 `capturePolicy` 与异步 `releasePending()` 契约并提供默认实现，保持既有 sink 向后兼容。
 - [x] `TelemetrySessionPersistence` 在 `live` 模式逐条 capture；`onDemand` 模式只在 canonical `feedback/record` 提交后读取未交接的事件 suffix，按 cursor 重放并释放。
 - [x] 新增异步回归测试验证反馈前不发送、首次 feedback 重放完整 prefix、后续 feedback 只发送 suffix、配置 OTLP endpoint 可交付且各自只释放一次；修复 Swift 6 测试夹具的 async/锁隔离问题。
-- [x] 固定门复跑：SwiftPM **939 tests, 5 skipped, 0 failures**；Xcode arm64 Simulator **BUILD SUCCEEDED**；Plugin Host check、Node smoke、设备-only audit、upstream parity、`git diff --check` 均通过。
+- [x] 固定门复跑：SwiftPM **940 tests, 5 skipped, 0 failures**；Xcode arm64 Simulator **BUILD SUCCEEDED**；Plugin Host check、Node smoke、设备-only audit、upstream parity、`git diff --check` 均通过。
 - [ ] 设置 UI、真实 feedback/OTLP endpoint、flush/shutdown 生命周期和 iPhone 16 Pro 证据；未取得前保持 `VERIFY`。
 
 ## 2. PARITY-013 本批次逐步修改清单

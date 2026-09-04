@@ -19,7 +19,10 @@ struct LocalStateAPISchema: Codable, Sendable, Equatable {
         controllers: [
             LocalStateAPIController(
                 name: "session",
-                methods: ["list", "status"]
+                methods: [
+                    "list", "status", "create", "select", "switch", "rename",
+                    "delete", "archive", "restore", "fork", "prompt", "cancel"
+                ]
             ),
             LocalStateAPIController(
                 name: "settings",
@@ -69,6 +72,33 @@ final class LocalStateSnapshotStore: @unchecked Sendable {
     }
 }
 
+/// Late-bound bridge avoids capturing AppModel before its initializer has
+/// finished while still allowing the network queue to await main-actor RPCs.
+final class LocalStateRPCBridge: @unchecked Sendable {
+    private let lock = NSLock()
+    private var handler: LocalStateServer.AsyncRPCHandler?
+
+    func setHandler(_ handler: LocalStateServer.AsyncRPCHandler?) {
+        lock.lock()
+        self.handler = handler
+        lock.unlock()
+    }
+
+    func call(_ method: String, _ payload: JSONValue) async throws -> JSONValue {
+        let handler = snapshotHandler()
+        guard let handler else {
+            throw LocalStateRPCError.methodNotFound(method)
+        }
+        return try await handler(method, payload)
+    }
+
+    private nonisolated func snapshotHandler() -> LocalStateServer.AsyncRPCHandler? {
+        lock.lock()
+        defer { lock.unlock() }
+        return handler
+    }
+}
+
 /// A loopback-only HTTP state server (desktop `webserver`/`frontend-static`
 /// parity). Listens on 127.0.0.1 with an ephemeral port and answers a small
 /// set of GET endpoints; it never binds a remote interface, never reads
@@ -77,6 +107,7 @@ final class LocalStateSnapshotStore: @unchecked Sendable {
 /// interface and cannot execute or forward anything remotely.
 final class LocalStateServer: @unchecked Sendable {
     typealias RPCHandler = @Sendable (_ method: String, _ payload: JSONValue) throws -> JSONValue
+    typealias AsyncRPCHandler = @Sendable (_ method: String, _ payload: JSONValue) async throws -> JSONValue
 
     struct Endpoint: Sendable {
         let path: String
@@ -91,13 +122,15 @@ final class LocalStateServer: @unchecked Sendable {
     private var webhookHandler: (@Sendable (LocalWebhookEvent) -> Void)?
     private var webhookSecret: String?
     private let rpcHandler: RPCHandler?
+    private let asyncRPCHandler: AsyncRPCHandler?
 
     init?(
         endpoints: [Endpoint],
         port: UInt16 = 0,
         webhookHandler: (@Sendable (LocalWebhookEvent) -> Void)? = nil,
         webhookSecret: String? = nil,
-        rpcHandler: RPCHandler? = nil
+        rpcHandler: RPCHandler? = nil,
+        asyncRPCHandler: AsyncRPCHandler? = nil
     ) {
         guard let listener = try? NWListener(
             using: .tcp,
@@ -111,6 +144,7 @@ final class LocalStateServer: @unchecked Sendable {
         self.webhookHandler = webhookHandler
         self.webhookSecret = webhookSecret
         self.rpcHandler = rpcHandler
+        self.asyncRPCHandler = asyncRPCHandler
     }
 
     var port: UInt16? {
@@ -313,6 +347,26 @@ final class LocalStateServer: @unchecked Sendable {
             let webhookHandler = self.webhookHandler
             let webhookSecret = self.webhookSecret
             self.webhookHandlerLock.unlock()
+            if let asyncRPCHandler = self.asyncRPCHandler,
+               let rpcRequest = Self.rpcRequest(in: request) {
+                Task {
+                    let routed: (status: Int, body: String)
+                    do {
+                        routed = Self.rpcSuccessResponse(
+                            rpcID: rpcRequest.rpcID,
+                            value: try await asyncRPCHandler(rpcRequest.method, rpcRequest.payload)
+                        )
+                    } catch {
+                        routed = Self.rpcErrorResponse(
+                            rpcID: rpcRequest.rpcID,
+                            code: "gateway/internal",
+                            message: error.localizedDescription
+                        )
+                    }
+                    Self.send(routed, on: connection)
+                }
+                return
+            }
             let routed = Self.route(
                 request: request,
                 endpoints: self.endpoints,
@@ -331,6 +385,35 @@ final class LocalStateServer: @unchecked Sendable {
             )
             _ = error
         }
+    }
+
+    private static func send(_ routed: (status: Int, body: String), on connection: NWConnection) {
+        let body = routed.body
+        let headers = "HTTP/1.1 \(routed.status)\r\n"
+            + "Content-Type: application/json\r\n"
+            + "Content-Length: \(body.utf8.count)\r\n"
+            + "Connection: close\r\n\r\n"
+        connection.send(
+            content: Data((headers + body).utf8),
+            completion: .contentProcessed { _ in connection.cancel() }
+        )
+    }
+
+    private static func rpcRequest(in request: String) -> (rpcID: String, method: String, payload: JSONValue)? {
+        guard request.hasPrefix("POST /api "),
+              let separator = request.range(of: "\r\n\r\n"),
+              let message = try? JSONDecoder().decode(
+                  [String: JSONValue].self,
+                  from: Data(request[separator.upperBound...].utf8)
+              ),
+              message["type"]?.stringValue == "client-request",
+              let rpcID = message["rpcId"]?.stringValue,
+              let method = message["method"]?.stringValue,
+              !rpcID.isEmpty,
+              !method.isEmpty else {
+            return nil
+        }
+        return (rpcID, method, message["payload"] ?? .null)
     }
 
     private static func rpcSuccessResponse(rpcID: String, value: JSONValue) -> (status: Int, body: String) {
@@ -376,11 +459,13 @@ enum LocalStateHTTPError: Error, Sendable, Equatable {
 enum LocalStateRPCError: LocalizedError, Sendable, Equatable {
     case methodNotFound(String)
     case invalidProjection
+    case invalidPayload(String)
 
     var errorDescription: String? {
         switch self {
         case let .methodNotFound(method): return "RPC method not found: \(method)"
         case .invalidProjection: return "RPC projection is invalid."
+        case let .invalidPayload(field): return "RPC payload field is invalid: \(field)"
         }
     }
 }
@@ -400,6 +485,36 @@ struct LocalStateHTTPClient: Sendable {
 
     func post(path: String, body: String, headers: [String: String] = [:]) async throws -> String {
         try await request(path: path, method: "POST", body: Data(body.utf8), headers: headers)
+    }
+
+    func callRPC(
+        rpcID: String = UUID().uuidString.lowercased(),
+        method: String,
+        payload: JSONValue = .object([:])
+    ) async throws -> JSONValue {
+        let body = try JSONEncoder().encode([
+            "type": JSONValue.string("client-request"),
+            "rpcId": JSONValue.string(rpcID),
+            "method": JSONValue.string(method),
+            "payload": payload
+        ])
+        let response = try await post(
+            path: "/api",
+            body: String(decoding: body, as: UTF8.self)
+        )
+        guard let data = response.data(using: .utf8),
+              let envelope = try? JSONDecoder().decode(JSONValue.self, from: data),
+              envelope.objectValue?["type"]?.stringValue == "server-response",
+              envelope.objectValue?["rpcId"]?.stringValue == rpcID,
+              let result = envelope.objectValue?["result"] else {
+            throw LocalStateHTTPError.invalidResponse
+        }
+        guard result.objectValue?["ok"]?.booleanValue == true,
+              let value = result.objectValue?["value"] else {
+            let message = result.objectValue?["error"]?.objectValue?["message"]?.stringValue ?? "RPC failed"
+            throw LocalStateHTTPError.server(status: 200, body: message)
+        }
+        return value
     }
 
     private func request(

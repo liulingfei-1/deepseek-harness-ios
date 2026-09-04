@@ -550,6 +550,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
     @ObservationIgnored private let runtimeHangWatchdog: RuntimeHangWatchdog
     @ObservationIgnored private let runtimeMetricKitSubscriber: RuntimeMetricKitSubscriber
     @ObservationIgnored private let localStateSnapshotStore = LocalStateSnapshotStore()
+    @ObservationIgnored private let localStateRPCBridge = LocalStateRPCBridge()
     @ObservationIgnored private let localWebhookDeduplicator = LocalWebhookDeduplicator(
         storageURL: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("HarnessMobile/Webhooks/github-deliveries.json")
@@ -752,12 +753,117 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
             default:
                 throw LocalStateRPCError.methodNotFound(method)
             }
+        }, asyncRPCHandler: { [localStateRPCBridge] method, payload in
+            try await localStateRPCBridge.call(method, payload)
         })
+        localStateRPCBridge.setHandler { [weak self] method, payload in
+            guard let self else { throw LocalStateRPCError.methodNotFound(method) }
+            return try await self.handleLocalStateRPC(method: method, payload: payload)
+        }
         localStateServer?.start()
         localStateServer?.setWebhookHandler { [weak self] event in
             Task { @MainActor [weak self] in
                 await self?.handleLocalWebhook(event)
             }
+        }
+    }
+
+    /// Implements the asynchronous Session controller subset used by the
+    /// Desktop connection client. All mutations reuse the same AppModel
+    /// methods as the native UI, so RPC calls cannot create a second state
+    /// source.
+    private func handleLocalStateRPC(method: String, payload: JSONValue) async throws -> JSONValue {
+        let fields = payload.objectValue ?? [:]
+        func requiredString(_ key: String) throws -> String {
+            guard let value = fields[key]?.stringValue,
+                  !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw LocalStateRPCError.invalidPayload(key)
+            }
+            return value
+        }
+        func sessionID() throws -> UUID {
+            guard let id = UUID(uuidString: try requiredString("sessionId")) else {
+                throw LocalStateRPCError.invalidPayload("sessionId")
+            }
+            return id
+        }
+        func currentProjection() async throws -> JSONValue {
+            let summaries = try await sessionStore.listSessions()
+            let rows: [JSONValue] = summaries.map { summary in
+                var row: [String: JSONValue] = [
+                    "id": .string(summary.id.uuidString.lowercased()),
+                    "title": .string(summary.title),
+                    "messageCount": .number(Double(summary.messageCount)),
+                    "revision": .number(Double(summary.revision)),
+                    "updatedAt": .string(summary.updatedAt.ISO8601Format()),
+                    "archived": .bool(summary.isArchived),
+                    "isResumable": .bool(summary.isResumable)
+                ]
+                if let archivedAt = summary.archivedAt {
+                    row["archivedAt"] = .string(archivedAt.ISO8601Format())
+                }
+                return .object(row)
+            }
+            return .object([
+                "activeSessionId": activeSessionID.map { .string($0.uuidString.lowercased()) } ?? .null,
+                "sessions": .array(rows)
+            ])
+        }
+
+        switch method {
+        case "session/list":
+            return try await currentProjection()
+        case "session/status":
+            return .object([
+                "activeSessionId": activeSessionID.map { .string($0.uuidString.lowercased()) } ?? .null,
+                "running": .bool(isRunning),
+                "resumable": .bool(hasResumableRun)
+            ])
+        case "session/create":
+            let title = fields["title"]?.stringValue ?? "新会话"
+            await createConversation(title: title)
+            return try await currentProjection()
+        case "session/select", "session/switch":
+            let id = try sessionID()
+            await switchConversation(to: id)
+            return try await currentProjection()
+        case "session/rename":
+            let id = try sessionID()
+            let title = try requiredString("title")
+            await renameConversation(id: id, title: title)
+            return try await currentProjection()
+        case "session/delete":
+            let id = try sessionID()
+            await deleteConversation(id: id)
+            return try await currentProjection()
+        case "session/archive":
+            let id = try sessionID()
+            await archiveConversation(id: id)
+            return try await currentProjection()
+        case "session/restore":
+            let id = try sessionID()
+            await restoreConversation(id: id)
+            return try await currentProjection()
+        case "session/fork":
+            let id = try sessionID()
+            await forkConversation(id: id)
+            return try await currentProjection()
+        case "session/prompt":
+            let text = try requiredString("text")
+            if let rawID = fields["sessionId"]?.stringValue {
+                guard let id = UUID(uuidString: rawID) else {
+                    throw LocalStateRPCError.invalidPayload("sessionId")
+                }
+                if id != activeSessionID {
+                    await switchConversation(to: id)
+                }
+            }
+            return .object(["accepted": .bool(await send(text))])
+        case "session/cancel":
+            cancelRun()
+            return .object(["accepted": .bool(true)])
+        default:
+            throw LocalStateRPCError.methodNotFound(method)
         }
     }
 

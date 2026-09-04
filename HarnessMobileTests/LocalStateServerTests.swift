@@ -50,7 +50,12 @@ final class LocalStateServerTests: XCTestCase {
         )
         XCTAssertEqual(decoded.version, LocalStateAPISchema.currentVersion)
         XCTAssertEqual(decoded.transport, "loopback-http")
-        XCTAssertTrue(decoded.controllers.contains { $0.name == "session" && $0.methods.contains("list") })
+        XCTAssertTrue(decoded.controllers.contains {
+            $0.name == "session"
+                && $0.methods.contains("list")
+                && $0.methods.contains("create")
+                && $0.methods.contains("prompt")
+        })
 
         let alias = LocalStateServer.route(
             request: "GET /api/session HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
@@ -155,6 +160,36 @@ final class LocalStateServerTests: XCTestCase {
         } catch let error as LocalStateHTTPError {
             XCTAssertEqual(error, .invalidPath)
         }
+    }
+
+    func testLiveHTTPClientAwaitsAsyncRPCHandler() async throws {
+        let server = LocalStateServer(
+            endpoints: [],
+            asyncRPCHandler: { method, payload in
+                XCTAssertEqual(method, "session/create")
+                XCTAssertEqual(payload.objectValue?["title"]?.stringValue, "from-rpc")
+                try await Task.sleep(for: .milliseconds(5))
+                return .object(["accepted": .bool(true)])
+            }
+        )
+        XCTAssertNotNil(server)
+        server?.start()
+        defer { server?.stop() }
+        var assignedPort: UInt16 = 0
+        for _ in 0..<40 {
+            if let port = server?.port, port > 0 {
+                assignedPort = port
+                break
+            }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        XCTAssertGreaterThan(assignedPort, 0)
+        let value = try await LocalStateHTTPClient(port: assignedPort).callRPC(
+            rpcID: "async-1",
+            method: "session/create",
+            payload: .object(["title": .string("from-rpc")])
+        )
+        XCTAssertEqual(value.objectValue?["accepted"], .bool(true))
     }
 
     func testLiveHTTPClientPostsWebhookAfterSecretIsConfigured() async throws {
