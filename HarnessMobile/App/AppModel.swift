@@ -1173,10 +1173,10 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                                 method: "workspace/list",
                                 payload: payload
                             )
-                            if previous == nil || previous != current {
-                                continuation.yield(current)
-                                previous = current
+                            for frame in workspaceFollowFrames(previous: previous, current: current) {
+                                continuation.yield(frame)
                             }
+                            previous = current
                             try await Task.sleep(for: .milliseconds(250))
                         }
                     } else {

@@ -283,6 +283,42 @@ final class LocalStateServerTests: XCTestCase {
         XCTAssertEqual(values[1].objectValue?["type"], .string("event"))
     }
 
+    func testWorkspaceFollowFramesEmitBaselineAndOrderedIncrements() throws {
+        let first = JSONValue.object([
+            "workspaces": .array([
+                .object(["id": .string("a"), "title": .string("A")]),
+                .object(["id": .string("b"), "title": .string("B")])
+            ]),
+            "archivedSessionIds": .array([])
+        ])
+        let baseline = workspaceFollowFrames(previous: nil, current: first)
+        XCTAssertEqual(baseline.count, 1)
+        XCTAssertEqual(baseline[0].objectValue?["type"], JSONValue.string("baseline"))
+        guard case let .array(items)? = baseline[0].objectValue?["value"]?.objectValue?["items"] else {
+            return XCTFail("baseline must include workspace items")
+        }
+        XCTAssertEqual(items.count, 2)
+
+        let second = JSONValue.object([
+            "workspaces": .array([
+                .object(["id": .string("b"), "title": .string("B2")]),
+                .object(["id": .string("c"), "title": .string("C")])
+            ]),
+            "archivedSessionIds": .array([.string("session-1")])
+        ])
+        let increments = workspaceFollowFrames(previous: first, current: second)
+        XCTAssertEqual(increments.map { $0.objectValue?["type"]?.stringValue }, ["upsert", "upsert", "remove", "order", "archived"])
+        XCTAssertEqual(
+            increments[0].objectValue?["workspace"]?.objectValue?["workspaceId"],
+            JSONValue.string("b")
+        )
+        XCTAssertEqual(
+            increments[1].objectValue?["workspace"]?.objectValue?["workspaceId"],
+            JSONValue.string("c")
+        )
+        XCTAssertEqual(increments[2].objectValue?["workspaceId"], JSONValue.string("a"))
+    }
+
     func testLiveHTTPClientPostsWebhookAfterSecretIsConfigured() async throws {
         let server = LocalStateServer(endpoints: [])
         XCTAssertNotNil(server)

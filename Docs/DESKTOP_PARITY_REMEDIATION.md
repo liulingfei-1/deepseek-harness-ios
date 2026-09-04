@@ -792,5 +792,5 @@ git diff --check
 
 - 对照上游 `client/connection` 与 `api/{session,workspace}-controller`，为 loopback `/api` 增加 `session/follow`、`workspace/follow` 的 `text/event-stream` + HTTP chunked carrier；保留 `server-response`/`rpcId` envelope。
 - `LocalStateHTTPClient.callRPCStream` 通过 `URLSession.bytes` 解码 SSE data frame，支持长连接取消；AppModel 首帧 snapshot，session 后续帧携带 cursor/sessionID，workspace 复用 workspace projection。
-- 生产事件源暂为 250ms persistence polling bridge；live loopback 回归 `LocalStateServerTests.testLiveHTTPClientReceivesSnapshotFirstSSEStream` 通过，完整 SwiftPM 945 tests、5 skipped、0 failures，Xcode arm64 Simulator BUILD SUCCEEDED，Plugin Host/Node smoke/两项审计通过。
+- 生产事件源暂为 250ms persistence polling bridge；workspace follow 已投影为 baseline + upsert/remove/order/archived 增量并有纯函数回归。live loopback 回归 `LocalStateServerTests.testLiveHTTPClientReceivesSnapshotFirstSSEStream` 通过，完整 SwiftPM 945 tests、5 skipped、0 failures，Xcode arm64 Simulator BUILD SUCCEEDED，Plugin Host/Node smoke/两项审计通过。
 - 状态：`VERIFY`。仍缺上游原生 AsyncIterable/event subscription、workspace baseline/increment、断线重连 generation、WebSocket、端口冲突、前后台生命周期及 iPhone 16 Pro 真机证据。

@@ -831,3 +831,68 @@ actor LocalWebhookDeduplicator {
         try? data.write(to: storageURL, options: .atomic)
     }
 }
+
+/// Projects the workspace controller baseline/increment vocabulary from the
+/// existing durable workspace projection. The polling caller supplies the
+/// previous full projection so reconnects remain snapshot-first.
+func workspaceFollowFrames(previous: JSONValue?, current: JSONValue) -> [JSONValue] {
+    guard let currentObject = current.objectValue,
+          case let .array(currentWorkspaces)? = currentObject["workspaces"],
+          case let .array(currentArchived)? = currentObject["archivedSessionIds"] else {
+        return []
+    }
+
+    func workspaceView(_ value: JSONValue) -> JSONValue? {
+        guard let object = value.objectValue,
+              let id = object["id"]?.stringValue else { return nil }
+        var view = object
+        view.removeValue(forKey: "id")
+        view["workspaceId"] = .string(id)
+        return .object(view)
+    }
+
+    let currentViews = currentWorkspaces.compactMap(workspaceView)
+    let currentByID = Dictionary(uniqueKeysWithValues: currentViews.compactMap { value in
+        value.objectValue?["workspaceId"]?.stringValue.map { ($0, value) }
+    })
+    let currentOrder = currentViews.compactMap { $0.objectValue?["workspaceId"]?.stringValue }
+    let baseline = JSONValue.object([
+        "items": .array(currentViews),
+        "archivedSessionIds": .array(currentArchived)
+    ])
+
+    guard let previous,
+          let previousObject = previous.objectValue,
+          case let .array(previousWorkspaces)? = previousObject["workspaces"],
+          case let .array(previousArchived)? = previousObject["archivedSessionIds"] else {
+        return [.object(["type": .string("baseline"), "value": baseline])]
+    }
+
+    let previousViews = previousWorkspaces.compactMap(workspaceView)
+    let previousByID = Dictionary(uniqueKeysWithValues: previousViews.compactMap { value in
+        value.objectValue?["workspaceId"]?.stringValue.map { ($0, value) }
+    })
+    let previousOrder = previousViews.compactMap { $0.objectValue?["workspaceId"]?.stringValue }
+    var frames: [JSONValue] = []
+    for value in currentViews {
+        guard let id = value.objectValue?["workspaceId"]?.stringValue,
+              previousByID[id] != value else { continue }
+        frames.append(.object(["type": .string("upsert"), "workspace": value]))
+    }
+    for id in previousByID.keys where currentByID[id] == nil {
+        frames.append(.object(["type": .string("remove"), "workspaceId": .string(id)]))
+    }
+    if currentOrder != previousOrder {
+        frames.append(.object([
+            "type": .string("order"),
+            "workspaceIds": .array(currentOrder.map(JSONValue.string))
+        ]))
+    }
+    if currentArchived != previousArchived {
+        frames.append(.object([
+            "type": .string("archived"),
+            "archivedSessionIds": .array(currentArchived)
+        ]))
+    }
+    return frames
+}
