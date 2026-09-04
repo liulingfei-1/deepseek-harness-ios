@@ -98,6 +98,63 @@ final class ProviderRequestLifecycleTests: XCTestCase {
         XCTAssertEqual(stored?.refreshToken, "rotated")
     }
 
+    func testOAuthRefreshClientUsesRFC6749FormAndDecodesRotation() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [OAuthRefreshURLProtocolStub.self]
+        let client = ProviderOAuthRefreshClient(sessionConfiguration: configuration)
+        let endpoint = URL(string: "https://auth.example.test/oauth/token")!
+        let credential = ProviderOAuthCredential(
+            accessToken: "expired",
+            refreshToken: "refresh token",
+            expiresAt: Date(timeIntervalSince1970: 1),
+            tokenEndpoint: endpoint,
+            clientID: "mobile-client"
+        )
+        OAuthRefreshURLProtocolStub.handler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(
+                request.value(forHTTPHeaderField: "Content-Type"),
+                "application/x-www-form-urlencoded"
+            )
+            let bodyData: Data
+            if let httpBody = request.httpBody {
+                bodyData = httpBody
+            } else if let stream = request.httpBodyStream {
+                stream.open()
+                defer { stream.close() }
+                var data = Data()
+                var buffer = [UInt8](repeating: 0, count: 4096)
+                while stream.hasBytesAvailable {
+                    let count = stream.read(&buffer, maxLength: buffer.count)
+                    if count <= 0 { break }
+                    data.append(buffer, count: count)
+                }
+                bodyData = data
+            } else {
+                bodyData = Data()
+            }
+            let body = String(decoding: bodyData, as: UTF8.self)
+            XCTAssertTrue(body.contains("grant_type=refresh_token"))
+            XCTAssertTrue(body.contains("refresh_token=refresh+token"))
+            XCTAssertTrue(body.contains("client_id=mobile-client"))
+            let response = HTTPURLResponse(
+                url: endpoint,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, Data(#"{"access_token":"fresh","expires_in":3600,"token_type":"Bearer"}"#.utf8))
+        }
+        defer { OAuthRefreshURLProtocolStub.handler = nil }
+
+        let refreshed = try await client.refresh(credential)
+        XCTAssertEqual(refreshed.accessToken, "fresh")
+        XCTAssertEqual(refreshed.refreshToken, "refresh token")
+        XCTAssertEqual(refreshed.tokenEndpoint, endpoint)
+        XCTAssertEqual(refreshed.clientID, "mobile-client")
+        XCTAssertGreaterThan(refreshed.expiresAt ?? .distantPast, Date())
+    }
+
     func testQuickTestUsesSingleAdapterRequestWithoutToolsOrConversationState() async throws {
         let client = QuickTestClient(events: [.text("ready"), .finish(.stop)])
         var configuration = ModelProviderCatalog.applying(.openAI, to: AgentConfiguration())
@@ -220,4 +277,29 @@ private final class QuickTestClient: LLMStreamingClient, @unchecked Sendable {
             continuation.finish()
         }
     }
+}
+
+private final class OAuthRefreshURLProtocolStub: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let handler = Self.handler else {
+            client?.urlProtocol(self, didFailWithError: URLError(.resourceUnavailable))
+            return
+        }
+        do {
+            let (response, data) = try handler(request)
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
 }

@@ -22,6 +22,8 @@ struct SetupView: View {
     @State private var oauthAccessToken = ""
     @State private var oauthRefreshToken = ""
     @State private var oauthExpiresAt = ""
+    @State private var oauthTokenEndpoint = ""
+    @State private var oauthClientID = ""
     @State private var catalog = SetupModelCatalog.builtIn(for: AgentConfiguration())
     @State private var isDiscoveringModels = false
     @State private var isSaving = false
@@ -354,6 +356,13 @@ struct SetupView: View {
                 SecureField("Refresh token（可选）", text: $oauthRefreshToken)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                TextField("Token endpoint HTTPS URL（可选）", text: $oauthTokenEndpoint)
+                    .keyboardType(.URL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                TextField("Client ID（可选）", text: $oauthClientID)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
                 TextField("过期时间 ISO 8601（可选）", text: $oauthExpiresAt)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -566,6 +575,8 @@ struct SetupView: View {
         oauthAccessToken = ""
         oauthRefreshToken = ""
         oauthExpiresAt = ""
+        oauthTokenEndpoint = ""
+        oauthClientID = ""
         catalog = .stored(for: profile)
         modelDiscoveryError = nil
         inlineError = nil
@@ -623,11 +634,25 @@ struct SetupView: View {
         let access = oauthAccessToken.trimmingCharacters(in: .whitespacesAndNewlines)
         let refresh = oauthRefreshToken.trimmingCharacters(in: .whitespacesAndNewlines)
         let expiry = oauthExpiresAt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let endpointText = oauthTokenEndpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clientID = oauthClientID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !access.isEmpty else {
-            guard refresh.isEmpty, expiry.isEmpty else {
+            guard refresh.isEmpty, expiry.isEmpty, endpointText.isEmpty, clientID.isEmpty else {
                 throw SetupOAuthError.accessTokenRequired
             }
             return nil
+        }
+        let tokenEndpoint: URL?
+        if endpointText.isEmpty {
+            tokenEndpoint = nil
+        } else {
+            guard let url = URL(string: endpointText) else {
+                throw SetupOAuthError.invalidEndpoint
+            }
+            tokenEndpoint = url
+        }
+        if (tokenEndpoint == nil) != clientID.isEmpty {
+            throw SetupOAuthError.endpointAndClientIDRequired
         }
         let expiresAt: Date?
         if expiry.isEmpty {
@@ -642,7 +667,9 @@ struct SetupView: View {
         return ProviderOAuthCredential(
             accessToken: access,
             refreshToken: refresh.isEmpty ? nil : refresh,
-            expiresAt: expiresAt
+            expiresAt: expiresAt,
+            tokenEndpoint: tokenEndpoint,
+            clientID: clientID.isEmpty ? nil : clientID
         )
     }
 
@@ -689,6 +716,8 @@ struct SetupView: View {
                 oauthAccessToken = ""
                 oauthRefreshToken = ""
                 oauthExpiresAt = ""
+                oauthTokenEndpoint = ""
+                oauthClientID = ""
                 if mode != .onboarding {
                     dismiss()
                 }
@@ -728,6 +757,8 @@ struct SetupView: View {
         oauthAccessToken = ""
         oauthRefreshToken = ""
         oauthExpiresAt = ""
+        oauthTokenEndpoint = ""
+        oauthClientID = ""
         if isCreatingProfile {
             draft.profileID = nil
             draft.credentialReference = nil
@@ -975,6 +1006,8 @@ private struct ModelSelectionRow: View {
 private enum SetupOAuthError: LocalizedError {
     case accessTokenRequired
     case invalidExpiry
+    case invalidEndpoint
+    case endpointAndClientIDRequired
 
     var errorDescription: String? {
         switch self {
@@ -982,6 +1015,10 @@ private enum SetupOAuthError: LocalizedError {
             "填写 refresh token 或过期时间前，请先填写 access token。"
         case .invalidExpiry:
             "OAuth 过期时间必须是 ISO 8601 格式。"
+        case .invalidEndpoint:
+            "OAuth token endpoint URL 无效。"
+        case .endpointAndClientIDRequired:
+            "填写 token endpoint 时必须同时填写 client ID，反之亦然。"
         }
     }
 }

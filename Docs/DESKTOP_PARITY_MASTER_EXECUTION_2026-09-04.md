@@ -23,7 +23,7 @@
 | Web 搜索 | `web` seam 按配置或唯一可用 provider 选择，结果上限由 seam 执行 | Exa/Perplexity provider、设置和 citation 映射已接线 | `VERIFY` |
 | Webhook | provider-neutral delivery，rule 只内建创建 Session | loopback POST、持久规则、claim/complete/requeue、可选唤醒已接线 | `VERIFY` |
 | E2B | 官方 `e2b` SDK 的共享 Sandbox；`fs-e2b` 与 `subprocess-e2b` 复用同一 sandbox | 无官方 SDK/远端账号配置；iSH 仅能作语义替代 | `IOS-REPLACEMENT/VERIFY` |
-| Credential records | `CredentialRecord = ApiKeyRecord | GrantRecord`；授权 flow 观察到 record commit 才算成功；刷新使用 read-modify-write | 本地已有 API-key/OAuth Keychain records、single-flight 与手动 grant 录入；缺 provider-specific 授权 flow | `VERIFY` |
+| Credential records | `CredentialRecord = ApiKeyRecord | GrantRecord`；授权 flow 观察到 record commit 才算成功；刷新使用 read-modify-write | 本地已有 API-key/OAuth Keychain records、single-flight、RFC 6749 refresh client 与手动 grant 录入；缺 provider-specific 授权 flow/401 retry | `VERIFY` |
 | Provider reload | 上游 route 可在设置变化后无重启生效；模型/凭据按请求解析 | 本地有 profile generation、模型 capability cache；缺 OAuth 生命周期闭环 | `VERIFY` |
 | Local web UI | 桌面 web server/client-half 独立存在 | loopback API/WKWebView 可用，桌面 frontend bundle 尚未接入 | `VERIFY` |
 | Windows host | PowerShell/win32/ACL 依赖 Windows 内核 | iOS 无等价内核能力 | `OUT-OF-SCOPE` |
@@ -41,6 +41,7 @@
 - [x] provider request credential lookup 可读取 OAuth access token；profile generation reload 复用既有路径。
 - [x] 编辑 Profile 时允许已有 OAuth grant 作为凭据；删除 Profile 同时清理 API-key 与 OAuth record。
 - [x] 设置页可手动录入 OAuth access/refresh token 与 ISO 8601 过期时间，并随 Profile 保存事务写入。
+- [x] 设置页可选录入 HTTPS token endpoint 与 public client ID；过期 grant 在 provider request credential lookup 中按 RFC 6749 自动刷新并持久化轮换 token。
 - [x] 添加纯 Swift 回归测试：编码 round-trip、过期判断、并发 refresh、旧 API-key 兼容。
 - [ ] provider-specific OAuth authorization UI、401 自动重试和真实授权 flow。
 - [ ] 真实 OAuth/API/iSH/真机证据取得前保持 `VERIFY`。

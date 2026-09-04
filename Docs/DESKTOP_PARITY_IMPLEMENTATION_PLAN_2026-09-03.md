@@ -151,10 +151,10 @@ git diff --check
 ### PARITY-011 · `llm-pi-ai` 等价能力
 
 - **上游参考**：最新上游 `llm-pi-ai` provider/model catalog、native protocol、OAuth、runtime reload、replay metadata、wire protocol。
-- **当前证据**：`ModelProviderCatalog.swift` 支持 DeepSeek/OpenAI/Anthropic/OpenRouter/custom OpenAI-compatible；已接入 OpenAI/enriched 与 Anthropic 原生动态 listing、exact model identity resolution、description、逐模型 reasoning metadata（含上游 `reasoning_options` effort values、`limit` 与 `modalities` 嵌套字段）与持久 capability cache。2026-09-04 已新增 `ProviderOAuthCredential`、Keychain OAuth record、`ProviderOAuthRefreshCoordinator`，补齐 OAuth-backed Profile 保存/删除，并在 `SetupView` 提供手动 OAuth grant 录入（专项测试覆盖）；仍缺 provider-specific 浏览器/device-code 授权、401 自动重试和真实设备证据。
+- **当前证据**：`ModelProviderCatalog.swift` 支持 DeepSeek/OpenAI/Anthropic/OpenRouter/custom OpenAI-compatible；已接入 OpenAI/enriched 与 Anthropic 原生动态 listing、exact model identity resolution、description、逐模型 reasoning metadata（含上游 `reasoning_options` effort values、`limit` 与 `modalities` 嵌套字段）与持久 capability cache。2026-09-04 已新增 `ProviderOAuthCredential`、Keychain OAuth record、`ProviderOAuthRefreshCoordinator`、RFC 6749 form refresh client，补齐 OAuth-backed Profile 保存/删除、过期 grant 请求前自动刷新，并在 `SetupView` 提供手动 OAuth grant 录入（专项测试覆盖）；仍缺 provider-specific 浏览器/device-code 授权、401 自动重试和真实设备证据。
 - **目标行为**：provider/model 动态发现、协议选择、授权生命周期、能力协商、运行时 reload、重放 metadata 和错误语义一致。
 - **影响文件**：configuration/network/auth/settings/UI/AgentRuntime/tests。
-- **步骤**：建立 provider plugin protocol；迁移静态 provider；实现 capability/cache；补 OAuth record/refresh（已完成基础层，待 provider-specific flow）；统一 request/replay metadata；逐 provider fixture 对比上游。
+- **步骤**：建立 provider plugin protocol；迁移静态 provider；实现 capability/cache；补 OAuth record/refresh（record、single-flight、RFC 6749 自动刷新已完成，待 provider-specific flow 与 401 retry）；统一 request/replay metadata；逐 provider fixture 对比上游。
 - **完成条件**：支持列表中每个 provider 有协议、错误和重放证据；未支持项保持明确状态。
 
 ### PARITY-012 · e2b / fs-e2b / subprocess-e2b

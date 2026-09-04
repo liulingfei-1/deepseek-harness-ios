@@ -83,6 +83,9 @@ scan_files() {
       # path interface changes and resets provider-owned URLSession objects; it
       # does not construct requests or perform model I/O itself.
       outside-network:*/Core/Network/HarnessLLMSessionRegistry.swift) continue ;;
+      # OAuth refresh is provider-owned credential I/O; the helper lives beside
+      # the request lifecycle seam and never executes tools or remote commands.
+      outside-network:*/Core/Network/ProviderRequestLifecycle.swift) continue ;;
       outside-network:*/Core/Tools/WebFetchTool.swift) continue ;;
       outside-network:*/Core/Browser/HarnessBrowserWebKitBackend.swift) continue ;;
       outside-network:*/Core/Tools/ISH/ISHGuestNetworkMonitor.swift) continue ;;
@@ -119,6 +122,9 @@ scan_files() {
       # In-process URLProtocol fixture for DeepSeek extension wire/acceptance
       # contracts. It never opens a production network path.
       outside-network:*/HarnessMobileTests/DeepSeekWireTests.swift) continue ;;
+      # In-process URLProtocol fixture for RFC 6749 OAuth refresh request
+      # encoding/decoding. Production OAuth refresh I/O stays in Core/Network.
+      outside-network:*/HarnessMobileTests/ProviderRequestLifecycleTests.swift) continue ;;
       outside-network:*/HarnessMobileTests/HarnessLLMSessionRegistryTests.swift) continue ;;
       outside-network:*/HarnessMobileTests/SessionTrajectoryRepositoryTests.swift) continue ;;
       outside-network:*/HarnessMobileTests/MCPClientTests.swift) continue ;;

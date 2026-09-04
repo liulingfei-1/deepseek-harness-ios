@@ -217,6 +217,14 @@
 
 2026-09-04 追加：`SetupView` 增加手动 OAuth grant 入口（access token、可选 refresh token、ISO 8601 过期时间）；`AppModel.saveProviderProfile(...oauthCredential:)` 在创建或编辑时写入 OAuth record，空 API Key 不再阻断新 Profile 的 OAuth 配置。真实 provider-specific 浏览器/device-code 授权与 401 自动刷新仍为 `VERIFY`。
 
+### PARITY-011 · RFC 6749 refresh client 与请求前自动刷新（2026-09-04）
+
+- **上游核对**：最新 `credentials`/provider seams 要求 refresh 使用存储层 read-modify-write；RFC 6749 token endpoint 采用 `application/x-www-form-urlencoded` 的 `grant_type=refresh_token` 请求，并允许 refresh token rotation。
+- **移动端变更**：`ProviderOAuthCredential` 增加 token endpoint 与 public client ID；新增 `ProviderOAuthRefreshClient`，解析 `access_token`、可选轮换 `refresh_token`、`expires_in`、`token_type`、`scope`；`AppModel.apiKey(for:)` 对已过期且配置完整的 grant 通过既有 single-flight 自动刷新并持久化最新 record。设置页增加 endpoint/client ID 字段，仍只把 access token 交给 provider adapter。
+- **专项验证**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter ProviderRequestLifecycleTests` → 7 tests passed；RFC 6749 form/body 与 token rotation 解码测试通过。
+- **构建审计**：Xcode arm64 Simulator 初次构建因测试 `URLProtocol` 被设备审计误报；已将该测试 fixture 加入脚本的测试白名单，未放宽生产网络边界；修复后需重跑完整 build 与固定验收门。
+- **剩余边界**：provider-specific 浏览器/device-code 授权、401 自动重试、真实 OAuth 服务与 iPhone 16 Pro 证据仍为 `VERIFY`。
+
 ### PARITY-006 · 子 Agent reasoning effort 参数（2026-09-03）
 
 - **状态**：VERIFY

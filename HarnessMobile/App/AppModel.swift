@@ -520,6 +520,8 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
     @ObservationIgnored let providerBundleInstaller: AgentProviderBundleInstaller
     @ObservationIgnored private let agentPresetStore: AgentPresetRegistryStore
     @ObservationIgnored private let credentialStore: CredentialStore
+    @ObservationIgnored private let oauthRefreshCoordinator = ProviderOAuthRefreshCoordinator()
+    @ObservationIgnored private let oauthRefreshClient = ProviderOAuthRefreshClient()
     @ObservationIgnored private let sessionStore: SessionStore
     @ObservationIgnored private let appIntentInboxStore: AppIntentInboxStore
     @ObservationIgnored private let sessionQueryReadModel: SessionQueryReadModel
@@ -8598,10 +8600,30 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                 return apiKey
             }
             // OAuth grants use the same request seam: adapters receive only
-            // the current access token, never refresh metadata.
-            return try await credentialStore.readOAuthCredential(
+            // the current access token, never refresh metadata. A grant with
+            // explicit RFC 6749 refresh metadata is refreshed before expiry,
+            // serialized per profile by the shared coordinator.
+            guard let oauth = try await credentialStore.readOAuthCredential(
                 for: reference,
                 expectedOrigin: origin
+            ) else { return nil }
+            guard oauth.isExpired(),
+                  oauth.refreshToken != nil,
+                  oauth.tokenEndpoint != nil,
+                  oauth.clientID?.isEmpty == false else {
+                return oauth.accessToken
+            }
+            let profileID = providerDirectory.profile(matching: configuration)?.id
+                ?? configuration.profileID
+                ?? reference.rawValue
+            return try await oauthRefreshCoordinator.credential(
+                profileID: profileID,
+                credentialStore: credentialStore,
+                reference: reference,
+                expectedOrigin: origin,
+                refresh: { [oauthRefreshClient] credential in
+                    try await oauthRefreshClient.refresh(credential)
+                }
             )?.accessToken
         }
         return try await credentialStore.readAPIKey(for: origin)

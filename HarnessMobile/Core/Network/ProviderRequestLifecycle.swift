@@ -9,19 +9,25 @@ struct ProviderOAuthCredential: Codable, Sendable, Equatable {
     let expiresAt: Date?
     let tokenType: String
     let scope: String?
+    let tokenEndpoint: URL?
+    let clientID: String?
 
     init(
         accessToken: String,
         refreshToken: String? = nil,
         expiresAt: Date? = nil,
         tokenType: String = "Bearer",
-        scope: String? = nil
+        scope: String? = nil,
+        tokenEndpoint: URL? = nil,
+        clientID: String? = nil
     ) {
         self.accessToken = accessToken
         self.refreshToken = refreshToken
         self.expiresAt = expiresAt
         self.tokenType = tokenType
         self.scope = scope
+        self.tokenEndpoint = tokenEndpoint
+        self.clientID = clientID
     }
 
     func validated() throws -> ProviderOAuthCredential {
@@ -39,12 +45,29 @@ struct ProviderOAuthCredential: Codable, Sendable, Equatable {
               type.unicodeScalars.allSatisfy({ $0.value < 128 && !CharacterSet.whitespacesAndNewlines.contains($0) }) else {
             throw ProviderOAuthCredentialError.invalidTokenType
         }
+        if let tokenEndpoint {
+            guard tokenEndpoint.scheme?.lowercased() == "https",
+                  tokenEndpoint.user == nil,
+                  tokenEndpoint.password == nil,
+                  tokenEndpoint.query == nil,
+                  tokenEndpoint.fragment == nil,
+                  tokenEndpoint.host?.isEmpty == false else {
+                throw ProviderOAuthCredentialError.invalidTokenEndpoint
+            }
+        }
+        let normalizedClientID = clientID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let normalizedClientID,
+           normalizedClientID.isEmpty || normalizedClientID.utf8.count > 512 {
+            throw ProviderOAuthCredentialError.invalidClientID
+        }
         return ProviderOAuthCredential(
             accessToken: access,
             refreshToken: refresh,
             expiresAt: expiresAt,
             tokenType: type,
-            scope: scope?.trimmingCharacters(in: .whitespacesAndNewlines)
+            scope: scope?.trimmingCharacters(in: .whitespacesAndNewlines),
+            tokenEndpoint: tokenEndpoint,
+            clientID: normalizedClientID
         )
     }
 
@@ -60,6 +83,8 @@ enum ProviderOAuthCredentialError: LocalizedError, Sendable, Equatable {
     case invalidAccessToken
     case invalidRefreshToken
     case invalidTokenType
+    case invalidTokenEndpoint
+    case invalidClientID
     case missingRefreshToken
 
     var errorDescription: String? {
@@ -67,6 +92,8 @@ enum ProviderOAuthCredentialError: LocalizedError, Sendable, Equatable {
         case .invalidAccessToken: "OAuth access token 无效。"
         case .invalidRefreshToken: "OAuth refresh token 无效。"
         case .invalidTokenType: "OAuth token type 无效。"
+        case .invalidTokenEndpoint: "OAuth token endpoint 必须是无凭据的 HTTPS URL。"
+        case .invalidClientID: "OAuth client ID 无效。"
         case .missingRefreshToken: "OAuth 凭据没有 refresh token。"
         }
     }
@@ -137,13 +164,13 @@ actor ProviderRefreshSingleFlight<Value: Sendable> {
 actor ProviderOAuthRefreshCoordinator {
     private let flight = ProviderRefreshSingleFlight<ProviderOAuthCredential?>()
 
-    func accessToken(
+    func credential(
         profileID: String,
         credentialStore: CredentialStore,
         reference: CredentialReference,
         expectedOrigin: String,
         refresh: @escaping @Sendable (ProviderOAuthCredential) async throws -> ProviderOAuthCredential
-    ) async throws -> String? {
+    ) async throws -> ProviderOAuthCredential? {
         guard let current = try await credentialStore.readOAuthCredential(
             for: reference,
             expectedOrigin: expectedOrigin
@@ -151,7 +178,7 @@ actor ProviderOAuthRefreshCoordinator {
             return nil
         }
         if !current.isExpired() {
-            return current.authorizationValue
+            return current
         }
         let resolved = try await flight.run(profileID: profileID) {
             // Re-read inside the single-flight operation: another process or
@@ -176,7 +203,23 @@ actor ProviderOAuthRefreshCoordinator {
             )
             return refreshed
         }
-        return resolved?.authorizationValue
+        return resolved
+    }
+
+    func accessToken(
+        profileID: String,
+        credentialStore: CredentialStore,
+        reference: CredentialReference,
+        expectedOrigin: String,
+        refresh: @escaping @Sendable (ProviderOAuthCredential) async throws -> ProviderOAuthCredential
+    ) async throws -> String? {
+        try await credential(
+            profileID: profileID,
+            credentialStore: credentialStore,
+            reference: reference,
+            expectedOrigin: expectedOrigin,
+            refresh: refresh
+        )?.authorizationValue
     }
 }
 
@@ -247,5 +290,100 @@ enum ProviderQuickTester {
         let normalized = output.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { throw ProviderQuickTestError.emptyOutput }
         return ProviderQuickTestResult(route: route, output: normalized)
+    }
+}
+
+/// RFC 6749 refresh-token transport for grants that provide their own token
+/// endpoint and public client id.
+struct ProviderOAuthRefreshClient: Sendable {
+    private let session: URLSession
+
+    init(sessionConfiguration: URLSessionConfiguration? = nil) {
+        let configuration = sessionConfiguration ?? .ephemeral
+        configuration.urlCache = nil
+        configuration.urlCredentialStorage = nil
+        configuration.httpShouldSetCookies = false
+        configuration.timeoutIntervalForRequest = 30
+        configuration.timeoutIntervalForResource = 60
+        session = URLSession(configuration: configuration)
+    }
+
+    func refresh(_ credential: ProviderOAuthCredential) async throws -> ProviderOAuthCredential {
+        let validated = try credential.validated()
+        guard let refreshToken = validated.refreshToken,
+              let endpoint = validated.tokenEndpoint,
+              let clientID = validated.clientID,
+              !clientID.isEmpty else {
+            throw ProviderOAuthRefreshError.missingConfiguration
+        }
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = Self.formEncode([
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refreshToken),
+            ("client_id", clientID)
+        ])
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw ProviderOAuthRefreshError.invalidResponse
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw ProviderOAuthRefreshError.httpFailure(
+                status: http.statusCode,
+                message: String(decoding: data.prefix(2_048), as: UTF8.self)
+            )
+        }
+        guard data.count <= 1_048_576,
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let accessToken = object["access_token"] as? String,
+              !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw ProviderOAuthRefreshError.invalidResponse
+        }
+        let expiresAt: Date? = {
+            let seconds: Double?
+            if let value = object["expires_in"] as? NSNumber { seconds = value.doubleValue }
+            else if let value = object["expires_in"] as? String { seconds = Double(value) }
+            else { seconds = nil }
+            guard let seconds, seconds.isFinite, seconds > 0, seconds <= 31_536_000 else { return nil }
+            return Date().addingTimeInterval(seconds)
+        }()
+        return try ProviderOAuthCredential(
+            accessToken: accessToken,
+            refreshToken: object["refresh_token"] as? String ?? refreshToken,
+            expiresAt: expiresAt ?? validated.expiresAt,
+            tokenType: object["token_type"] as? String ?? validated.tokenType,
+            scope: object["scope"] as? String ?? validated.scope,
+            tokenEndpoint: endpoint,
+            clientID: clientID
+        ).validated()
+    }
+
+    private static func formEncode(_ fields: [(String, String)]) -> Data {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._*"))
+        let encoded = fields.map { key, value in
+            let escaped = value.addingPercentEncoding(withAllowedCharacters: allowed)?
+                .replacingOccurrences(of: "%20", with: "+") ?? ""
+            return key + "=" + escaped
+        }.joined(separator: "&")
+        return Data(encoded.utf8)
+    }
+}
+
+enum ProviderOAuthRefreshError: LocalizedError, Sendable, Equatable {
+    case missingConfiguration
+    case invalidResponse
+    case httpFailure(status: Int, message: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .missingConfiguration:
+            return "OAuth refresh 缺少 token endpoint、client ID 或 refresh token。"
+        case .invalidResponse:
+            return "OAuth refresh 服务返回了无效响应。"
+        case let .httpFailure(status, message):
+            return "OAuth refresh 失败（" + String(status) + "）：" + message
+        }
     }
 }
