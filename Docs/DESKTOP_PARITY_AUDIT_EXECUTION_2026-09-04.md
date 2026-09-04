@@ -8,7 +8,7 @@
 | 项目 | 实测值 |
 |---|---|
 | 上游仓库 | `deepseek-ai/deepseek-harness` |
-| 上游最新提交 | `76fda729799fe9b3848dbe2c211d4b231032b81e`（2026-09-03） |
+| 上游最新提交 | `d347e703908d0406b7a7ef80e3a0e594d86b2215`（`v0.1.3-alpha.1`，2026-09-04） |
 | 上游 package 目录 | `acp`、`subagent`、`jobs`、`hooks`、`e2b`、`llm`、`webhook`、`web` 等均存在 |
 | 移动端分支 | `codex/deepseek-parity` |
 | 统一 SwiftPM 基线 | `939 tests, 5 skipped, 0 failures`（`/tmp/hm-upstream-latest-full`） |
@@ -34,6 +34,7 @@
 | 012 | TODO | 无 e2b/fs/subprocess provider | 先写上游 REST compatibility fixture，再决定本机替代或显式远程适配 |
 | 013 | VERIFY | provider-neutral envelope、loopback POST、持久规则 registry、claim/complete/requeue、admission retry、可选 Agent 唤醒、HMAC 和 AppModel→本机 Job 投影均已接线 | 后台持续监听、公网隧道、真实 Session 创建和真机证据 |
 | 014 | TODO | 无桌面浏览器/Windows 发行形态 | 形成 capability matrix，平台不适用项明确收口 |
+| 023 | VERIFY | 已接入上游同名 `POST /api/session/uploadFileBinary`、有界二进制接收、staged receipt 与 prompt file part；专项 loopback 测试通过 | 上游 v2 fixture、取消/过期/真实 Desktop client 和设备证据 |
 
 ## 3. 每个 ID 的执行模板
 

@@ -1,9 +1,17 @@
 # DeepSeek Harness Mobile 对齐与插件迁移
 
+### PARITY-023 · file-upload binary route + staged receipt（2026-09-04）
+
+- **状态**：VERIFY
+- **上游复核**：`packages/client/file-upload` 最新 master `d347e703908d0406b7a7ef80e3a0e594d86b2215` 定义 `POST /api/session/uploadFileBinary`，成功返回 staged `receiptId + file`；receipt 由同一 Session 的 prompt file part 消费。
+- **移动端变更**：`LocalStateServer` 增加同名 loopback 二进制路径和 64 MiB 有界缓冲；`WorkspaceStore.stageFileAttachment(data:filename:)` 复用既有 `FileAttachmentAdmission`；`AppModel` 保存 session-scoped receipt，`session/prompt.content[]` 解析 text/file 并复用既有 `send()`/轨迹持久化。
+- **专项验证**：`swift test --build-path /tmp/hm-build --filter LocalStateServerTests.testLiveHTTPClientUploadsBinaryFileAndReturnsReceiptValue` → **1 test passed**；既有 `LocalStateServerTests` → **29 tests passed**。
+- **剩余边界**：当前网络层按 Content-Length 做有界缓冲，不等同上游零聚合 streaming；尚未完成 v2 fixture 逐字段对照、取消/过期/重启回收、真实 Desktop client 和 iPhone 16 Pro 证据，继续保持 `VERIFY`。
+
 ### PARITY-PLAN-2026-09-03 · 全量逐项实施计划
 
 - **状态**：ACTIVE
-- **证据**：新增 `Docs/DESKTOP_PARITY_IMPLEMENTATION_PLAN_2026-09-03.md`，记录审计起点与当前分支 `947e7671`；基于最新上游 `76fda729799fe9b3848dbe2c211d4b231032b81e` 的源码/运行审计。
+- **证据**：新增 `Docs/DESKTOP_PARITY_IMPLEMENTATION_PLAN_2026-09-03.md`，记录审计起点与当前分支；当前上游基线已更新为 `d347e703908d0406b7a7ef80e3a0e594d86b2215`（`v0.1.3-alpha.1`）。
 - **范围**：请求扩展、session log、telemetry、turn outline、ACP、子 Agent 路由、hooks、Exa/Perplexity、agent team、LocalStateServer、`llm-pi-ai`、e2b/webhook 与平台发行形态共 14 项。
 - **执行规则**：每项按上游核对 → 生产接线 → 专项测试 → Simulator/真机证据 → 回写本日志顺序推进；源码、测试和设备结果优先于控制文档。
 - **当前结果**：计划文档已创建；源码改造从 PARITY-001 开始，尚未宣称任何新增项完成。

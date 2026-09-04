@@ -149,6 +149,7 @@ final class LocalStateServer: @unchecked Sendable {
     typealias AsyncRPCHandler = @Sendable (_ method: String, _ payload: JSONValue) async throws -> JSONValue
     typealias StreamRPCHandler = @Sendable (_ method: String, _ payload: JSONValue) async throws
         -> AsyncThrowingStream<JSONValue, Error>
+    typealias BinaryUploadHandler = @Sendable (_ sessionID: String, _ name: String?, _ data: Data) async throws -> JSONValue
 
     struct Endpoint: Sendable {
         let path: String
@@ -165,6 +166,7 @@ final class LocalStateServer: @unchecked Sendable {
     private let rpcHandler: RPCHandler?
     private let asyncRPCHandler: AsyncRPCHandler?
     private let streamRPCHandler: StreamRPCHandler?
+    private let binaryUploadHandler: BinaryUploadHandler?
 
     init?(
         endpoints: [Endpoint],
@@ -173,7 +175,8 @@ final class LocalStateServer: @unchecked Sendable {
         webhookSecret: String? = nil,
         rpcHandler: RPCHandler? = nil,
         asyncRPCHandler: AsyncRPCHandler? = nil,
-        streamRPCHandler: StreamRPCHandler? = nil
+        streamRPCHandler: StreamRPCHandler? = nil,
+        binaryUploadHandler: BinaryUploadHandler? = nil
     ) {
         guard let listener = try? NWListener(
             using: .tcp,
@@ -189,6 +192,7 @@ final class LocalStateServer: @unchecked Sendable {
         self.rpcHandler = rpcHandler
         self.asyncRPCHandler = asyncRPCHandler
         self.streamRPCHandler = streamRPCHandler
+        self.binaryUploadHandler = binaryUploadHandler
     }
 
     var port: UInt16? {
@@ -358,7 +362,7 @@ final class LocalStateServer: @unchecked Sendable {
             }
             var requestData = buffer
             requestData.append(data)
-            guard requestData.count <= 64 * 1024 else {
+            guard requestData.count <= 64 * 1024 * 1024 + 64 * 1024 else {
                 connection.cancel()
                 return
             }
@@ -382,9 +386,53 @@ final class LocalStateServer: @unchecked Sendable {
                 }
                 .first ?? 0
             let bodyStart = headerEnd.upperBound
+            let requestLine = headerText.split(separator: "\r\n", maxSplits: 1).first.map(String.init) ?? ""
+            let requestTarget = requestLine.split(separator: " ").dropFirst().first.map(String.init) ?? ""
+            let isBinaryUpload = requestTarget.hasPrefix("/api/session/uploadFileBinary")
+            let maximumBodyBytes = isBinaryUpload
+                ? 64 * 1024 * 1024 + 64 * 1024
+                : 64 * 1024
+            guard contentLength <= maximumBodyBytes else {
+                connection.cancel()
+                return
+            }
             guard requestData.count >= bodyStart + contentLength else {
                 if !isComplete { self.receiveRequest(on: connection, buffer: requestData) }
                 else { connection.cancel() }
+                return
+            }
+            if isBinaryUpload, let binaryUploadHandler {
+                let target = requestTarget
+                let contentType = headerText
+                    .split(separator: "\r\n")
+                    .dropFirst()
+                    .first(where: { $0.lowercased().hasPrefix("content-type:") })
+                    .map { String($0.split(separator: ":", maxSplits: 1).dropFirst().joined(separator: ":")).trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                guard contentType?.split(separator: ";", maxSplits: 1).first.map(String.init) == "application/octet-stream" else {
+                    Self.send((415, "content type must be application/octet-stream"), on: connection)
+                    return
+                }
+                guard let components = URLComponents(string: "http://127.0.0.1\(target)"),
+                      let sessionID = components.queryItems?.first(where: { $0.name == "sessionId" })?.value,
+                      !sessionID.isEmpty else {
+                    Self.send((400, "{\"error\":\"sessionId is required\"}"), on: connection)
+                    return
+                }
+                let name = components.queryItems?.first(where: { $0.name == "name" })?.value
+                let bodyData = Data(requestData[bodyStart..<(bodyStart + contentLength)])
+                Task {
+                    do {
+                        let value = try await binaryUploadHandler(sessionID, name, bodyData)
+                        let encoded = Self.encodeJSON(.object([
+                            "ok": .bool(true),
+                            "value": value
+                        ]))
+                        Self.send((200, encoded), on: connection)
+                    } catch {
+                        let message = error.localizedDescription.replacingOccurrences(of: "\"", with: "'")
+                        Self.send((200, "{\"ok\":false,\"error\":{\"code\":\"session/attachment-invalid\",\"message\":\"\(message)\",\"details\":{}}}"), on: connection)
+                    }
+                }
                 return
             }
             let request = String(decoding: requestData, as: UTF8.self)
@@ -571,6 +619,13 @@ final class LocalStateServer: @unchecked Sendable {
             return (500, #"{"error":"serialization failure"}"#)
         }
         return (200, String(decoding: data, as: UTF8.self))
+    }
+
+    private static func encodeJSON(_ value: JSONValue) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        guard let data = try? encoder.encode(value) else { return "{\"ok\":false}" }
+        return String(decoding: data, as: UTF8.self)
     }
 }
 
@@ -1004,6 +1059,33 @@ struct LocalStateHTTPClient: Sendable {
 
     func post(path: String, body: String, headers: [String: String] = [:]) async throws -> String {
         try await request(path: path, method: "POST", body: Data(body.utf8), headers: headers)
+    }
+
+    func uploadFile(
+        sessionID: String,
+        data: Data,
+        name: String? = nil
+    ) async throws -> JSONValue {
+        var components = URLComponents(url: baseURL.appendingPathComponent("api/session/uploadFileBinary"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "sessionId", value: sessionID)]
+        if let name { components.queryItems?.append(URLQueryItem(name: "name", value: name)) }
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "POST"
+        request.httpBody = data
+        request.timeoutInterval = 60
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        let (body, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw LocalStateHTTPError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            throw LocalStateHTTPError.server(status: http.statusCode, body: String(decoding: body, as: UTF8.self))
+        }
+        guard let envelope = try? JSONDecoder().decode(JSONValue.self, from: body) else {
+            throw LocalStateHTTPError.invalidResponse
+        }
+        guard envelope.objectValue?["ok"]?.booleanValue != false else {
+            throw LocalStateHTTPError.server(status: http.statusCode, body: String(decoding: body, as: UTF8.self))
+        }
+        return envelope
     }
 
     func callRPC(

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "source": {
     "project": "deepseek-ai/deepseek-harness",
-    "commit": "76fda729799fe9b3848dbe2c211d4b231032b81e",
+    "commit": "d347e703908d0406b7a7ef80e3a0e594d86b2215",
     "lockPath": "Dependencies/upstreams.lock.json"
   },
   "scenarios": [

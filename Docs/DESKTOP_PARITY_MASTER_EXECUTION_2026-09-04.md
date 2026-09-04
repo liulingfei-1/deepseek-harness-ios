@@ -2,7 +2,7 @@
 
 更新时间：2026-09-04  
 本地分支：`codex/deepseek-parity`  
-上游基线：`deepseek-ai/deepseek-harness` master `76fda729799fe9b3848dbe2c211d4b231032b81e`
+上游基线：`deepseek-ai/deepseek-harness` master `d347e703908d0406b7a7ef80e3a0e594d86b2215`（`v0.1.3-alpha.1`，2026-09-04）
 
 ## 1. 证据规则
 
@@ -26,7 +26,7 @@
 | Credential records | `CredentialRecord = ApiKeyRecord | GrantRecord`；授权 flow 观察到 record commit 才算成功；刷新使用 read-modify-write | 本地已有 API-key/OAuth Keychain records、single-flight、RFC 6749 refresh client 与手动 grant 录入；缺 provider-specific 授权 flow/401 retry | `VERIFY` |
 | Provider reload | 上游 route 可在设置变化后无重启生效；模型/凭据按请求解析 | 本地有 profile generation、模型 capability cache；`session/modelCatalog` 支持 `refresh`/`profileId` 强制重拉并持久化模型目录；provider-specific OAuth 生命周期仍缺 | `VERIFY` |
 | Local web UI | 桌面 web server/client-half 独立存在 | loopback API/WKWebView 可用，桌面 frontend bundle 尚未接入；`LocalStateHTTPClient` 已暴露 connecting/connected/disconnected 与 monotone generation | `VERIFY` |
-| Session attachment | `session.attachment(sessionId, attachmentId)` 先做 Session 轨迹引用授权，再返回 `ImageAttachmentRef + base64`；未引用返回 `session/attachment-invalid` | 已接入本地 `session/attachment` RPC，复用 canonical trajectory 与 `WorkspaceStore.readAttachment`，返回媒体类型、字节数、像素尺寸和 base64；专项回归通过 | `VERIFY` |
+| Session attachment/upload | `session.attachment` 做轨迹引用授权；`POST /api/session/uploadFileBinary` 流式接收并返回 staged receipt | 已接入本机同名上传路径（缓冲上限 64 MiB），复用 `FileAttachmentAdmission`/`WorkspaceStore`，receipt 可由 `session/prompt.content[]` 的 file part 消费；专项 loopback 回归通过 | `VERIFY` |
 | Session control stream | 上游 `SessionControlController.control()` 首帧 baseline，随后推送 queue/jobs/projection replacement，支持 AbortSignal 结束 | 已接入 loopback `session/control` SSE/chunked stream；baseline 覆盖 queue/jobs/projection，jobs 来自本地 `HarnessJobRegistry`，queue/jobs/基础运行状态 replacement 由 `SessionRunRegistry` + 250ms 轮询产生；原生事件订阅和 generation 语义仍缺 | `VERIFY` |
 | Session model/skill controls | 上游 `session/selectModel` 与独立 `skills/list` Remote | 本地复用会话模型配置与 `MobileSkillRegistry`，新增对应 RPC/schema 与 Session 存在性校验 | `VERIFY` |
 | Windows host | PowerShell/win32/ACL 依赖 Windows 内核 | iOS 无等价内核能力 | `OUT-OF-SCOPE` |
@@ -100,6 +100,6 @@ git diff --check
 
 ## 5. 当前批次记录
 
-2026-09-04：已用 `agent-reach doctor --json`、`gh search code`、GitHub API 和本地源码/测试核对上游 authorization、credential record、E2B、webhook、ACP、client connection 入口；并将 upstream checkout/lock 对齐到 master `76fda729799fe9b3848dbe2c211d4b231032b81e`。当前批次完成 OAuth record + refresh single-flight、RFC 6749 自动刷新、401 token-rotation retry、OAuth-backed Profile 生命周期、手动 grant 录入、异步 Session controller RPC、provider/workspace mutation 和 `session/follow` 增量窗口 projection；真正 follow stream/SSE/WebSocket、provider-specific authorization UI、真实授权和设备/API 证据仍保持 `VERIFY`。
+2026-09-04：已用 `agent-reach doctor --json`、`gh api`、GitHub compare 和本地源码/测试核对上游 authorization、credential record、E2B、webhook、ACP、client connection、file-upload、assistant-stream 入口；并将 upstream checkout/lock 对齐到 master `d347e703908d0406b7a7ef80e3a0e594d86b2215`（`v0.1.3-alpha.1`）。当前批次完成 OAuth record + refresh single-flight、RFC 6749 自动刷新、401 token-rotation retry、OAuth-backed Profile 生命周期、手动 grant 录入、异步 Session controller RPC、provider/workspace mutation、`session/follow` 增量窗口 projection 和同名 binary upload + staged receipt 闭环；真正 follow 原生事件/WebSocket、provider-specific authorization UI、assistant-stream 完整互操作、真实授权和设备/API 证据仍保持 `VERIFY`。
 
 2026-09-04 Workspace registry：根据上游 `workspace-controller` 的 types/commands/feed 实现，本地新增可持久化 Workspace registry 及 `create|rename|delete|insertBefore|insertSessionBefore|archiveSession` RPC。创建同一路径幂等解析，删除保留目录与 Session；专项 `WorkspaceRegistryTests` 2/2 通过。随后补上 `session/follow`/`workspace/follow` 的 SSE/chunked carrier、snapshot-first 客户端和 session 增量事件回归，并将 workspace follow 投影为 baseline + upsert/remove/order/archived 增量；客户端可选指数退避重连并续传 session cursor。当前事件源仍是 250ms persistence polling bridge，客户端 generation 状态、AbortSignal generation 和真机生命周期仍未完全承载，继续标记 `VERIFY`。

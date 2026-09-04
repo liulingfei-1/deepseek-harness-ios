@@ -233,6 +233,8 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
     private var stagedImageReference: AgentImageAttachmentRef?
     var hasStagedFile = false
     private var stagedFileReference: AgentFileAttachmentRef?
+    private var stagedUploadReceipts: [UUID: (sessionID: UUID, reference: AgentFileAttachmentRef)] = [:]
+    private var stagedRPCFileReferences: [AgentFileAttachmentRef] = []
     private var stagedShareAdmission: WorkspaceShareAdmission?
     var sessions: [ConversationSessionSummary] = []
     var activeSessionID: UUID?
@@ -258,6 +260,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
     private var allStagedFileReferences: [AgentFileAttachmentRef] {
         (stagedFileReference.map { [$0] } ?? [])
             + (stagedShareAdmission?.fileAttachments ?? [])
+            + stagedRPCFileReferences
     }
     var backgroundRuntimeStatus: BackgroundRuntimeStatus {
         selectedRunPresentation?.backgroundRuntimeStatus ?? .idle
@@ -779,6 +782,9 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
             try await localStateRPCBridge.call(method, payload)
         }, streamRPCHandler: { [localStateRPCBridge] method, payload in
             try await localStateRPCBridge.openStream(method, payload)
+        }, binaryUploadHandler: { [weak self] sessionID, name, data in
+            guard let self else { throw LocalStateRPCError.methodNotFound("session/uploadFileBinary") }
+            return try await self.handleLocalFileUpload(sessionID: sessionID, name: name, data: data)
         })
         localStateRPCBridge.setHandler { [weak self] method, payload in
             guard let self else { throw LocalStateRPCError.methodNotFound(method) }
@@ -800,6 +806,45 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
     /// Desktop connection client. All mutations reuse the same AppModel
     /// methods as the native UI, so RPC calls cannot create a second state
     /// source.
+    private func handleLocalFileUpload(
+        sessionID rawSessionID: String,
+        name: String?,
+        data: Data
+    ) async throws -> JSONValue {
+        guard let sessionID = UUID(uuidString: rawSessionID) else {
+            throw LocalStateRPCError.invalidPayload("sessionId")
+        }
+        guard try await sessionStore.listSessions().contains(where: { $0.id == sessionID }) else {
+            throw LocalStateRPCError.sessionNotFound(sessionID)
+        }
+        let reference: AgentFileAttachmentRef
+        do {
+            reference = try await workspaceStore.stageFileAttachment(
+                data: data,
+                filename: name.flatMap { $0.isEmpty ? nil : $0 } ?? "attachment"
+            )
+        } catch {
+            throw LocalStateRPCError.attachmentInvalid(error.localizedDescription)
+        }
+        let receiptID = UUID()
+        stagedUploadReceipts[receiptID] = (sessionID, reference)
+        if activeSessionID == sessionID {
+            stagedFileReference = reference
+            hasStagedFile = true
+        }
+        return .object([
+            "receiptId": .string(receiptID.uuidString.lowercased()),
+            "file": .object([
+                "id": .string(reference.id.uuidString.lowercased()),
+                "path": .string(reference.path),
+                "mimeType": .string(reference.mimeType),
+                "byteCount": .number(Double(reference.byteCount)),
+                "displayName": .string(reference.displayName),
+                "expiresAt": .string(reference.expiresAt.ISO8601Format())
+            ])
+        ])
+    }
+
     private func handleLocalStateRPC(method: String, payload: JSONValue) async throws -> JSONValue {
         let fields = payload.objectValue ?? [:]
         func requiredString(_ key: String) throws -> String {
@@ -1127,16 +1172,59 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
             await forkConversation(id: id)
             return try await currentProjection()
         case "session/prompt":
-            let text = try requiredString("text")
+            let targetSessionID: UUID?
             if let rawID = fields["sessionId"]?.stringValue {
                 guard let id = UUID(uuidString: rawID) else {
                     throw LocalStateRPCError.invalidPayload("sessionId")
                 }
+                targetSessionID = id
                 if id != activeSessionID {
                     await switchConversation(to: id)
                 }
+            } else {
+                targetSessionID = activeSessionID
             }
-            return .object(["accepted": .bool(await send(text))])
+            var textParts: [String] = []
+            var receiptIDs: [UUID] = []
+            var uploadedFiles: [AgentFileAttachmentRef] = []
+            if case let .array(parts)? = fields["content"] {
+                for part in parts {
+                    guard let block = part.objectValue,
+                          let type = block["type"]?.stringValue else {
+                        throw LocalStateRPCError.invalidPayload("content")
+                    }
+                    switch type {
+                    case "text":
+                        guard let text = block["text"]?.stringValue else {
+                            throw LocalStateRPCError.invalidPayload("content.text")
+                        }
+                        textParts.append(text)
+                    case "file":
+                        guard let rawReceiptID = block["receiptId"]?.stringValue,
+                              let receiptID = UUID(uuidString: rawReceiptID),
+                              let staged = stagedUploadReceipts[receiptID],
+                              staged.sessionID == targetSessionID else {
+                            throw LocalStateRPCError.attachmentInvalid("File was not uploaded for this session.")
+                        }
+                        receiptIDs.append(receiptID)
+                        if !uploadedFiles.contains(where: { $0.id == staged.reference.id }) {
+                            uploadedFiles.append(staged.reference)
+                        }
+                    default:
+                        throw LocalStateRPCError.attachmentInvalid("Unsupported prompt attachment type: \(type)")
+                    }
+                }
+            } else if let text = fields["text"]?.stringValue {
+                textParts = [text]
+            } else {
+                throw LocalStateRPCError.invalidPayload("content")
+            }
+            stagedRPCFileReferences = uploadedFiles
+            let accepted = await send(textParts.joined())
+            if accepted {
+                for receiptID in Set(receiptIDs) { stagedUploadReceipts.removeValue(forKey: receiptID) }
+            }
+            return .object(["accepted": .bool(accepted)])
         case "session/cancel":
             cancelRun()
             return .object(["accepted": .bool(true)])
@@ -2773,9 +2861,10 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         disposition: QueuedInputDisposition = .queued
     ) async -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty || hasStagedImage || hasStagedFile else { return false }
+        let hasAnyStagedAttachment = !allStagedImageReferences.isEmpty || !allStagedFileReferences.isEmpty
+        guard !trimmed.isEmpty || hasAnyStagedAttachment else { return false }
         if isRunning {
-            if hasStagedImage || hasStagedFile {
+            if hasAnyStagedAttachment {
                 presentError(
                     NSError(
                         domain: "HarnessMobile",
@@ -2818,6 +2907,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         hasStagedImage = false
         stagedFileReference = nil
         hasStagedFile = false
+        stagedRPCFileReferences = []
         stagedShareAdmission = nil
         let shouldRename = messages.isEmpty
         messages.append(message)

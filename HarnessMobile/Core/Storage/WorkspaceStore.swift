@@ -638,10 +638,13 @@ actor WorkspaceStore {
             throw WorkspaceError.fileTooLarge(Self.maximumFileAttachmentBytes)
         }
         let data = try Data(contentsOf: externalURL, options: [.mappedIfSafe])
-        let admitted = try FileAttachmentAdmission.admit(
-            data,
-            filename: externalURL.lastPathComponent
-        )
+        return try stageFileAttachment(data: data, filename: externalURL.lastPathComponent)
+    }
+
+    /// Admits already-buffered bytes received from the loopback Desktop upload route.
+    func stageFileAttachment(data: Data, filename: String) throws -> AgentFileAttachmentRef {
+        try ensureRoot()
+        let admitted = try FileAttachmentAdmission.admit(data, filename: filename)
         let attachments = root.appendingPathComponent("Attachments", isDirectory: true)
         try fileManager.createDirectory(at: attachments, withIntermediateDirectories: true)
         let id = UUID()

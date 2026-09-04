@@ -335,6 +335,40 @@ final class LocalStateServerTests: XCTestCase {
         XCTAssertEqual(value.objectValue?["accepted"], .bool(true))
     }
 
+    func testLiveHTTPClientUploadsBinaryFileAndReturnsReceiptValue() async throws {
+        let server = LocalStateServer(
+            endpoints: [],
+            binaryUploadHandler: { sessionID, name, data in
+                XCTAssertEqual(sessionID, "session-upload")
+                XCTAssertEqual(name, "report.pdf")
+                XCTAssertEqual(data, Data("%PDF-test".utf8))
+                return .object([
+                    "receiptId": .string("receipt-1"),
+                    "file": .object(["displayName": .string(name ?? "")])
+                ])
+            }
+        )
+        XCTAssertNotNil(server)
+        server?.start()
+        defer { server?.stop() }
+        var assignedPort: UInt16 = 0
+        for _ in 0..<40 {
+            if let port = server?.port, port > 0 {
+                assignedPort = port
+                break
+            }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        XCTAssertGreaterThan(assignedPort, 0)
+        let response = try await LocalStateHTTPClient(port: assignedPort).uploadFile(
+            sessionID: "session-upload",
+            data: Data("%PDF-test".utf8),
+            name: "report.pdf"
+        )
+        XCTAssertEqual(response.objectValue?["ok"], .bool(true))
+        XCTAssertEqual(response.objectValue?["value"]?.objectValue?["receiptId"], .string("receipt-1"))
+    }
+
     func testLiveHTTPClientReceivesSnapshotFirstSSEStream() async throws {
         let server = LocalStateServer(
             endpoints: [],

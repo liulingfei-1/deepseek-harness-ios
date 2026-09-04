@@ -2,7 +2,7 @@
 
 更新时间：2026-09-04
 目标分支：`codex/deepseek-parity`
-上游基线：`deepseek-ai/deepseek-harness` master `76fda729799fe9b3848dbe2c211d4b231032b81e`
+上游基线：`deepseek-ai/deepseek-harness` master `d347e703908d0406b7a7ef80e3a0e594d86b2215`（`v0.1.3-alpha.1`，2026-09-04）
 
 这份文档是可照着执行的工作单，不把控制文档当作能力证明。每一项必须先核对上游源码，再核对本地生产调用链，完成代码、测试和构建后才可勾选。`DONE` 只表示当前可获得证据已闭环；缺真实 API、iSH、后台或真机证据时保留 `VERIFY`。iOS 系统权限、平台限制和数据安全边界不删除，也不以文档宣称绕过。
 
@@ -53,6 +53,7 @@ git diff --check
 | PARITY-020 | Host-wide `SessionControlController.control()` baseline + live replacement stream | `session/control` stream → queues/jobs/projections baseline and updates | VERIFY | 已接入 baseline 与 queue/jobs/基础 projection replacement 的 loopback SSE/chunked bridge；原生事件源和 AbortSignal/generation 语义仍待补齐 |
 | PARITY-021 | Client connection state/generation | `LocalStateHTTPClient.callRPCStream` → connecting/connected/disconnected callbacks + monotone generation | VERIFY | 已实现并回归；WKWebView online/offline、retry jitter、AbortSignal cascade 和真实 Desktop client 互操作仍待补齐 |
 | PARITY-014 | frontend-static/client-half、Windows host 包 | loopback route 已补 `GET/HEAD` 兼容；WKWebView 可承载但桌面 bundle 未接入 | OUT-OF-SCOPE/VERIFY | 打包并接入真实 bundle；Windows PowerShell/win32/ACL 保持平台不适用 |
+| PARITY-023 | file-upload `POST /api/session/uploadFileBinary` + staged receipt | 本机同名二进制路由、64 MiB 上限、附件准入、receipt 和 `session/prompt.content[]` file 消费已接线；loopback upload 回归通过 | VERIFY | 用上游 v2 fixture 对照 receipt/过期/取消/大文件/真实 client；当前请求体仍为有界缓冲，不宣称流式零拷贝 |
 
 ### PARITY-002 本批次逐步修改清单
 
