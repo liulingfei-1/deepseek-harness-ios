@@ -147,8 +147,8 @@ final class LocalStateServerTests: XCTestCase {
             ])
         )
         let frames = localSessionControlFrames(previous: baseline, current: changed)
-        XCTAssertEqual(frames.count, 1)
-        XCTAssertEqual(frames[0].objectValue?["type"], .string("queue"))
+        XCTAssertEqual(frames.count, 2)
+        XCTAssertEqual(frames.map { $0.objectValue?["type"]?.stringValue }, ["queue", "projection"])
         XCTAssertEqual(frames[0].objectValue?["sessionId"], .string(sessionID.uuidString.lowercased()))
     }
 

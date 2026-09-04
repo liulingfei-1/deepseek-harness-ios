@@ -857,7 +857,7 @@ git diff --check
 
 - 状态：`VERIFY`
 - 上游证据：`packages/api/session-controller/src/control.ts`；每次连接先发 `baseline`，随后发 `queue`、`jobs`、`projection` replacement，AbortSignal 结束时关闭队列。
-- 移动端变更：`LocalStateServer` 接受 `session/control` stream；AppModel 用 `SessionStore` + `SessionRunRegistry.aggregate()` 生成 baseline，并以 250ms bridge 发送 queue replacement；客户端复用既有 SSE/chunked 解码与取消。
+- 移动端变更：`LocalStateServer` 接受 `session/control` stream；AppModel 用 `SessionStore` + `SessionRunRegistry.aggregate()` + `HarnessJobRegistry` 生成 queue/jobs/projection baseline，并以 250ms bridge 发送 queue/jobs/基础运行状态 replacement；客户端复用既有 SSE/chunked 解码与取消。
 - 测试命令与真实结果：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter LocalStateServerTests.testLiveHTTPClientReceivesSessionControlBaseline|LocalStateServerTests.testSessionControlFramesEmitBaselineAndQueueReplacement`：2/2 通过。
 - 剩余动作：接入 durable jobs、projection event bus、原生事件订阅和 generation/AbortSignal 语义，再用上游 `control-queue.host.spec.ts` 做逐帧对照；真机/真实 Desktop client 互操作前保持 `VERIFY`。
 

@@ -596,7 +596,8 @@ enum LocalStateRPCError: LocalizedError, Sendable, Equatable {
 
 func localSessionControlBaseline(
     sessions: [ConversationSessionSummary],
-    aggregate: SessionRunAggregateSnapshot
+    aggregate: SessionRunAggregateSnapshot,
+    jobsBySession: [UUID: [HarnessJobSnapshot]] = [:]
 ) -> JSONValue {
     var queues: [String: JSONValue] = [:]
     var projections: [String: JSONValue] = [:]
@@ -618,15 +619,29 @@ func localSessionControlBaseline(
         } ?? []
         queues[id] = .array(items)
         projections[id] = .object([
-            "asOfSeq": .number(0),
-            "values": .object([:])
+            "asOfSeq": .number(Double(session.revision)),
+            "values": .object([
+                "running": .bool(presentation != nil && presentation?.phase.isQuiescent == false),
+                "queuedInputCount": .number(Double(items.count))
+            ])
         ])
+    }
+    let jobValues = sessions.reduce(into: [String: JSONValue]()) { result, session in
+        result[session.id.uuidString.lowercased()] = .array((jobsBySession[session.id] ?? []).map { job in
+            .object([
+                "id": .string(job.id), "kind": .string(job.kind), "label": .string(job.label),
+                "status": .string(job.status.rawValue),
+                "detail": job.detail.map(JSONValue.string) ?? .null,
+                "startedAt": .number(Double(job.startedAt)),
+                "finishedAt": job.finishedAt.map { .number(Double($0)) } ?? .null
+            ])
+        })
     }
     return .object([
         "type": .string("baseline"),
         "value": .object([
             "queues": .object(queues),
-            "jobs": .object([:]),
+            "jobs": .object(jobValues),
             "projections": .object(projections)
         ])
     ])
@@ -645,6 +660,15 @@ func localSessionControlFrames(previous: JSONValue?, current: JSONValue) -> [JSO
             "type": .string("queue"),
             "sessionId": .string(sessionID),
             "items": newQueues[sessionID] ?? .array([])
+        ]))
+    }
+    let oldJobs = oldValue["jobs"]?.objectValue ?? [:]
+    let newJobs = newValue["jobs"]?.objectValue ?? [:]
+    for sessionID in newJobs.keys.sorted() where oldJobs[sessionID] != newJobs[sessionID] {
+        frames.append(.object([
+            "type": .string("jobs"),
+            "sessionId": .string(sessionID),
+            "jobs": newJobs[sessionID] ?? .array([])
         ]))
     }
     let oldProjections = oldValue["projections"]?.objectValue ?? [:]

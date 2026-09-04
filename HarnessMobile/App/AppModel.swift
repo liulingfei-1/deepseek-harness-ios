@@ -1315,9 +1315,16 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                             guard let self else { break }
                             let summaries = try await self.sessionStore.listSessions()
                             let aggregate = await self.sessionRunRegistry.aggregate()
+                            var jobsBySession: [UUID: [HarnessJobSnapshot]] = [:]
+                            for summary in summaries {
+                                jobsBySession[summary.id] = await self.jobRegistry.list(
+                                    ownerSession: summary.id.uuidString.lowercased()
+                                )
+                            }
                             let current = localSessionControlBaseline(
                                 sessions: summaries,
-                                aggregate: aggregate
+                                aggregate: aggregate,
+                                jobsBySession: jobsBySession
                             )
                             for frame in localSessionControlFrames(previous: previous, current: current) {
                                 continuation.yield(frame)
