@@ -171,6 +171,14 @@
 - **专项验证**：ACP 全套测试 → **9 tests passed**，新增 `testTransportTerminationSettlesWaitingRunImmediately`。
 - **剩余边界**：真实 ACP child 的非零退出码映射、重连策略、后台恢复和真机证据仍需设备运行。
 
+### PARITY-010 · Workspace registry controller projection（2026-09-04）
+
+- **状态**：VERIFY
+- **上游核对**：`packages/api/workspace-controller/src/types.ts` 定义 WorkspaceView、幂等 create、rename/delete/order/session/archive 命令及可取消 follow；`commands.ts` 明确删除不触碰目录与 Session，`feed.ts` 先发 baseline 再发 ordered increments。
+- **移动端变更**：新增 `LocalWorkspaceRegistry` actor 与 JSON 持久化，保存 Workspace UUID、规范化绝对目录、唯一标题、Session 手工顺序、时间戳和归档集合；`AppModel` 接入 `workspace/create|rename|delete|insertBefore|insertSessionBefore|archiveSession`，workspace projection 增加 `workspaces` 与 `archivedSessionIds`。同一路径 create 现在幂等返回既有记录，删除只删除注册关系。
+- **专项验证**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-workspace-registry-focused --filter WorkspaceRegistryTests` → **2 tests passed**（创建/幂等、重命名、排序、归档、冷启动重载、无效输入）。
+- **剩余边界**：当前 `workspace/follow` 仍未实现上游的 baseline + AsyncIterable + AbortSignal 长连接；SSE/WebSocket carrier、重连、前后台和 iPhone 16 Pro 证据待后续批次，不能写成 `DONE`。
+
 ### PARITY-013 · GitHub webhook envelope 与投递去重（2026-09-04）
 
 - **状态**：VERIFY

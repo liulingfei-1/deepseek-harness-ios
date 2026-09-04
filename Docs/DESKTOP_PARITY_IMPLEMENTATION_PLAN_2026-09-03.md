@@ -239,3 +239,9 @@ git diff --check
 3. 在 SSE decoder、AgentRuntime accumulator、持久化消息和多轮工具回放之间传递签名；缺签名历史只按文本回放。
 4. 用 wire/stream/replay 专项测试锁定字段和事件顺序，再执行固定全量验收门。
 5. 当前结果：Anthropic/model 专项 35 项通过，另有 TurnAccumulator 签名回归；完整 SwiftPM 934 项、5 skipped、0 failures；真实 API、OAuth、runtime reload、iSH/后台/真机仍为 VERIFY。
+
+### 2026-09-04 增量：Workspace registry
+
+1. 对照 `workspace-controller` 的 `types.ts`、`commands.ts`、`feed.ts`，实现本地持久化 Workspace identity、标题、目录、Session 顺序和归档集合。
+2. 将 `workspace/create|rename|delete|insertBefore|insertSessionBefore|archiveSession` 注册到 `/api`，create 对同一路径幂等解析，delete 保留目录与 Session。
+3. `WorkspaceRegistryTests` 2/2 通过；上游 `follow` 的 baseline/增量/取消语义仍需真正 SSE/WebSocket carrier 与断线重连，当前保持 `VERIFY`。

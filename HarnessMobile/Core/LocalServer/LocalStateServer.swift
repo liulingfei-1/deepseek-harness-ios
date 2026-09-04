@@ -35,7 +35,8 @@ struct LocalStateAPISchema: Codable, Sendable, Equatable {
                 name: "workspace",
                 methods: [
                     "schema", "list", "files", "mounts",
-                    "mount/setAccess", "mount/remove"
+                    "mount/setAccess", "mount/remove", "create", "rename", "delete",
+                    "insertBefore", "insertSessionBefore", "archiveSession"
                 ]
             )
         ]

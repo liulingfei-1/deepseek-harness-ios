@@ -88,3 +88,5 @@ git diff --check
 ## 5. 当前批次记录
 
 2026-09-04：已用 `agent-reach doctor --json`、`gh search code`、GitHub API 和本地源码/测试核对上游 authorization、credential record、E2B、webhook、ACP、client connection 入口；并将 upstream checkout/lock 对齐到 master `76fda729799fe9b3848dbe2c211d4b231032b81e`。当前批次完成 OAuth record + refresh single-flight、RFC 6749 自动刷新、401 token-rotation retry、OAuth-backed Profile 生命周期、手动 grant 录入、异步 Session controller RPC、provider/workspace mutation 和 `session/follow` 增量窗口 projection；真正 follow stream/SSE/WebSocket、provider-specific authorization UI、真实授权和设备/API 证据仍保持 `VERIFY`。
+
+2026-09-04 Workspace registry：根据上游 `workspace-controller` 的 types/commands/feed 实现，本地新增可持久化 Workspace registry 及 `create|rename|delete|insertBefore|insertSessionBefore|archiveSession` RPC。创建同一路径幂等解析，删除保留目录与 Session；专项 `WorkspaceRegistryTests` 2/2 通过。上游 `follow` 的 baseline + ordered increments + AbortSignal 尚未由本地 `/api` carrier 完整承载，继续标记 `VERIFY`，不得把增量窗口宣称为长连接流。

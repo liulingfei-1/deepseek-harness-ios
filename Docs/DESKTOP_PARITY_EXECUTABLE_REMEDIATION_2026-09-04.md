@@ -63,6 +63,13 @@ git diff --check
 - [x] `/api` 的 settings/workspace schema 与只读投影已接入：provider/list、provider/active、workspace/list/files/mounts；不把凭据值放入投影。
 - [x] 增加可验证的 controller mutation：`settings/provider/remove`、通用 Host-backed `settings/mutate|update|replace`、`workspace/mount/setAccess`、`workspace/mount/remove`；`session/follow` 返回带 streamID、cursor 与事件窗口的增量快照，复用 canonical trajectory。
 
+### PARITY-010 Workspace registry 本批次（2026-09-04）
+
+- [x] 对照上游 `packages/api/workspace-controller/src/{types,commands,feed}.ts`，补齐本机 Workspace registry 的持久化投影（UUID、目录、标题、Session 顺序、创建/更新时间、归档集合）。
+- [x] 接入 `workspace/create|rename|delete|insertBefore|insertSessionBefore|archiveSession` RPC；`create` 对已注册目录按桌面语义幂等返回既有 Workspace，删除仅移除注册不删除目录或 Session。
+- [x] 新增 `WorkspaceRegistryTests` 覆盖创建/幂等解析、重命名、排序、Session 归档、冷启动重载、无效路径与标题错误；专项 2/2 通过。
+- [ ] `workspace/follow` 当前仍是 `/api` 的增量窗口投影，不是上游可取消的长连接 AsyncIterable；需后续接入 SSE/WebSocket carrier、断线重连和真机生命周期证据，状态保持 `VERIFY`。
+
 ### PARITY-003 本批次逐步修改清单
 
 - [x] `SessionTelemetrySink` 增加 `capturePolicy` 与异步 `releasePending()` 契约并提供默认实现，保持既有 sink 向后兼容。

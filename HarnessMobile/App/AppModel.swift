@@ -325,6 +325,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
     var isMemoryEnabledForActiveSession = true
 
     let workspaceStore: WorkspaceStore
+    let workspaceRegistry: LocalWorkspaceRegistry
     let memoryStore: MemoryStore
     let backgroundPreferences: BackgroundPreferencesModel
     let pluginRuntime: CordisPluginRuntime
@@ -620,6 +621,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         sessionQueryReadModel: SessionQueryReadModel? = nil,
         feedbackSidecarStore: MessageFeedbackSidecarStore = MessageFeedbackSidecarStore(),
         workspaceStore: WorkspaceStore = WorkspaceStore(),
+        workspaceRegistry: LocalWorkspaceRegistry = LocalWorkspaceRegistry(),
         memoryStore: MemoryStore = MemoryStore(),
         modelClient: OpenAICompatibleClient = OpenAICompatibleClient(),
         sessionLogEnabled: Bool = false,
@@ -642,6 +644,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         self.sessionQueryReadModel = sessionQueryReadModel ?? SessionQueryReadModel()
         self.feedbackSidecarStore = feedbackSidecarStore
         self.workspaceStore = workspaceStore
+        self.workspaceRegistry = workspaceRegistry
         self.memoryStore = memoryStore
         self.mcpRegistry = MCPClientRegistry(
             workspaceURLProvider: { try await workspaceStore.rootURL() }
@@ -762,7 +765,10 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                     "version": .number(1),
                     "methods": .array([
                         .string("list"), .string("files"), .string("mounts"),
-                        .string("mount/setAccess"), .string("mount/remove")
+                        .string("mount/setAccess"), .string("mount/remove"),
+                        .string("create"), .string("rename"), .string("delete"),
+                        .string("insertBefore"), .string("insertSessionBefore"),
+                        .string("archiveSession")
                     ])
                 ])
             default:
@@ -805,6 +811,12 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         func mountID() throws -> UUID {
             guard let id = UUID(uuidString: try requiredString("mountId")) else {
                 throw LocalStateRPCError.invalidPayload("mountId")
+            }
+            return id
+        }
+        func workspaceID() throws -> UUID {
+            guard let id = UUID(uuidString: try requiredString("workspaceId")) else {
+                throw LocalStateRPCError.invalidPayload("workspaceId")
             }
             return id
         }
@@ -868,8 +880,25 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         }
         func workspaceProjection() async throws -> JSONValue {
             let root = try await workspaceStore.rootURL()
+            _ = try await workspaceRegistry.ensureDefault(path: root)
+            let registry = try await workspaceRegistry.snapshot()
             return .object([
                 "rootPath": .string(root.path),
+                "workspaces": .array(registry.workspaces.map { workspace in
+                    .object([
+                        "id": .string(workspace.id.uuidString.lowercased()),
+                        "path": .string(workspace.path),
+                        "title": .string(workspace.title),
+                        "sessionIds": .array(workspace.sessionIDs.map {
+                            .string($0.uuidString.lowercased())
+                        }),
+                        "createdAt": .string(workspace.createdAt.ISO8601Format()),
+                        "updatedAt": .string(workspace.updatedAt.ISO8601Format())
+                    ])
+                }),
+                "archivedSessionIds": .array(registry.archivedSessionIDs.map {
+                    .string($0.uuidString.lowercased())
+                }),
                 "files": .array(workspaceFiles.map { file in
                     .object([
                         "path": .string(file.path),
@@ -1048,7 +1077,10 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                 "version": .number(1),
                 "methods": .array([
                     .string("list"), .string("files"), .string("mounts"),
-                    .string("mount/setAccess"), .string("mount/remove")
+                    .string("mount/setAccess"), .string("mount/remove"),
+                    .string("create"), .string("rename"), .string("delete"),
+                    .string("insertBefore"), .string("insertSessionBefore"),
+                    .string("archiveSession")
                 ])
             ])
         case "workspace/list", "workspace/files", "workspace/mounts":
@@ -1068,6 +1100,45 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
             let id = try mountID()
             try await workspaceStore.removeMount(id: id)
             await refreshWorkspace()
+            return try await workspaceProjection()
+        case "workspace/create":
+            let path = try requiredString("path")
+            let title = fields["title"]?.stringValue
+            let workspace = try await workspaceRegistry.create(path: path, title: title)
+            return try await workspaceProjection()
+        case "workspace/rename":
+            let id = try workspaceID()
+            let title = try requiredString("title")
+            _ = try await workspaceRegistry.rename(id: id, title: title)
+            return try await workspaceProjection()
+        case "workspace/delete":
+            let id = try workspaceID()
+            try await workspaceRegistry.delete(id: id)
+            return try await workspaceProjection()
+        case "workspace/insertBefore":
+            let id = try workspaceID()
+            let beforeID = fields["beforeWorkspaceId"]?.stringValue.flatMap(UUID.init(uuidString:))
+            _ = try await workspaceRegistry.insertBefore(id: id, beforeID: beforeID)
+            return try await workspaceProjection()
+        case "workspace/insertSessionBefore":
+            let workspaceID = try workspaceID()
+            guard let rawSessionID = fields["sessionId"]?.stringValue,
+                  let sessionID = UUID(uuidString: rawSessionID) else {
+                throw LocalStateRPCError.invalidPayload("sessionId")
+            }
+            let beforeID = fields["beforeSessionId"]?.stringValue.flatMap(UUID.init(uuidString:))
+            _ = try await workspaceRegistry.insertSessionBefore(
+                workspaceID: workspaceID,
+                sessionID: sessionID,
+                beforeSessionID: beforeID
+            )
+            return try await workspaceProjection()
+        case "workspace/archiveSession":
+            guard let rawSessionID = fields["sessionId"]?.stringValue,
+                  let sessionID = UUID(uuidString: rawSessionID) else {
+                throw LocalStateRPCError.invalidPayload("sessionId")
+            }
+            _ = try await workspaceRegistry.archiveSession(sessionID)
             return try await workspaceProjection()
         default:
             throw LocalStateRPCError.methodNotFound(method)

@@ -115,6 +115,7 @@ $(SRCROOT)/HarnessMobile/Core/Agent/MessageFeedbackSidecar.swift
 $(SRCROOT)/HarnessMobile/Core/Storage/ToolResultSpillStore.swift
 $(SRCROOT)/HarnessMobile/Core/Storage/SessionStore.swift
 $(SRCROOT)/HarnessMobile/Core/Storage/WorkspaceStore.swift
+$(SRCROOT)/HarnessMobile/Core/Storage/WorkspaceRegistry.swift
 $(SRCROOT)/HarnessMobile/Core/Storage/ShareHandoff.swift
 $(SRCROOT)/HarnessMobile/Core/Storage/HarnessWidgetProjection.swift
 $(SRCROOT)/HarnessMobile/Core/Browser/HarnessBrowserService.swift
@@ -320,6 +321,7 @@ $(SRCROOT)/HarnessMobileTests/WebFetchToolTests.swift
 $(SRCROOT)/HarnessMobileTests/WorkStateToolsTests.swift
 $(SRCROOT)/HarnessMobileTests/WorkflowToolTests.swift
 $(SRCROOT)/HarnessMobileTests/WorkspaceStoreTests.swift
+$(SRCROOT)/HarnessMobileTests/WorkspaceRegistryTests.swift
 $(SRCROOT)/HarnessMobileTests/WorkspaceInstructionTransitionTests.swift
 $(SRCROOT)/HarnessMobileTests/WorkspaceSearchToolsTests.swift
 $(SRCROOT)/HarnessMobileUITests/HarnessMobileLiveUITests.swift
