@@ -580,8 +580,8 @@ enum LocalStateRPCError: LocalizedError, Sendable, Equatable {
 }
 
 /// Produces the desktop-compatible backwards, message-aligned history page.
-/// Assistant chunk packing remains raw event records until a lossless mobile
-/// ChunkRow projection exists.
+/// Consecutive whitelisted assistant deltas use the upstream chunkrow wire
+/// shape; unknown/future variants remain raw event records.
 func localSessionPagePayload(
     sessionID: UUID,
     events: [SessionEvent],
@@ -616,7 +616,44 @@ func localSessionPagePayload(
             if messageCount >= messageLimit { cut = Int(min(groupStart, UInt64(end))); break }
         }
     }
-    let records = try events[cut..<end].map { event -> JSONValue in
+    let records = try localSessionHistoryRecords(events: Array(events[cut..<end]))
+    return .object([
+        "sessionId": .string(sessionID.uuidString.lowercased()), "records": .array(records),
+        "hasMore": .bool(cut > 0), "throughSeq": .number(throughSequence == -1 ? -1 : Double(through))
+    ])
+}
+
+private func localSessionHistoryRecords(events: [SessionEvent]) throws -> [JSONValue] {
+    var records: [JSONValue] = []
+    var run: [SessionEvent] = []
+    var kind: String?
+    func flush() throws {
+        guard !run.isEmpty else { return }
+        if run.count >= 3, let kind {
+            records.append(try localChunkRun(kind: kind, events: run))
+        } else {
+            records.append(contentsOf: try run.map(localRawHistoryRecord))
+        }
+        run.removeAll(keepingCapacity: true)
+    }
+    for event in events {
+        guard let nextKind = localChunkKind(event) else {
+            try flush()
+            records.append(try localRawHistoryRecord(event))
+            kind = nil
+            continue
+        }
+        if !(kind == nextKind && run.last.map { localChunkContinues($0, event) } == true) {
+            try flush()
+            kind = nextKind
+        }
+        run.append(event)
+    }
+    try flush()
+    return records
+}
+
+private func localRawHistoryRecord(_ event: SessionEvent) throws -> JSONValue {
         var wire: [String: JSONValue] = [
             "type": .string(event.type), "seq": .number(Double(event.seq)),
             "time": .number(Double(event.time)), "data": event.data
@@ -626,11 +663,95 @@ func localSessionPagePayload(
         if let operation = event.surfaceOp {
             wire["surfaceOp"] = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(operation))
         }
-        return .object(["type": .string("event"), "event": .object(wire)])
+    return .object(["type": .string("event"), "event": .object(wire)])
+}
+
+private func localChunkKind(_ event: SessionEvent) -> String? {
+    guard event.type == SessionEventVocabulary.assistantChunk,
+          case let .object(data) = event.data,
+          localHasExactKeys(data, ["turn", "step", "chunk"]),
+          case let .number(turn) = data["turn"], turn.isFinite,
+          case let .number(step) = data["step"], step.isFinite,
+          case let .object(chunk) = data["chunk"],
+          case let .string(type) = chunk["type"],
+          ["text-delta", "reasoning-delta", "tool-call-delta"].contains(type),
+          case .number = chunk["index"] else { return nil }
+    if type == "tool-call-delta" {
+        guard (localHasExactKeys(chunk, ["type", "index", "id", "argumentsDelta"])
+            || localHasExactKeys(chunk, ["type", "index", "id", "name", "argumentsDelta"])),
+              case .string = chunk["id"], case .string = chunk["argumentsDelta"] else { return nil }
+    } else {
+        guard localHasExactKeys(chunk, ["type", "index", "text"]), case .string = chunk["text"] else { return nil }
+    }
+    return type
+}
+
+private func localHasExactKeys(_ object: [String: JSONValue], _ keys: [String]) -> Bool {
+    object.count == keys.count && keys.allSatisfy { object[$0] != nil }
+}
+
+private func localChunkContinues(_ previous: SessionEvent, _ next: SessionEvent) -> Bool {
+    let (_, timeOverflow) = next.time.subtractingReportingOverflow(previous.time)
+    guard previous.seq + 1 == next.seq,
+          let previousKind = localChunkKind(previous), previousKind == localChunkKind(next),
+          case let .object(a) = previous.data, case let .object(b) = next.data,
+          a["turn"] == b["turn"], a["step"] == b["step"],
+          case let .object(ac) = a["chunk"], case let .object(bc) = b["chunk"],
+          ac["index"] == bc["index"], !timeOverflow else { return false }
+    if previousKind == "tool-call-delta" {
+        return ac["id"] == bc["id"] && ac["name"] == bc["name"]
+    }
+    return true
+}
+
+private func localChunkRun(kind: String, events: [SessionEvent]) throws -> JSONValue {
+    guard let first = events.first,
+          case let .object(data) = first.data,
+          case let .number(turn) = data["turn"],
+          case let .number(step) = data["step"],
+          case let .object(chunk) = data["chunk"],
+          case let .number(index) = chunk["index"] else {
+        throw LocalStateRPCError.invalidProjection
+    }
+    var runData: [String: JSONValue] = [
+        "turn": .number(turn), "step": .number(step), "index": .number(index),
+        "dt": .array(zip(events.dropFirst(), events).map {
+            .number(Double($0.time.subtractingReportingOverflow($1.time).partialValue))
+        })
+    ]
+    let rowType: String
+    switch kind {
+    case "text-delta":
+        rowType = "text-chunks"
+        runData["texts"] = .array(events.compactMap { event in
+            guard case let .object(d) = event.data, case let .object(c) = d["chunk"], case let .string(text) = c["text"] else { return nil }
+            return .string(text)
+        })
+    case "reasoning-delta":
+        rowType = "reasoning-chunks"
+        runData["texts"] = .array(events.compactMap { event in
+            guard case let .object(d) = event.data, case let .object(c) = d["chunk"], case let .string(text) = c["text"] else { return nil }
+            return .string(text)
+        })
+    case "tool-call-delta":
+        rowType = "tool-call-chunks"
+        guard case let .string(id) = chunk["id"] else { throw LocalStateRPCError.invalidProjection }
+        runData["id"] = .string(id)
+        if case let .string(name) = chunk["name"] { runData["name"] = .string(name) }
+        runData["args"] = .array(events.compactMap { event in
+            guard case let .object(d) = event.data, case let .object(c) = d["chunk"], case let .string(args) = c["argumentsDelta"] else { return nil }
+            return .string(args)
+        })
+    default:
+        throw LocalStateRPCError.invalidProjection
     }
     return .object([
-        "sessionId": .string(sessionID.uuidString.lowercased()), "records": .array(records),
-        "hasMore": .bool(cut > 0), "throughSeq": .number(throughSequence == -1 ? -1 : Double(through))
+        "type": .string("chunks"),
+        "event": .object([
+            "type": .string("chunkrow/\(rowType)"),
+            "seq": .number(Double(first.seq)), "time": .number(Double(first.time)),
+            "data": .object(runData)
+        ])
     ])
 }
 

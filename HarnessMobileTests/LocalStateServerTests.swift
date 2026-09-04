@@ -382,15 +382,25 @@ final class LocalStateServerTests: XCTestCase {
             SessionEventDraft(type: SessionEventVocabulary.userMessage, data: .string("hello")),
             sessionID: sessionID
         )
-        _ = try await repository.append(
-            SessionEventDraft(type: SessionEventVocabulary.assistantChunk, data: .object(["text": .string("h")])),
-            sessionID: sessionID
-        )
+        for text in ["h", "i", "!"] {
+            _ = try await repository.append(
+                SessionEventDraft(
+                    type: SessionEventVocabulary.assistantChunk,
+                    data: .object([
+                        "turn": .number(1), "step": .number(0),
+                        "chunk": .object([
+                            "type": .string("text-delta"), "index": .number(0), "text": .string(text)
+                        ])
+                    ])
+                ),
+                sessionID: sessionID
+            )
+        }
         _ = try await repository.append(
             SessionEventDraft(
                 type: SessionEventVocabulary.assistantMessage,
                 data: .string("hi"),
-                sourceEventSeqs: [2]
+                sourceEventSeqs: [2, 3, 4]
             ),
             sessionID: sessionID
         )
@@ -398,19 +408,21 @@ final class LocalStateServerTests: XCTestCase {
         let page = try localSessionPagePayload(
             sessionID: sessionID,
             events: events,
-            throughSequence: 3,
+            throughSequence: 5,
             maxMessages: 1
         )
         guard case let .array(records)? = page.objectValue?["records"] else {
             return XCTFail("page must include records")
         }
-        XCTAssertEqual(records.map { $0.objectValue?["event"]?.objectValue?["seq"]?.numberValueForTests }, [2, 3])
+        XCTAssertEqual(records.first?.objectValue?["type"], JSONValue.string("chunks"))
+        XCTAssertEqual(records.first?.objectValue?["event"]?.objectValue?["type"], JSONValue.string("chunkrow/text-chunks"))
+        XCTAssertEqual(records.last?.objectValue?["event"]?.objectValue?["seq"]?.numberValueForTests, 5)
         XCTAssertEqual(page.objectValue?["hasMore"], JSONValue.bool(true))
 
         let older = try localSessionPagePayload(
             sessionID: sessionID,
             events: events,
-            throughSequence: 3,
+            throughSequence: 5,
             beforeSequence: 2,
             maxMessages: 1
         )
