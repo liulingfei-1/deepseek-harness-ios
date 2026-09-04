@@ -64,7 +64,7 @@ git diff --check
 - [x] `SessionTelemetrySink` 增加 `capturePolicy` 与异步 `releasePending()` 契约并提供默认实现，保持既有 sink 向后兼容。
 - [x] `TelemetrySessionPersistence` 在 `live` 模式逐条 capture；`onDemand` 模式只在 canonical `feedback/record` 提交后读取未交接的事件 suffix，按 cursor 重放并释放。
 - [x] 新增异步回归测试验证反馈前不发送、首次 feedback 重放完整 prefix、后续 feedback 只发送 suffix、配置 OTLP endpoint 可交付且各自只释放一次；修复 Swift 6 测试夹具的 async/锁隔离问题。
-- [x] 固定门复跑：SwiftPM **924 tests, 5 skipped, 0 failures**；Xcode arm64 Simulator **BUILD SUCCEEDED**；Plugin Host check、Node smoke、设备-only audit、upstream parity、`git diff --check` 均通过。
+- [x] 固定门复跑：SwiftPM **939 tests, 5 skipped, 0 failures**；Xcode arm64 Simulator **BUILD SUCCEEDED**；Plugin Host check、Node smoke、设备-only audit、upstream parity、`git diff --check` 均通过。
 - [ ] 设置 UI、真实 feedback/OTLP endpoint、flush/shutdown 生命周期和 iPhone 16 Pro 证据；未取得前保持 `VERIFY`。
 
 ## 2. PARITY-013 本批次逐步修改清单
@@ -79,7 +79,7 @@ git diff --check
 
 ## 3. 变更后执行顺序
 
-1. 运行 `LocalStateServerTests`，确认当前路由、schema 与真实 URLSession 覆盖全部通过（当前 15 项）。
+1. 运行 `LocalStateServerTests`，确认当前路由、schema 与真实 URLSession 覆盖全部通过（当前 16 项）。
 2. 运行固定验收门；失败时记录真实错误文本，不放宽校验。
 3. `git diff --check`、`git status --short --branch`，按单一 PARITY ID 提交并推送。
 4. 回写 `Docs/DESKTOP_PARITY_REMEDIATION.md` 的状态、命令、真实输出与剩余边界。
@@ -99,7 +99,7 @@ git diff --check
 - [x] provider-specific Anthropic reasoning wire：`effort` 使用 `thinking.type=adaptive` + `output_config.effort`；`budget_tokens` 使用 `thinking.type=enabled` + 有界预算；`off` 使用 `thinking.type=disabled`。
 - [x] Anthropic thinking stream 的 `signature` / `signature_delta` 进入 `LLMStreamEvent`、`TurnAccumulator` 和可持久化 `AgentMessage.reasoningSignature`。
 - [x] 多轮工具调用回放 signed thinking block；缺签名的旧/中断 reasoning 降级为文本，避免伪造签名。
-- [x] 新增 Anthropic request/stream/replay 回归测试；Anthropic/model 专项 35 项通过，完整 SwiftPM 934 项（5 skipped）通过。
+- [x] 新增 Anthropic request/stream/replay 回归测试；Anthropic/model 专项 35 项通过，完整 SwiftPM 基线现为 939 项（5 skipped）。
 - [ ] OAuth 授权/刷新、runtime reload、真实多 provider/API/iSH/后台/iPhone 16 Pro 证据；未取得前保持 `VERIFY`。
 
 ## 5. PARITY-010 本批次逐步修改清单

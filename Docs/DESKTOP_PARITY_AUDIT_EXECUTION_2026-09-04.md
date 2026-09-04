@@ -11,7 +11,7 @@
 | 上游最新提交 | `76fda729799fe9b3848dbe2c211d4b231032b81e`（2026-09-03） |
 | 上游 package 目录 | `acp`、`subagent`、`jobs`、`hooks`、`e2b`、`llm`、`webhook`、`web` 等均存在 |
 | 移动端分支 | `codex/deepseek-parity` |
-| 统一 SwiftPM 基线 | 以最近一次完整运行输出为准；不得用单测替代全量门 |
+| 统一 SwiftPM 基线 | `939 tests, 5 skipped, 0 failures`（`/tmp/hm-upstream-latest-full`） |
 | 统一构建 | `DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer` + arm64 Simulator |
 
 上游源码已直接核对：ACP 是 `initialize → session/new → session/prompt → session/update` 生命周期；Claude hooks 包含 `SubagentStart`/`SubagentStop`，Codex hooks 仍是五事件子集；jobs、webhook 和 e2b 都是独立 provider/service，而不是仅文档名。
