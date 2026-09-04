@@ -747,9 +747,19 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                 }
                 return value
             case "settings/schema":
-                return .object(["name": .string("settings"), "version": .number(1)])
+                return .object([
+                    "name": .string("settings"),
+                    "version": .number(1),
+                    "methods": .array([
+                        .string("describe"), .string("provider/list"), .string("provider/active")
+                    ])
+                ])
             case "workspace/schema":
-                return .object(["name": .string("workspace"), "version": .number(1)])
+                return .object([
+                    "name": .string("workspace"),
+                    "version": .number(1),
+                    "methods": .array([.string("list"), .string("files"), .string("mounts")])
+                ])
             default:
                 throw LocalStateRPCError.methodNotFound(method)
             }
@@ -809,6 +819,48 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                 "sessions": .array(rows)
             ])
         }
+        func providerProjection(_ profile: ProviderProfile) -> JSONValue {
+            .object([
+                "id": .string(profile.id),
+                "displayName": .string(profile.displayName),
+                "provider": .string(profile.providerID.rawValue),
+                "wireProtocol": .string(profile.wireProtocol.rawValue),
+                "baseURL": .string(profile.baseURL),
+                "defaultModel": .string(profile.defaultModel),
+                "reasoningMode": .string(profile.reasoningMode.rawValue),
+                "models": .array(profile.models.map { model in
+                    .object([
+                        "id": .string(model.id),
+                        "name": .string(model.name),
+                        "contextWindow": model.contextWindow.map { .number(Double($0)) } ?? .null,
+                        "maxOutputTokens": model.maxOutputTokens.map { .number(Double($0)) } ?? .null
+                    ])
+                })
+            ])
+        }
+        func workspaceProjection() async throws -> JSONValue {
+            let root = try await workspaceStore.rootURL()
+            return .object([
+                "rootPath": .string(root.path),
+                "files": .array(workspaceFiles.map { file in
+                    .object([
+                        "path": .string(file.path),
+                        "size": .number(Double(file.size)),
+                        "modifiedAt": file.modifiedAt.map { .string($0.ISO8601Format()) } ?? .null
+                    ])
+                }),
+                "mounts": .array(workspaceMounts.map { mount in
+                    .object([
+                        "id": .string(mount.id.uuidString.lowercased()),
+                        "name": .string(mount.name),
+                        "path": .string(mount.workspacePath),
+                        "access": .string(mount.access.rawValue),
+                        "status": .string(mount.status.rawValue),
+                        "writable": .bool(mount.effectiveWritable)
+                    ])
+                })
+            ])
+        }
 
         switch method {
         case "session/list":
@@ -862,6 +914,28 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         case "session/cancel":
             cancelRun()
             return .object(["accepted": .bool(true)])
+        case "settings/schema":
+            return .object([
+                "name": .string("settings"),
+                "version": .number(1),
+                "methods": .array([.string("describe"), .string("provider/list"), .string("provider/active")])
+            ])
+        case "settings/describe", "settings/provider/list":
+            return .object([
+                "activeProfileId": providerDirectory.activeProfileID.map { .string($0) } ?? .null,
+                "profiles": .array(providerDirectory.profiles.map(providerProjection))
+            ])
+        case "settings/provider/active":
+            guard let profile = providerDirectory.activeProfile else { return .null }
+            return providerProjection(profile)
+        case "workspace/schema":
+            return .object([
+                "name": .string("workspace"),
+                "version": .number(1),
+                "methods": .array([.string("list"), .string("files"), .string("mounts")])
+            ])
+        case "workspace/list", "workspace/files", "workspace/mounts":
+            return try await workspaceProjection()
         default:
             throw LocalStateRPCError.methodNotFound(method)
         }

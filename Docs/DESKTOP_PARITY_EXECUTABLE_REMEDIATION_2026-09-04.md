@@ -60,6 +60,7 @@ git diff --check
 - [x] 真实 `URLSession` loopback webhook 回归通过，保留 64 KiB 请求上限。
 - [x] 增加异步 RPC handler 与 `LocalStateHTTPClient.callRPC`；复用 AppModel 的 SessionStore/UI 生产路径，接入 session create/select/rename/delete/archive/restore/fork/prompt/cancel。
 - [x] 新增真实 loopback async RPC 回归；`LocalStateServerTests` 现为 17 项。
+- [x] `/api` 的 settings/workspace schema 与只读投影已接入：provider/list、provider/active、workspace/list/files/mounts；不把凭据值放入投影。
 
 ### PARITY-003 本批次逐步修改清单
 
@@ -81,7 +82,7 @@ git diff --check
 
 ## 3. 变更后执行顺序
 
-1. 运行 `LocalStateServerTests`，确认当前路由、schema 与真实 URLSession 覆盖全部通过（当前 16 项）。
+1. 运行 `LocalStateServerTests`，确认当前路由、schema 与真实 URLSession 覆盖全部通过（当前 17 项）。
 2. 运行固定验收门；失败时记录真实错误文本，不放宽校验。
 3. `git diff --check`、`git status --short --branch`，按单一 PARITY ID 提交并推送。
 4. 回写 `Docs/DESKTOP_PARITY_REMEDIATION.md` 的状态、命令、真实输出与剩余边界。

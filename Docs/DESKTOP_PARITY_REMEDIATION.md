@@ -251,8 +251,8 @@
 ### PARITY-010 · 异步 Session controller RPC（2026-09-04）
 
 - **上游核对**：最新 `packages/api/session-controller` 的 remote contract 包含 create、rename、fork、prompt、cancel 等异步命令；本地先复用现有 `AppModel` SessionStore/UI 方法，不复制第二套持久化。
-- **移动端变更**：`LocalStateServer` 新增异步 RPC handler；`LocalStateHTTPClient.callRPC` 解析 `{type:"server-response",rpcId,result:{ok,value|error}}`；AppModel 接入 Session mutation subset，schema 同步声明方法。
-- **专项验证**：真实 `URLSession` loopback async RPC 测试通过；完整 SwiftPM **940 tests, 5 skipped, 0 failures**。
+- **移动端变更**：`LocalStateServer` 新增异步 RPC handler；`LocalStateHTTPClient.callRPC` 解析 `{type:"server-response",rpcId,result:{ok,value|error}}`；AppModel 接入 Session mutation subset，以及 settings/workspace 的只读 schema/projection，schema 同步声明方法。
+- **专项验证**：真实 `URLSession` loopback async RPC 测试通过；`LocalStateServerTests` **17 tests**；完整 SwiftPM **940 tests, 5 skipped, 0 failures**。
 - **剩余边界**：workspace/settings 写入、session follow 增量流、SSE/WebSocket、端口冲突与前后台生命周期仍未完成，继续保持 `VERIFY`。
 
 ### PARITY-006 · 子 Agent reasoning effort 参数（2026-09-03）
