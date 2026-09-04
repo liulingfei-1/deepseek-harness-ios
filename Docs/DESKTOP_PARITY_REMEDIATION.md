@@ -787,3 +787,10 @@ git diff --check
 - Simulator：专项编译通过；固定 arm64 Simulator build 在本批次收尾门复跑。
 - iPhone 16 Pro：未用真实 Anthropic API/工具回合验证，保持 VERIFY。
 - 剩余平台限制或后续动作：OAuth 授权/刷新、runtime adapter reload、真实 provider/API/iSH/后台和真机证据；不能用模拟器或 mock 代替。
+
+### PAR-106 · LocalState follow SSE carrier（2026-09-04）
+
+- 对照上游 `client/connection` 与 `api/{session,workspace}-controller`，为 loopback `/api` 增加 `session/follow`、`workspace/follow` 的 `text/event-stream` + HTTP chunked carrier；保留 `server-response`/`rpcId` envelope。
+- `LocalStateHTTPClient.callRPCStream` 通过 `URLSession.bytes` 解码 SSE data frame，支持长连接取消；AppModel 首帧 snapshot，session 后续帧携带 cursor/sessionID，workspace 复用 workspace projection。
+- 生产事件源暂为 250ms persistence polling bridge；live loopback 回归 `LocalStateServerTests.testLiveHTTPClientReceivesSnapshotFirstSSEStream` 通过，完整 SwiftPM 945 tests、5 skipped、0 failures，Xcode arm64 Simulator BUILD SUCCEEDED，Plugin Host/Node smoke/两项审计通过。
+- 状态：`VERIFY`。仍缺上游原生 AsyncIterable/event subscription、workspace baseline/increment、断线重连 generation、WebSocket、端口冲突、前后台生命周期及 iPhone 16 Pro 真机证据。

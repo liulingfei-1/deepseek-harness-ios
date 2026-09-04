@@ -776,10 +776,16 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
             }
         }, asyncRPCHandler: { [localStateRPCBridge] method, payload in
             try await localStateRPCBridge.call(method, payload)
+        }, streamRPCHandler: { [localStateRPCBridge] method, payload in
+            try await localStateRPCBridge.openStream(method, payload)
         })
         localStateRPCBridge.setHandler { [weak self] method, payload in
             guard let self else { throw LocalStateRPCError.methodNotFound(method) }
             return try await self.handleLocalStateRPC(method: method, payload: payload)
+        }
+        localStateRPCBridge.setStreamHandler { [weak self] method, payload in
+            guard let self else { throw LocalStateRPCError.methodNotFound(method) }
+            return try await self.handleLocalStateRPCStream(method: method, payload: payload)
         }
         localStateServer?.start()
         localStateServer?.setWebhookHandler { [weak self] event in
@@ -1104,7 +1110,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         case "workspace/create":
             let path = try requiredString("path")
             let title = fields["title"]?.stringValue
-            let workspace = try await workspaceRegistry.create(path: path, title: title)
+            _ = try await workspaceRegistry.create(path: path, title: title)
             return try await workspaceProjection()
         case "workspace/rename":
             let id = try workspaceID()
@@ -1142,6 +1148,86 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
             return try await workspaceProjection()
         default:
             throw LocalStateRPCError.methodNotFound(method)
+        }
+    }
+
+    /// Opens a reconnect-friendly SSE source for the two controller follow
+    /// methods. The durable trajectory remains the source of truth; polling
+    /// only bridges the existing persistence seam until a native event bus is
+    /// available, while preserving snapshot-first and contiguous cursors.
+    private func handleLocalStateRPCStream(
+        method: String,
+        payload: JSONValue
+    ) async throws -> AsyncThrowingStream<JSONValue, Error> {
+        guard method == "session/follow" || method == "workspace/follow" else {
+            throw LocalStateRPCError.methodNotFound(method)
+        }
+        return AsyncThrowingStream { continuation in
+            let task = Task { @MainActor [weak self] in
+                do {
+                    if method == "workspace/follow" {
+                        var previous: JSONValue?
+                        while !Task.isCancelled {
+                            guard let self else { break }
+                            let current = try await self.handleLocalStateRPC(
+                                method: "workspace/list",
+                                payload: payload
+                            )
+                            if previous == nil || previous != current {
+                                continuation.yield(current)
+                                previous = current
+                            }
+                            try await Task.sleep(for: .milliseconds(250))
+                        }
+                    } else {
+                        let fields = payload.objectValue ?? [:]
+                        guard let rawID = fields["sessionId"]?.stringValue,
+                              let sessionID = UUID(uuidString: rawID) else {
+                            throw LocalStateRPCError.invalidPayload("sessionId")
+                        }
+                        var cursor = 0
+                        if case let .number(value) = fields["sinceSequence"],
+                           value.isFinite, value >= 0, value <= Double(Int.max) {
+                            cursor = Int(value.rounded(.down))
+                        }
+                        var first = true
+                        while !Task.isCancelled {
+                            guard let self else { break }
+                            var requestFields = fields
+                            requestFields["sessionId"] = .string(sessionID.uuidString.lowercased())
+                            requestFields["sinceSequence"] = .number(Double(cursor))
+                            let snapshot = try await self.handleLocalStateRPC(
+                                method: "session/follow",
+                                payload: .object(requestFields)
+                            )
+                            guard let object = snapshot.objectValue,
+                                  case let .number(nextCursor)? = object["cursor"],
+                                  case let .array(events)? = object["events"] else {
+                                throw LocalStateRPCError.invalidProjection
+                            }
+                            if first {
+                                continuation.yield(snapshot)
+                                first = false
+                            } else {
+                                for event in events {
+                                    continuation.yield(.object([
+                                        "type": .string("event"),
+                                        "sessionId": .string(sessionID.uuidString.lowercased()),
+                                        "cursor": .number(nextCursor),
+                                        "event": event
+                                    ]))
+                                }
+                            }
+                            cursor = Int(nextCursor.rounded(.down))
+                            try await Task.sleep(for: .milliseconds(250))
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    if !Task.isCancelled { continuation.finish(throwing: error) }
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
         }
     }
 

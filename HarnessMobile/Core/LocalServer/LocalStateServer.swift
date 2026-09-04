@@ -99,11 +99,39 @@ final class LocalStateRPCBridge: @unchecked Sendable {
         return try await handler(method, payload)
     }
 
+    func openStream(
+        _ method: String,
+        _ payload: JSONValue
+    ) async throws -> AsyncThrowingStream<JSONValue, Error> {
+        let handler = snapshotStreamHandler()
+        guard let handler else {
+            throw LocalStateRPCError.methodNotFound(method)
+        }
+        return try await handler(method, payload)
+    }
+
+    func setStreamHandler(
+        _ handler: (@Sendable (String, JSONValue) async throws -> AsyncThrowingStream<JSONValue, Error>)?
+    ) {
+        lock.lock()
+        streamHandler = handler
+        lock.unlock()
+    }
+
     private nonisolated func snapshotHandler() -> LocalStateServer.AsyncRPCHandler? {
         lock.lock()
         defer { lock.unlock() }
         return handler
     }
+
+    private nonisolated func snapshotStreamHandler()
+        -> (@Sendable (String, JSONValue) async throws -> AsyncThrowingStream<JSONValue, Error>)? {
+        lock.lock()
+        defer { lock.unlock() }
+        return streamHandler
+    }
+
+    private var streamHandler: (@Sendable (String, JSONValue) async throws -> AsyncThrowingStream<JSONValue, Error>)?
 }
 
 /// A loopback-only HTTP state server (desktop `webserver`/`frontend-static`
@@ -115,6 +143,8 @@ final class LocalStateRPCBridge: @unchecked Sendable {
 final class LocalStateServer: @unchecked Sendable {
     typealias RPCHandler = @Sendable (_ method: String, _ payload: JSONValue) throws -> JSONValue
     typealias AsyncRPCHandler = @Sendable (_ method: String, _ payload: JSONValue) async throws -> JSONValue
+    typealias StreamRPCHandler = @Sendable (_ method: String, _ payload: JSONValue) async throws
+        -> AsyncThrowingStream<JSONValue, Error>
 
     struct Endpoint: Sendable {
         let path: String
@@ -130,6 +160,7 @@ final class LocalStateServer: @unchecked Sendable {
     private var webhookSecret: String?
     private let rpcHandler: RPCHandler?
     private let asyncRPCHandler: AsyncRPCHandler?
+    private let streamRPCHandler: StreamRPCHandler?
 
     init?(
         endpoints: [Endpoint],
@@ -137,7 +168,8 @@ final class LocalStateServer: @unchecked Sendable {
         webhookHandler: (@Sendable (LocalWebhookEvent) -> Void)? = nil,
         webhookSecret: String? = nil,
         rpcHandler: RPCHandler? = nil,
-        asyncRPCHandler: AsyncRPCHandler? = nil
+        asyncRPCHandler: AsyncRPCHandler? = nil,
+        streamRPCHandler: StreamRPCHandler? = nil
     ) {
         guard let listener = try? NWListener(
             using: .tcp,
@@ -152,6 +184,7 @@ final class LocalStateServer: @unchecked Sendable {
         self.webhookSecret = webhookSecret
         self.rpcHandler = rpcHandler
         self.asyncRPCHandler = asyncRPCHandler
+        self.streamRPCHandler = streamRPCHandler
     }
 
     var port: UInt16? {
@@ -354,6 +387,12 @@ final class LocalStateServer: @unchecked Sendable {
             let webhookHandler = self.webhookHandler
             let webhookSecret = self.webhookSecret
             self.webhookHandlerLock.unlock()
+            if let streamRPCHandler = self.streamRPCHandler,
+               let rpcRequest = Self.rpcRequest(in: request),
+               rpcRequest.method == "session/follow" || rpcRequest.method == "workspace/follow" {
+                self.stream(rpcRequest, using: streamRPCHandler, on: connection)
+                return
+            }
             if let asyncRPCHandler = self.asyncRPCHandler,
                let rpcRequest = Self.rpcRequest(in: request) {
                 Task {
@@ -391,6 +430,68 @@ final class LocalStateServer: @unchecked Sendable {
                 completion: .contentProcessed { _ in connection.cancel() }
             )
             _ = error
+        }
+    }
+
+    private func stream(
+        _ request: (rpcID: String, method: String, payload: JSONValue),
+        using handler: @escaping StreamRPCHandler,
+        on connection: NWConnection
+    ) {
+        let task = Task {
+            do {
+                let frames = try await handler(request.method, request.payload)
+                try await Self.sendStreamHeaders(on: connection)
+                for try await frame in frames {
+                    try Task.checkCancellation()
+                    let value = Self.rpcSuccessResponse(rpcID: request.rpcID, value: frame)
+                    try await Self.sendSSE(value.body, on: connection)
+                }
+                try await Self.sendChunk("0\r\n\r\n", on: connection)
+                connection.cancel()
+            } catch {
+                connection.cancel()
+            }
+        }
+        connection.stateUpdateHandler = { state in
+            if case .failed = state { task.cancel() }
+            if case .cancelled = state { task.cancel() }
+        }
+    }
+
+    private static func sendStreamHeaders(on connection: NWConnection) async throws {
+        let headers = "HTTP/1.1 200 OK\r\n"
+            + "Content-Type: text/event-stream\r\n"
+            + "Cache-Control: no-cache\r\n"
+            + "Transfer-Encoding: chunked\r\n"
+            + "Connection: keep-alive\r\n\r\n"
+        try await sendChunk(headers, on: connection, includeChunkFraming: false)
+    }
+
+    private static func sendSSE(_ body: String, on connection: NWConnection) async throws {
+        let escaped = body.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { "data: \($0)" }
+            .joined(separator: "\n")
+        try await sendChunk("\(escaped)\n\n", on: connection)
+    }
+
+    private static func sendChunk(
+        _ text: String,
+        on connection: NWConnection,
+        includeChunkFraming: Bool = true
+    ) async throws {
+        let data: Data
+        if includeChunkFraming {
+            let payload = Data(text.utf8)
+            data = Data("\(String(payload.count, radix: 16))\r\n".utf8) + payload + Data("\r\n".utf8)
+        } else {
+            data = Data(text.utf8)
+        }
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            connection.send(content: data, completion: .contentProcessed { error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            })
         }
     }
 
@@ -522,6 +623,57 @@ struct LocalStateHTTPClient: Sendable {
             throw LocalStateHTTPError.server(status: 200, body: message)
         }
         return value
+    }
+
+    /// Consumes the SSE form of a streaming RPC. Each yielded value is the
+    /// decoded `value` from a correlated server-response envelope.
+    func callRPCStream(
+        rpcID: String = UUID().uuidString.lowercased(),
+        method: String,
+        payload: JSONValue = .object([:])
+    ) -> AsyncThrowingStream<JSONValue, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    let body = try JSONEncoder().encode([
+                        "type": JSONValue.string("client-request"),
+                        "rpcId": JSONValue.string(rpcID),
+                        "method": JSONValue.string(method),
+                        "payload": payload
+                    ])
+                    var request = URLRequest(url: baseURL.appendingPathComponent("api"))
+                    request.httpMethod = "POST"
+                    request.httpBody = body
+                    request.timeoutInterval = 86_400
+                    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                    request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+                    let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                    guard let http = response as? HTTPURLResponse,
+                          (200..<300).contains(http.statusCode) else {
+                        throw LocalStateHTTPError.invalidResponse
+                    }
+                    for try await line in bytes.lines {
+                        guard line.hasPrefix("data: ") else { continue }
+                        let data = Data(line.dropFirst(6).utf8)
+                        guard let envelope = try? JSONDecoder().decode(JSONValue.self, from: data),
+                              envelope.objectValue?["type"]?.stringValue == "server-response",
+                              envelope.objectValue?["rpcId"]?.stringValue == rpcID,
+                              let result = envelope.objectValue?["result"] else {
+                            throw LocalStateHTTPError.invalidResponse
+                        }
+                        guard result.objectValue?["ok"]?.booleanValue == true,
+                              let value = result.objectValue?["value"] else {
+                            throw LocalStateHTTPError.invalidResponse
+                        }
+                        continuation.yield(value)
+                    }
+                    continuation.finish()
+                } catch {
+                    if !Task.isCancelled { continuation.finish(throwing: error) }
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
     }
 
     private func request(

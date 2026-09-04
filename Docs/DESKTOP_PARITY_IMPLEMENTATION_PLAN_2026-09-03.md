@@ -146,7 +146,7 @@ git diff --check
 - **当前证据**：`LocalStateServer.swift` 有 NWListener、`/health` 和注入式 GET endpoint；生产没有实例化，也不是完整 webserver/API gateway。
 - **目标行为**：本机 server 启停、路由注册、session/settings/workspace controller、事件流和错误 schema；Web 前端仅在平台可承载时实现。
 - **影响文件**：`Core/LocalServer/LocalStateServer.swift`、App lifecycle、session/settings/workspace controllers、tests、平台文档。
-- **步骤**：明确 bind/lifecycle；注册只读和写入 controller；接入 auth/session identity；实现 SSE/WebSocket（若平台可行）；补并发、重启和端口冲突。
+- **步骤**：明确 bind/lifecycle；注册只读和写入 controller；接入 auth/session identity；已实现 loopback SSE/chunked carrier 与 stream client；后续补原生事件订阅、WebSocket（若平台可行）、并发、重启、重连 generation 和端口冲突。
 - **完成条件**：本机 API 可被 fixture 客户端调用；桌面 frontend-static/client connection 可由现有 WKWebView 承载，但 bundle 未接入时保持 `VERIFY`。
 
 ### PARITY-011 · `llm-pi-ai` 等价能力
@@ -226,7 +226,7 @@ git diff --check
 | PARITY-005 ACP transport | VERIFY | `ISHACPLineTransport` 复用 iSH transport，并新增 `ACPSubagentProviderDescriptor/Catalog`、自定义 command/args/env、`runAndWait`，且 `acp_provider` 已接入 `subagent`/Jobs；ACP/Jobs 专项通过；真实 iSH agent、持久化选择与真机仍待验证 |
 | PARITY-008 Exa/Perplexity | VERIFY | AppModel 统一路由、Keychain origin 存取/删除、显式 provider 选择和 Settings UI 已接入；Exa 映射已按上游丢弃无 highlight 并取首个非空 highlight；Exa 3 tests 通过、Simulator build 通过；真实 API 与真机引用仍待验证 |
 | PARITY-009 agent team | IOS-REPLACEMENT | 现有 workflow tool 提供本机编排、并行/流水线、成员生命周期与可恢复轨迹树；桌面后台 team daemon 机制不适用于 iOS，保留前台语义等价实现 |
-| PARITY-010 LocalStateServer | VERIFY | AppModel 启动 loopback server 并注册 health/status/sessions；新增线程安全快照盒、真实 `LocalStateHTTPClient` GET、`POST /api` Connection RPC envelope、session mutation/follow 增量窗口、provider remove 与 workspace mount mutations；LocalStateServer 19 tests 通过；真正 SSE/WebSocket carrier、重连、生命周期和真机 HTTP 仍待验证 |
+| PARITY-010 LocalStateServer | VERIFY | AppModel 启动 loopback server 并注册 health/status/sessions；新增线程安全快照盒、真实 `LocalStateHTTPClient` GET、`POST /api` Connection RPC envelope、session mutation/follow 增量窗口、provider remove 与 workspace mount mutations；已接入 session/workspace follow SSE/chunked carrier、snapshot-first stream client 与 live loopback 回归；当前仍为 250ms persistence polling bridge，原生事件订阅、workspace baseline/increment、重连 generation、WebSocket、生命周期、端口冲突和真机 HTTP 待验证 |
 | PARITY-011/012/014 | VERIFY/TODO | PARITY-011 已实现动态 listing、exact resolution、capability cache、OAuth record、RFC 6749 refresh single-flight 与单次 401 token-rotation retry；provider-specific OAuth UI/真实设备仍 VERIFY；PARITY-012/014 仍按下方边界处理 |
 | PARITY-013 webhook | VERIFY | GitHub delivery/event/payload envelope、loopback POST `/webhook/github`、有界去重及跨重启 delivery state 已实现；Settings 可配置/删除 Keychain secret，listener 支持运行时 secret 与真实 POST/HMAC；修复 AppModel sink 初始化时提前 claim delivery 的 bug，Job 投影路径已接通；11 个 LocalStateServer 测试通过；rule/重试/Agent 唤醒仍待实现 |
 
@@ -244,4 +244,4 @@ git diff --check
 
 1. 对照 `workspace-controller` 的 `types.ts`、`commands.ts`、`feed.ts`，实现本地持久化 Workspace identity、标题、目录、Session 顺序和归档集合。
 2. 将 `workspace/create|rename|delete|insertBefore|insertSessionBefore|archiveSession` 注册到 `/api`，create 对同一路径幂等解析，delete 保留目录与 Session。
-3. `WorkspaceRegistryTests` 2/2 通过；上游 `follow` 的 baseline/增量/取消语义仍需真正 SSE/WebSocket carrier 与断线重连，当前保持 `VERIFY`。
+3. `WorkspaceRegistryTests` 2/2 通过；follow 已有 SSE/chunked carrier，但上游 baseline/增量/取消语义、原生事件订阅和断线重连仍未完整承载，当前保持 `VERIFY`。

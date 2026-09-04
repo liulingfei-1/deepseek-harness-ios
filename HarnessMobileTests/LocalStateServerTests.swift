@@ -248,6 +248,41 @@ final class LocalStateServerTests: XCTestCase {
         XCTAssertEqual(value.objectValue?["accepted"], .bool(true))
     }
 
+    func testLiveHTTPClientReceivesSnapshotFirstSSEStream() async throws {
+        let server = LocalStateServer(
+            endpoints: [],
+            streamRPCHandler: { method, _ in
+                XCTAssertEqual(method, "session/follow")
+                return AsyncThrowingStream { continuation in
+                    continuation.yield(.object(["type": .string("snapshot")]))
+                    continuation.yield(.object(["type": .string("event")]))
+                    continuation.finish()
+                }
+            }
+        )
+        XCTAssertNotNil(server)
+        server?.start()
+        defer { server?.stop() }
+        var assignedPort: UInt16 = 0
+        for _ in 0..<40 {
+            if let port = server?.port, port > 0 {
+                assignedPort = port
+                break
+            }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        XCTAssertGreaterThan(assignedPort, 0)
+        let stream = LocalStateHTTPClient(port: assignedPort).callRPCStream(
+            rpcID: "stream-1",
+            method: "session/follow"
+        )
+        var values: [JSONValue] = []
+        for try await value in stream { values.append(value) }
+        XCTAssertEqual(values.count, 2)
+        XCTAssertEqual(values[0].objectValue?["type"], .string("snapshot"))
+        XCTAssertEqual(values[1].objectValue?["type"], .string("event"))
+    }
+
     func testLiveHTTPClientPostsWebhookAfterSecretIsConfigured() async throws {
         let server = LocalStateServer(endpoints: [])
         XCTAssertNotNil(server)
