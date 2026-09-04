@@ -737,7 +737,10 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         ], rpcHandler: { [localStateSnapshotStore] method, _ in
             switch method {
             case "session/list", "session/status":
-                guard let data = localStateSnapshotStore.sessions().data(using: .utf8),
+                let body = method == "session/list"
+                    ? localStateSnapshotStore.sessions()
+                    : localStateSnapshotStore.status()
+                guard let data = body.data(using: .utf8),
                       let value = try? JSONDecoder().decode(JSONValue.self, from: data) else {
                     throw LocalStateRPCError.invalidProjection
                 }
