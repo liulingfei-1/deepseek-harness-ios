@@ -15,12 +15,13 @@
 | 项目 | 已验证值 |
 |---|---|
 | 移动端 HEAD | `9e33cd43` |
-| 当前移动端锁定上游 | `b150a551b8d465e31e418e1b2eaf5e79bbb7d28e` / `dsh-v0.1.1-rc.2` |
+| 当前移动端锁定上游 | `76fda729799fe9b3848dbe2c211d4b231032b81e` / GitHub master（2026-09-03） |
 | 最新上游仓库 | `deepseek-ai/deepseek-harness` |
 | 最新上游 HEAD | `76fda729799fe9b3848dbe2c211d4b231032b81e`（2026-09-03） |
 | 上游 packages | 约 257 个 package manifest |
-| SwiftPM 基线 | 895 tests，5 skipped，0 failures |
+| SwiftPM 基线 | 939 tests，5 skipped，0 failures |
 | Node/Host 基线 | `npm run check` 通过；`ISHPluginHostNodeSmoke.mjs` 通过 |
+| 兼容性 fixtures | `harness-wire-v1`、`agent-lifecycle-v1`、`tool-scheduler-v1` 已重锚到 `76fda729`；RC2/跨版本 fixtures 继续保留 `b150a551` 历史锚点 |
 | 工作树 | 初始审计时干净 |
 
 ### 1.2 状态词

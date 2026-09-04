@@ -83,7 +83,7 @@ git diff --check
 2. 运行固定验收门；失败时记录真实错误文本，不放宽校验。
 3. `git diff --check`、`git status --short --branch`，按单一 PARITY ID 提交并推送。
 4. 回写 `Docs/DESKTOP_PARITY_REMEDIATION.md` 的状态、命令、真实输出与剩余边界。
-5. 只有拿到真实 API/iSH/后台/真机证据才把 `VERIFY` 改成 `DONE`。
+5. 只有拿到真实 API/iSH/后台/真机证据才把 `VERIFY` 改成 `DONE`；上游 lock 更新后，必须同步更新所有要求“fixture commit == lock”的 fixture，并单独跑对应差分测试。
 
 ## 4. PARITY-011 本批次逐步修改清单
 

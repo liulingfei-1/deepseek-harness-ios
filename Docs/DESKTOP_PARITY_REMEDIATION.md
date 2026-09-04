@@ -239,6 +239,13 @@
 - **专项验证**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-local-rpc --filter LocalStateServerTests` → **16 tests passed**，新增 RPC correlation 测试；真实 loopback GET/POST 旧测试继续通过。
 - **剩余边界**：settings/workspace/session 写入 controller、SSE/WebSocket、端口冲突及前后台生命周期仍需补齐；公网绑定不属于移动端部署项。
 
+### BASELINE · 上游锁定到最新 Desktop master（2026-09-04）
+
+- **上游核对**：通过 `agent-reach`/GitHub API 验证 `deepseek-ai/deepseek-harness` master 为 `76fda729799fe9b3848dbe2c211d4b231032b81e`；本地 checkout 已 detached 到该 commit。
+- **移动端变更**：`Dependencies/upstreams.lock.json` 与 `check-upstream-parity.sh` 现在以该 master 为当前源码基线；`harness-wire-v1.json`、`agent-lifecycle-v1.json`、`tool-scheduler-v1.json` 已同步最新 lock，其余带 RC2/跨版本标签的 fixtures 保留历史锚点用于回归。
+- **专项验证**：`./Scripts/verify-upstreams.sh` → **Upstream lock verification passed**；`UpstreamCompatibilityFixtureTests`、`CompactionCrossVersionFixtureTests`、`RC2CompatibilityFixtureTests`、`WorkspaceInstructionTransitionTests` → **14 tests passed**；`./Scripts/check-upstream-parity.sh` 输出最新 package inventory。
+- **剩余边界**：上游大量新增/重构包仍需逐包映射到移动端；锁定最新 commit 不等于所有包已实现，未接入项继续按 `VERIFY`、`IOS-REPLACEMENT` 或 `OUT-OF-SCOPE` 标记。
+
 ### PARITY-006 · 子 Agent reasoning effort 参数（2026-09-03）
 
 - **状态**：VERIFY

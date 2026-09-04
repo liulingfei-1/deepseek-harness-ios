@@ -86,4 +86,4 @@ git diff --check
 
 ## 5. 当前批次记录
 
-2026-09-04：已用 `agent-reach doctor --json`、`gh search code`、GitHub API 和本地源码/测试核对上游 authorization、credential record、E2B、webhook、ACP、client connection 入口。本批完成 OAuth record + refresh single-flight、RFC 6749 自动刷新、401 token-rotation retry、OAuth-backed Profile 生命周期、手动 grant 录入及 `/api` RPC envelope；provider-specific authorization UI、真实授权、写入 controller 和设备/API 证据仍保持 `VERIFY`。
+2026-09-04：已用 `agent-reach doctor --json`、`gh search code`、GitHub API 和本地源码/测试核对上游 authorization、credential record、E2B、webhook、ACP、client connection 入口；并将 upstream checkout/lock 对齐到 master `76fda729799fe9b3848dbe2c211d4b231032b81e`。当前批次完成 OAuth record + refresh single-flight、RFC 6749 自动刷新、401 token-rotation retry、OAuth-backed Profile 生命周期、手动 grant 录入及 `/api` RPC envelope；provider-specific authorization UI、真实授权、写入 controller 和设备/API 证据仍保持 `VERIFY`。
