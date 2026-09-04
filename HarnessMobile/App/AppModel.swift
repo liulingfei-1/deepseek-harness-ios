@@ -751,7 +751,8 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                     "name": .string("settings"),
                     "version": .number(1),
                     "methods": .array([
-                        .string("describe"), .string("provider/list"), .string("provider/active")
+                        .string("describe"), .string("provider/list"), .string("provider/active"),
+                        .string("provider/activate")
                     ])
                 ])
             case "workspace/schema":
@@ -918,7 +919,10 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
             return .object([
                 "name": .string("settings"),
                 "version": .number(1),
-                "methods": .array([.string("describe"), .string("provider/list"), .string("provider/active")])
+                "methods": .array([
+                    .string("describe"), .string("provider/list"), .string("provider/active"),
+                    .string("provider/activate")
+                ])
             ])
         case "settings/describe", "settings/provider/list":
             return .object([
@@ -928,6 +932,12 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
         case "settings/provider/active":
             guard let profile = providerDirectory.activeProfile else { return .null }
             return providerProjection(profile)
+        case "settings/provider/activate":
+            let id = try requiredString("profileId")
+            try await activateProviderProfile(id: id)
+            return .object([
+                "activeProfileId": providerDirectory.activeProfileID.map { .string($0) } ?? .null
+            ])
         case "workspace/schema":
             return .object([
                 "name": .string("workspace"),
