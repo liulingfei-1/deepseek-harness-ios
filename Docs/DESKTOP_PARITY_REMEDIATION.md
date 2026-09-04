@@ -203,7 +203,7 @@
 - **上游证据**：最新 `llm` runtime 暴露 `listModels`、`resolveModelInfo`、reasoning/context/modality capability，并要求每次调用绑定当前 adapter registration。
 - **移动端变更**：`ModelCatalogDiscovering` 增加 exact `resolveModelInfo`；OpenAI-compatible 与 Anthropic adapter 均支持 advisory `listModels`。解析 `data[]` 与 enriched `models{}`，属性键优先、忽略 primitive entries、缺失名称回退模型 ID；同时读取上游 `reasoning_options` 的 effort values，以及 `limit.context/output`、`modalities.input` 嵌套能力字段。Anthropic 使用原生 `x-api-key`、`anthropic-version: 2023-06-01` 和 `?limit=1000`，根地址自动规范为 `/v1/models`。`ProviderModel` 现在保留 description 及逐模型 `reasoningModes/defaultReasoningMode`；profile/UI 合并路径不丢失这些字段，AgentConfiguration 校验与 OpenAI wire 支持 `minimal/medium/xhigh`。未知模型解析回退为可请求的 identity，不把目录缺失误判为路由拒绝。既有 `ProviderCapabilityCache` 持久化继续生效。
 - **测试命令与真实结果**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter ProviderModelDiscoveryTests` → 22 tests passed，覆盖 Anthropic loopback listing、header/query、enriched map、exact resolution、逐模型 reasoning 能力、上游 `reasoning_options` 映射和不支持 level 拒绝；全量 Swift 回归 → 930 tests、5 skipped、0 failures。
-- **剩余动作**：OAuth 登录/刷新生命周期、per-model reasoning/context wire metadata、registration-bound runtime reload、真实多 provider/API/设备证据；未完成部分保持 `VERIFY`。
+- **剩余动作**：provider-specific OAuth 登录生命周期、per-model reasoning/context wire metadata、registration-bound runtime reload、真实多 provider/API/设备证据；通用 OAuth record/refresh 与 401 token-rotation retry 已完成，未取得真实服务/设备证据的部分保持 `VERIFY`。
 
 ### PARITY-011 · OAuth credential record 与 refresh single-flight（2026-09-04）
 
@@ -211,11 +211,11 @@
 - **上游核对**：最新 `credentials` seam 使用 `ApiKeyRecord | GrantRecord`，授权 flow 只有观察到 record commit 才报告 authorized；provider refresh 必须在存储层 read-modify-write 之内完成。
 - **移动端变更**：新增 `ProviderOAuthCredential`（access/refresh token、过期时间、token type、scope）和独立 Keychain record namespace；`CredentialStore` 提供 save/read/delete，旧 API-key schema 保持兼容；`ProviderOAuthRefreshCoordinator` 按 profile single-flight，刷新前重读最新 grant 并原子写回；AppModel credential lookup/status 可读取 OAuth access token，沿用既有 profile generation reload。
 - **专项验证**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter ProviderRequestLifecycleTests` → **6 tests passed**，含 10 路并发 refresh 只执行一次与 OAuth round-trip/过期判断。
-- **剩余边界**：provider-specific OAuth authorization UI、401 自动重试、真实授权服务、iSH/后台/iPhone 16 Pro 仍未取得证据，不能写成 `DONE`。
+- **剩余边界**：provider-specific OAuth authorization UI、真实授权服务、iSH/后台/iPhone 16 Pro 仍未取得证据，不能写成 `DONE`；通用 RFC 6749 refresh 与 401 token-rotation retry 已在后续批次补齐。
 
-2026-09-04 追加：Profile 保存在 API Key 留空时现在会检查同源 OAuth record；删除 Profile 同时删除 API-key 与 OAuth record，避免 OAuth 凭据被误判为缺失或残留。新增 `AppModelProviderProfileTests.testOAuthCredentialCanBackProfileSaveAndIsDeletedWithProfile` 覆盖该生产路径。provider-specific authorization UI、401 自动重试、真实授权服务和设备证据仍为 `VERIFY`。
+2026-09-04 追加：Profile 保存在 API Key 留空时现在会检查同源 OAuth record；删除 Profile 同时删除 API-key 与 OAuth record，避免 OAuth 凭据被误判为缺失或残留。新增 `AppModelProviderProfileTests.testOAuthCredentialCanBackProfileSaveAndIsDeletedWithProfile` 覆盖该生产路径。provider-specific authorization UI、真实授权服务和设备证据仍为 `VERIFY`；401 自动重试已在后续批次完成。
 
-2026-09-04 追加：`SetupView` 增加手动 OAuth grant 入口（access token、可选 refresh token、ISO 8601 过期时间）；`AppModel.saveProviderProfile(...oauthCredential:)` 在创建或编辑时写入 OAuth record，空 API Key 不再阻断新 Profile 的 OAuth 配置。真实 provider-specific 浏览器/device-code 授权与 401 自动刷新仍为 `VERIFY`。
+2026-09-04 追加：`SetupView` 增加手动 OAuth grant 入口（access token、可选 refresh token、ISO 8601 过期时间）；`AppModel.saveProviderProfile(...oauthCredential:)` 在创建或编辑时写入 OAuth record，空 API Key 不再阻断新 Profile 的 OAuth 配置。真实 provider-specific 浏览器/device-code 授权仍为 `VERIFY`；通用 RFC 6749 自动刷新已在后续批次完成。
 
 ### PARITY-011 · RFC 6749 refresh client 与请求前自动刷新（2026-09-04）
 
@@ -223,7 +223,7 @@
 - **移动端变更**：`ProviderOAuthCredential` 增加 token endpoint 与 public client ID；新增 `ProviderOAuthRefreshClient`，解析 `access_token`、可选轮换 `refresh_token`、`expires_in`、`token_type`、`scope`；`AppModel.apiKey(for:)` 对已过期且配置完整的 grant 通过既有 single-flight 自动刷新并持久化最新 record。设置页增加 endpoint/client ID 字段，仍只把 access token 交给 provider adapter。
 - **专项验证**：`DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --build-path /tmp/hm-build --filter ProviderRequestLifecycleTests` → 7 tests passed；RFC 6749 form/body 与 token rotation 解码测试通过。
 - **构建审计**：Xcode arm64 Simulator 初次构建因测试 `URLProtocol` 被设备审计误报；已将该测试 fixture 加入脚本的测试白名单，未放宽生产网络边界；修复后需重跑完整 build 与固定验收门。
-- **剩余边界**：provider-specific 浏览器/device-code 授权、401 自动重试、真实 OAuth 服务与 iPhone 16 Pro 证据仍为 `VERIFY`。
+- **剩余边界**：provider-specific 浏览器/device-code 授权、真实 OAuth 服务与 iPhone 16 Pro 证据仍为 `VERIFY`；401 token-rotation retry 已在下一批完成。
 
 ### PARITY-011 · 401 自动刷新并重试（2026-09-04）
 
