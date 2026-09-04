@@ -801,6 +801,11 @@ git diff --check
 - `LocalStateServerTests.testLiveHTTPClientReconnectsAndResumesSessionCursor` 真实启动 loopback server，验证两代连接及 cursor `[1, 2]` 续传；专项和完整 SwiftPM 950 tests、5 skipped、0 failures 均通过。
 - 状态：`VERIFY`。尚未实现完整上游 `ConnectionController` generation 可观察状态、online/offline 事件、AbortSignal 级联、前后台生命周期和真机网络切换证据。
 
+### PAR-109 · Static route HEAD compatibility（2026-09-04）
+
+- 对照上游 `host/frontend-static` 的 `GET/HEAD` fallback 约定，`LocalStateServer.route` 现在接受 `HEAD`，返回与 `GET` 相同状态码但空 body；未知路径与 webhook/RPC 行为不变。
+- `LocalStateServerTests.testRouteServesHealthAndStatusEndpoints` 增加 HEAD 回归；该兼容不代表已接入上游 frontend bundle，client-half 仍为 `VERIFY`。
+
 ### PAR-107 · Exa/Perplexity transport failure fixtures（2026-09-04）
 
 - 为 `ExaSearchProvider` 与 `PerplexitySearchProvider` 增加可选 `URLProtocol` 注入，仅用于测试复现真实 transport；生产默认路径不变。

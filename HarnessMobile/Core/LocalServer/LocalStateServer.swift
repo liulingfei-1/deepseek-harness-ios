@@ -325,14 +325,15 @@ final class LocalStateServer: @unchecked Sendable {
                 )
             }
         }
-        guard tokens[0] == "GET" else {
+        guard tokens[0] == "GET" || tokens[0] == "HEAD" else {
             return (400, #"{"error":"unsupported request"}"#)
         }
+        let isHead = tokens[0] == "HEAD"
         if pathString == "/health" {
-            return (200, #"{"status":"ok"}"#)
+            return (200, isHead ? "" : #"{"status":"ok"}"#)
         }
         if let endpoint = endpoints[pathString] {
-            return (200, endpoint.handler())
+            return (200, isHead ? "" : endpoint.handler())
         }
         return (404, #"{"error":"not found"}"#)
     }

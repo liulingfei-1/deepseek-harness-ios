@@ -33,6 +33,13 @@ final class LocalStateServerTests: XCTestCase {
         )
         XCTAssertEqual(status.status, 200)
         XCTAssertTrue(status.body.contains("turns"))
+
+        let head = LocalStateServer.route(
+            request: "HEAD /status HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+            endpoints: endpoints
+        )
+        XCTAssertEqual(head.status, 200)
+        XCTAssertEqual(head.body, "")
     }
 
     func testAPISchemaAndSessionAliasExposeControllerSurface() throws {

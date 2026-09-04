@@ -67,6 +67,7 @@
 - [x] session/workspace follow 的 SSE/chunked carrier 与 `URLSession` stream client；session 首帧 snapshot、后续事件 cursor 已有 live loopback 回归；workspace 首帧 baseline、后续 upsert/remove/order/archived 增量已有纯函数回归；客户端可选指数退避重连并续传 session cursor。
 - [ ] 原生事件订阅（当前为 250ms persistence polling bridge）、客户端 generation/online-offline 状态、AbortSignal generation、WebSocket、端口冲突、前后台启停和 iPhone 16 Pro 证据。
 - [ ] 将上游 `frontend-static/client-half` 接入现有 WKWebView；UI 状态仍由本地 projection 提供。
+- [x] loopback route 补齐上游静态宿主的 `HEAD` 请求语义（200 + 空 body），并加入路由回归。
 - [ ] Windows PowerShell/win32/ACL 保持 `OUT-OF-SCOPE`，不得伪造 iOS 实现。
 
 ### P5：E2B（PARITY-012）
