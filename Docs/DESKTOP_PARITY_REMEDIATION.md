@@ -931,3 +931,8 @@ git diff --check
 
 - **移动端变更**：`SettingsView` 使用系统 `insetGrouped` 分组和 44pt 最小行高，减少入口被渲染成巨型独立卡片的问题；保留现有入口、图标和操作。
 - **验证**：iphoneos arm64 构建、安装和启动成功；设置 UI 回归被 Xcode 诊断阶段 `simctl` 路径错误阻断，待下一轮 Simulator UI 运行器修复后复测。
+
+### UI-012 · 本机工作区页分组收口（2026-09-05）
+
+- **移动端变更**：`WorkspaceView` 使用系统 `insetGrouped` 分组和 44pt 最小行高，统一挂载目录与文件列表的层级和留白；导入、挂载、导出与卸载操作保持不变。
+- **验证**：arm64 Simulator build 生成成功；真实页面截图和 UI 自动化仍待下一轮运行器复测。

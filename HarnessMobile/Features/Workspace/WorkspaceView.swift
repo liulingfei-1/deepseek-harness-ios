@@ -56,7 +56,10 @@ struct WorkspaceView: View {
                 }
             } header: { Label("文件", systemImage: "doc.text") }
         }
-        .harnessCompactListChrome()
+        .listStyle(.insetGrouped)
+        .environment(\.defaultMinListRowHeight, 44)
+        .scrollContentBackground(.hidden)
+        .background(HarnessTheme.pageBackground)
         .navigationTitle("工作区")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
