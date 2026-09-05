@@ -19,7 +19,7 @@
 | 最新上游仓库 | `deepseek-ai/deepseek-harness` |
 | 最新上游 HEAD | `d347e703908d0406b7a7ef80e3a0e594d86b2215`（2026-09-04） |
 | 上游 packages | 约 257 个 package manifest |
-| SwiftPM 基线 | 939 tests，5 skipped，0 failures |
+| SwiftPM 基线（2026-09-05复核） | 959 tests，5 skipped，0 failures |
 | Node/Host 基线 | `npm run check` 通过；`ISHPluginHostNodeSmoke.mjs` 通过 |
 | 兼容性 fixtures | `harness-wire-v1`、`agent-lifecycle-v1`、`tool-scheduler-v1` 已重锚到 `d347e703`；RC2/跨版本 fixtures 继续保留 `b150a551` 历史锚点 |
 | 工作树 | 初始审计时干净 |
