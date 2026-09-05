@@ -1975,7 +1975,9 @@ function publicPlugin(record, loaded) {
     ...(nativeClient === undefined ? {} : {
       nativeContributionCount: nativeClient.contributions.inspectors.length
         + nativeClient.contributions.settings.length
-        + nativeClient.contributions.commands.length,
+        + nativeClient.contributions.commands.length
+        + (nativeClient.contributions.cards?.length ?? 0)
+        + (nativeClient.contributions.references?.length ?? 0),
     }),
     ...(record.lastError === undefined ? {} : { lastError: publicText(record.lastError, 1000) }),
   }

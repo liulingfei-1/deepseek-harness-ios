@@ -345,7 +345,7 @@
 | PLUGIN-004 | VERIFY | Native Code Mode 与 Host 插件共用 checkpoint、授权和 trajectory |
 | PLUGIN-005 | VERIFY | generation 替换/失败恢复补 iPhone 动态插件验证 |
 | PLUGIN-006 | VERIFY | Host 重启后的 inventory 握手与定义重建补真机验证；无活动会话先完成轻量 ping/inventory，活动会话再同步完整上下文与贡献 |
-| PLUGIN-007 | TODO | 按上游版本补齐经过审计的 `dsh.nativeClient` contribution kinds |
+| PLUGIN-007 | VERIFY | Host 已覆盖 inspectors/settings/commands/cards/references；inventory 计数同步统计五类 contribution，仍需真实市场样本与真机验证 |
 | PLUGIN-008 | IOS-REPLACEMENT | React/slots/themes 继续使用受控 native manifest 表达 |
 | PLUGIN-009 | VERIFY | 编译失败修正、同 token 重提交流程补 iPhone 复测 |
 | PLUGIN-010 | VERIFY | 市场入口与对话入口做真实双入口安装/rollback 验收 |
