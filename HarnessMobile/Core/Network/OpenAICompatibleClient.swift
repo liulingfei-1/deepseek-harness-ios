@@ -79,11 +79,13 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
     }
 
     func stream(_ request: ModelRequest) -> AsyncThrowingStream<LLMStreamEvent, Error> {
+        Self.debugLog("stream API called")
         let streamID = UUID()
         return AsyncThrowingStream { [weak self] continuation in
             self?.registerActiveStream(continuation, id: streamID)
             let task = Task { [weak self] in
                 guard let self else { return }
+                Self.debugLog("stream task started")
                 defer { self.unregisterActiveStream(id: streamID) }
                 do {
                     try await self.perform(request, continuation: continuation)
