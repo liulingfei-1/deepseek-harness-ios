@@ -1003,3 +1003,9 @@ git diff --check
 - 项目修补：`ACPSubagentProviderCatalog.shared` 改为空 catalog，未配置 ACP 时不注册通道；`LocalWebhookRule` fallback 和默认 job id 修复为真实插值，并补回归测试。
 - 文档收口：PRD、后端结构、能力目录、README 与 D-011 验证文字统一为“默认本机、远程后端显式配置、未配置不注册”；e2b 仍 TODO，webhook/ACP 的真实隧道、远端 agent 和真机链路仍 VERIFY。
 - 验证：本批次运行 ACP/webhook 窄测试、配置解析、远程执行边界审计、上游 parity、能力清单校验和 `git diff --check`；不把模拟器或 mock 结果写成真机完成。
+
+### UI-013 · 插件设置深层页面分组收口（2026-09-05）
+
+- **移动端变更**：`PluginSettingsView`、`PluginSettingsNamespaceView` 和 `NativeAgentPluginSettingsView` 统一使用系统 `insetGrouped` 分组、语义页面背景和 44pt 最小行高；命名空间副信息在窄屏或大字下自动换行，避免生效方式、版本和受保护字段数量被截断。
+- **交互保留**：Host 启动/刷新、搜索、schema 编辑、字段继承/覆盖、冲突重放、只读显示、秘密字段状态、默认值恢复、保存与放弃草稿均未改变；编辑器工具栏和字段重置按钮补齐 44pt 触控目标。
+- **验证**：Xcode Beta arm64 generic iOS Simulator build succeeded；`git diff --check` 通过。插件设置真实 Host 数据、深色/大字、VoiceOver、横屏和真机交互仍为 `VERIFY`。

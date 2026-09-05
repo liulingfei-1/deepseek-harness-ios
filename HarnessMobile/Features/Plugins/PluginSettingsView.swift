@@ -124,7 +124,10 @@ struct PluginSettingsView: View {
             }
         }
         .accessibilityIdentifier("ish-plugin-settings-list")
-        .harnessCompactListChrome()
+        .listStyle(.insetGrouped)
+        .environment(\.defaultMinListRowHeight, 44)
+        .scrollContentBackground(.hidden)
+        .background(HarnessTheme.pageBackground)
     }
 
     private var filteredNamespaces: [ISHPluginSettingsNamespace] {
@@ -179,20 +182,17 @@ private struct PluginSettingsNamespaceRow: View {
                 Text(namespace.ns)
                     .font(.body.monospaced())
                     .lineLimit(1)
-                HStack(spacing: 8) {
-                    Label(namespace.applies.displayName, systemImage: namespace.applies.systemImage)
-                    Text("版本 \(namespace.revision)")
-                        .monospacedDigit()
-                    if !namespace.secrets.isEmpty {
-                        Label(
-                            "\(namespace.secrets.count)",
-                            systemImage: "key.fill"
-                        )
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) {
+                        metadata
+                    }
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        metadata
                     }
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
             }
 
             Spacer(minLength: 8)
@@ -204,6 +204,16 @@ private struct PluginSettingsNamespaceRow: View {
         .padding(.vertical, HarnessTheme.Spacing.xSmall)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("ish-plugin-settings-namespace-\(namespace.ns)")
+    }
+
+    @ViewBuilder
+    private var metadata: some View {
+        Label(namespace.applies.displayName, systemImage: namespace.applies.systemImage)
+        Text("版本 \(namespace.revision)")
+            .monospacedDigit()
+        if !namespace.secrets.isEmpty {
+            Label("\(namespace.secrets.count)", systemImage: "key.fill")
+        }
     }
 }
 
@@ -265,6 +275,10 @@ struct PluginSettingsNamespaceView: View {
                     }
                 }
                 .accessibilityIdentifier("ish-plugin-settings-editor")
+                .listStyle(.insetGrouped)
+                .environment(\.defaultMinListRowHeight, 44)
+                .scrollContentBackground(.hidden)
+                .background(HarnessTheme.pageBackground)
             } else {
                 ContentUnavailableView(
                     "设置已释放",
@@ -282,6 +296,7 @@ struct PluginSettingsNamespaceView: View {
                         discardDraft()
                     } label: {
                         Image(systemName: "arrow.uturn.backward")
+                            .frame(width: 44, height: 44)
                     }
                     .disabled(isSaving || draft?.isDirty != true)
                     .accessibilityLabel("放弃设置草稿")
@@ -292,6 +307,7 @@ struct PluginSettingsNamespaceView: View {
                         saveDraft()
                     } label: {
                         Image(systemName: "checkmark")
+                            .frame(width: 44, height: 44)
                     }
                     .disabled(!canSave)
                     .accessibilityLabel("保存插件设置")
@@ -534,6 +550,10 @@ struct NativeAgentPluginSettingsView: View {
                     }
                 }
                 .accessibilityIdentifier("native-agent-settings-editor")
+                .listStyle(.insetGrouped)
+                .environment(\.defaultMinListRowHeight, 44)
+                .scrollContentBackground(.hidden)
+                .background(HarnessTheme.pageBackground)
             } else {
                 ContentUnavailableView(
                     "没有可编辑设置",
@@ -731,6 +751,7 @@ private struct PluginSettingsFieldEditor: View {
                         draft = updated
                     } label: {
                         Image(systemName: "arrow.uturn.backward")
+                            .frame(width: 44, height: 44)
                     }
                     .buttonStyle(.plain)
                     .disabled(isDisabled || leaf.disabled)

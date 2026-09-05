@@ -410,3 +410,9 @@ Harness 采用同一原则，但保留自己的开发者信息架构：运行后
 - Native Client 的激活代际、Inspector 加载中/失败、命令列表和输入提示统一使用语义图标块与状态胶囊；长描述、错误和命令参数在窄屏下自然换行并支持文本选择。
 - 保留 Inspector 刷新与读取、Settings 导航、命令展示、Scope/Digest 和插件未运行空状态；本轮只调整视觉层级。
 - 验证：Xcode Beta arm64 generic iOS Simulator build succeeded，`git diff --check` 通过；真实 Inspector 数据、Dynamic Type、深色、横屏、VoiceOver 和真机触控仍为 `VERIFY`。
+
+### 2026-09-05 · 插件设置深层页面分组收口
+
+- `PluginSettingsView`、命名空间编辑器和原生插件设置统一为系统 `insetGrouped` 列表背景与 44pt 最小行高，减少从插件详情进入深层设置后出现的旧列表壳割裂。
+- 命名空间行的生效方式、版本和受保护字段数量使用 `ViewThatFits` 自适应横排/纵排；编辑器保存、放弃和字段重置按钮显式保持 44pt 目标。
+- Host 启动、搜索、schema、冲突重放、只读字段、秘密字段、默认值和错误通知保持不变。验证：arm64 generic iOS Simulator build succeeded；真实 Host、深色、大字、横屏、VoiceOver 和真机仍为 `VERIFY`。
