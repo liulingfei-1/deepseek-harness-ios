@@ -339,7 +339,7 @@ final class ProviderModelDiscoveryTests: XCTestCase {
         }
 
         let deepSeekRequest = try deepSeek.makeStreamingRequest(request(AgentConfiguration()))
-        XCTAssertEqual(deepSeekRequest.url?.path, "/chat/completions")
+        XCTAssertEqual(deepSeekRequest.url?.path, "/v1/chat/completions")
         XCTAssertEqual(
             deepSeekRequest.value(forHTTPHeaderField: "Authorization"),
             "Bearer test-only"
