@@ -639,7 +639,10 @@ private struct DiagnosticLogView: View {
                 }
             }
         }
-        .harnessCompactListChrome()
+        .listStyle(.insetGrouped)
+        .environment(\.defaultMinListRowHeight, 44)
+        .scrollContentBackground(.hidden)
+        .background(HarnessTheme.pageBackground)
         .navigationTitle("详细日志")
         .navigationBarTitleDisplayMode(.inline)
         .fileExporter(

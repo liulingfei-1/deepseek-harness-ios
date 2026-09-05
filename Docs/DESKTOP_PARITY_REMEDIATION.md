@@ -981,3 +981,8 @@ git diff --check
 
 - **移动端变更**：`ToolApprovalSettingsView` 使用系统 `insetGrouped` 分组和 44pt 最小行高，统一长期授权列表与撤销操作；授权范围、风险提示和撤销行为不变。
 - **验证**：`ConversationControlsTests` 13/13 通过；真实页面截图和 UI 自动化仍待下一轮运行器复测。
+
+### UI-012 · 详细日志页分组收口（2026-09-05）
+
+- **移动端变更**：`DiagnosticLogView` 使用系统 `insetGrouped` 分组和 44pt 最小行高，统一运行状态、Cordis Host、导出与性能采样区域；刷新、导出和脱敏说明不变。
+- **验证**：`HarnessTraceStoreTests` 8/8 通过；真实页面截图和 UI 自动化仍待下一轮运行器复测。
