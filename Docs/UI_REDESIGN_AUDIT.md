@@ -421,3 +421,8 @@ Harness 采用同一原则，但保留自己的开发者信息架构：运行后
 
 - `SessionModelPickerView` 从共享紧凑列表壳切换为系统 `insetGrouped` 背景与 44pt 行高，范围、服务商、模型和推理参数在窄屏下更接近系统设置层级。
 - 保留跟随默认、覆盖当前会话、搜索、远程模型发现、手动模型 ID、能力信息、取消和保存逻辑。验证：arm64 generic iOS Simulator build succeeded；真实模型发现、深色、大字、横屏、VoiceOver 和真机仍为 `VERIFY`。
+
+### 2026-09-05 · 任务状态主列表分组收口
+
+- `WorkStateView` 统一使用系统 `insetGrouped` 页面背景与 44pt 行高，使错误、恢复、当前运行、目标、计划、待办和上下文治理分组保持一致。
+- 恢复、目标操作、计划/待办和错误状态保持原有顺序与行为。验证：arm64 generic iOS Simulator build 待本批次完成后执行；真实运行/恢复、深色、大字、横屏、VoiceOver 和真机仍为 `VERIFY`。

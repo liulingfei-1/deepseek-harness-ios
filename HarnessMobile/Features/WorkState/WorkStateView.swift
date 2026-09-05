@@ -85,7 +85,10 @@ struct WorkStateView: View {
                 } header: { Label("上下文治理", systemImage: "internaldrive") }
             }
         }
-        .harnessCompactListChrome()
+        .listStyle(.insetGrouped)
+        .environment(\.defaultMinListRowHeight, 44)
+        .scrollContentBackground(.hidden)
+        .background(HarnessTheme.pageBackground)
         .navigationTitle("任务状态")
         .sheet(item: $goalEditor) { request in
             GoalEditorSheet(request: request)

@@ -1015,3 +1015,9 @@ git diff --check
 - **移动端变更**：`SessionModelPickerView` 使用系统 `insetGrouped` 分组、语义页面背景和 44pt 最小行高，统一范围、服务商、模型和推理参数的层级。
 - **交互保留**：默认模型跟随、服务商切换、模型搜索/远程发现、手动模型 ID、能力信息、取消和保存禁用条件不变。
 - **验证**：Xcode Beta arm64 generic iOS Simulator build 已通过；`SessionModelPickerUITests` 真实入口回归待本轮构建后执行，深色/大字、横屏、VoiceOver 和真机仍为 `VERIFY`。
+
+### UI-015 · 任务状态主列表分组收口（2026-09-05）
+
+- **移动端变更**：`WorkStateView` 使用系统 `insetGrouped` 分组、语义页面背景和 44pt 最小行高，统一错误、恢复、当前运行、目标、计划、待办和上下文治理区域。
+- **交互保留**：恢复检查点、目标创建/编辑/转移/清空、计划与待办展示、上下文省略提示及错误投影不变。
+- **验证**：Xcode Beta arm64 generic iOS Simulator build 待本批次完成后执行；工作状态真实运行/恢复、深色/大字、横屏、VoiceOver 和真机仍为 `VERIFY`。
