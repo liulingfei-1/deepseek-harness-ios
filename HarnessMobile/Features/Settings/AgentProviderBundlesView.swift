@@ -40,7 +40,10 @@ struct AgentProviderBundlesView: View {
                 Text("安装在手机 iSH 内完成，下载校验后原子替换。")
             }
         }
-        .harnessCompactListChrome()
+        .listStyle(.insetGrouped)
+        .environment(\.defaultMinListRowHeight, 44)
+        .scrollContentBackground(.hidden)
+        .background(HarnessTheme.pageBackground)
         .navigationTitle("Agent 编排")
         .alert("Bundle 设置失败", isPresented: Binding(
             get: { errorMessage != nil },

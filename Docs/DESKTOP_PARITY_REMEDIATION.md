@@ -956,3 +956,8 @@ git diff --check
 
 - **移动端变更**：`LocalWebhookSettingsView` 使用系统 `insetGrouped` 分组和 44pt 最小行高，统一签名、规则和监听范围区域；Secret、规则重试与本机监听行为不变。
 - **验证**：`LocalStateServerTests` 31/31 通过；真实页面截图和 UI 自动化仍待下一轮运行器复测。
+
+### UI-012 · Agent 编排 Bundle 页分组收口（2026-09-05）
+
+- **移动端变更**：`AgentProviderBundlesView` 使用系统 `insetGrouped` 分组和 44pt 最小行高，统一 Bundle 状态、安装操作和安全说明的层级；启用、安装、重装与取消行为不变。
+- **验证**：`AgentProviderBundleTests` 9/9 通过；真实页面截图和 UI 自动化仍待下一轮运行器复测。
