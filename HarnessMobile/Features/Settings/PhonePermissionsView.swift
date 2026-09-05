@@ -39,7 +39,10 @@ struct PhonePermissionsView: View {
                 Text("此页面只读取当前状态。权限只会在你主动使用对应功能或批准相关工具调用时由 iOS 请求。")
             }
         }
-        .harnessCompactListChrome()
+        .listStyle(.insetGrouped)
+        .environment(\.defaultMinListRowHeight, 44)
+        .scrollContentBackground(.hidden)
+        .background(HarnessTheme.pageBackground)
         .navigationTitle("手机权限")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {
