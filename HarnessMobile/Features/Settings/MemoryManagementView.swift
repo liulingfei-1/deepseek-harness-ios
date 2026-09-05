@@ -46,7 +46,10 @@ struct MemoryManagementView: View {
                 Label("导出", systemImage: "square.and.arrow.up")
             }
         }
-        .harnessCompactListChrome()
+        .listStyle(.insetGrouped)
+        .environment(\.defaultMinListRowHeight, 44)
+        .scrollContentBackground(.hidden)
+        .background(HarnessTheme.pageBackground)
         .navigationTitle("记忆")
         .navigationBarTitleDisplayMode(.inline)
         .task(id: model.activeSessionID) {

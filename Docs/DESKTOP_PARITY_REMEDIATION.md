@@ -966,3 +966,8 @@ git diff --check
 
 - **移动端变更**：`PhonePermissionsView` 使用系统 `insetGrouped` 分组和 44pt 最小行高，统一隐私访问、系统连接、额外能力与设置入口；权限读取、刷新和跳转行为不变。
 - **验证**：`PhonePermissionsTests` 2/2 通过；真实页面截图和 UI 自动化仍待下一轮运行器复测。
+
+### UI-012 · 记忆管理页分组收口（2026-09-05）
+
+- **移动端变更**：`MemoryManagementView` 使用系统 `insetGrouped` 分组和 44pt 最小行高，统一当前会话、已保存记忆和导出区域；读取、删除、开关和导出行为不变。
+- **验证**：`MemoryStoreTests` 7/7 通过；真实页面截图和 UI 自动化仍待下一轮运行器复测。
