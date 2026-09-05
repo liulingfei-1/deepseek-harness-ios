@@ -416,3 +416,8 @@ Harness 采用同一原则，但保留自己的开发者信息架构：运行后
 - `PluginSettingsView`、命名空间编辑器和原生插件设置统一为系统 `insetGrouped` 列表背景与 44pt 最小行高，减少从插件详情进入深层设置后出现的旧列表壳割裂。
 - 命名空间行的生效方式、版本和受保护字段数量使用 `ViewThatFits` 自适应横排/纵排；编辑器保存、放弃和字段重置按钮显式保持 44pt 目标。
 - Host 启动、搜索、schema、冲突重放、只读字段、秘密字段、默认值和错误通知保持不变。验证：arm64 generic iOS Simulator build succeeded；真实 Host、深色、大字、横屏、VoiceOver 和真机仍为 `VERIFY`。
+
+### 2026-09-05 · 本会话模型选择器分组收口
+
+- `SessionModelPickerView` 从共享紧凑列表壳切换为系统 `insetGrouped` 背景与 44pt 行高，范围、服务商、模型和推理参数在窄屏下更接近系统设置层级。
+- 保留跟随默认、覆盖当前会话、搜索、远程模型发现、手动模型 ID、能力信息、取消和保存逻辑。验证：arm64 generic iOS Simulator build succeeded；真实模型发现、深色、大字、横屏、VoiceOver 和真机仍为 `VERIFY`。

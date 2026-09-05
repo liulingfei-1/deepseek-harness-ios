@@ -85,7 +85,10 @@ struct SessionModelPickerView: View {
                     inferenceSection
                 }
             }
-            .harnessCompactListChrome()
+            .listStyle(.insetGrouped)
+            .environment(\.defaultMinListRowHeight, 44)
+            .scrollContentBackground(.hidden)
+            .background(HarnessTheme.pageBackground)
             .navigationTitle("本会话模型")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(

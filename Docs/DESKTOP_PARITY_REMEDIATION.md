@@ -1009,3 +1009,9 @@ git diff --check
 - **移动端变更**：`PluginSettingsView`、`PluginSettingsNamespaceView` 和 `NativeAgentPluginSettingsView` 统一使用系统 `insetGrouped` 分组、语义页面背景和 44pt 最小行高；命名空间副信息在窄屏或大字下自动换行，避免生效方式、版本和受保护字段数量被截断。
 - **交互保留**：Host 启动/刷新、搜索、schema 编辑、字段继承/覆盖、冲突重放、只读显示、秘密字段状态、默认值恢复、保存与放弃草稿均未改变；编辑器工具栏和字段重置按钮补齐 44pt 触控目标。
 - **验证**：Xcode Beta arm64 generic iOS Simulator build succeeded；`git diff --check` 通过。插件设置真实 Host 数据、深色/大字、VoiceOver、横屏和真机交互仍为 `VERIFY`。
+
+### UI-014 · 本会话模型选择器分组收口（2026-09-05）
+
+- **移动端变更**：`SessionModelPickerView` 使用系统 `insetGrouped` 分组、语义页面背景和 44pt 最小行高，统一范围、服务商、模型和推理参数的层级。
+- **交互保留**：默认模型跟随、服务商切换、模型搜索/远程发现、手动模型 ID、能力信息、取消和保存禁用条件不变。
+- **验证**：Xcode Beta arm64 generic iOS Simulator build 已通过；`SessionModelPickerUITests` 真实入口回归待本轮构建后执行，深色/大字、横屏、VoiceOver 和真机仍为 `VERIFY`。
