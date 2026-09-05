@@ -19,7 +19,7 @@
 
 ## D-001 · 设备内执行边界
 
-模型推理可访问用户配置的 HTTPS API；工具、插件和命令默认在设备或 iSH 执行。D-011 允许用户显式配置的远程执行后端（e2b 沙箱、webhook 出站、ACP 远端）。
+模型推理可访问用户配置的 HTTPS API；工具、插件和命令默认在设备或 iSH 执行。D-011 允许用户显式配置的远程执行后端（e2b 沙箱、webhook 入站、ACP 远端），但不改变默认本机路径。
 
 ## D-011 · 可配置远程执行后端（修改 D-001）
 
@@ -41,7 +41,7 @@
 SECURITY_GUIDELINES 第 5 条与相关边界行更新（默认本机 + 显式远程后端）。e2b/webhook/ACP 从"边界外"转为"配置驱动后端"。
 
 验证：
-e2b 客户端接入框架在无 key 时不注册工具、配置 key 后沙箱创建/执行通过（模拟器网络）。webhook 本地 server 端点回环可达；隧道接入留真实配置验证。
+决策本身已接受，但实现验收尚未闭合：e2b 客户端和真实沙箱链路仍为 TODO；webhook 当前只有解析、去重、规则注册和 loopback server 内核；ACP wire/transport 有测试，但默认 catalog 保持空，远端 agent 与真实配置仍为 VERIFY。隧道、真实远端凭据和真机网络必须单独验收。
 
 ## D-002 · Swift + iSH Host-half
 

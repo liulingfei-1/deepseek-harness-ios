@@ -184,6 +184,11 @@ final class ACPSubagentClientTests: XCTestCase {
         XCTAssertThrowsError(try ACPSubagentProviderDescriptor(id: "", command: "/usr/bin/node"))
     }
 
+    func testSharedProviderCatalogStartsUnconfigured() async {
+        let ids = await ACPSubagentProviderCatalog.shared.all().map(\.id)
+        XCTAssertTrue(ids.isEmpty)
+    }
+
     func testRunAndWaitReturnsStreamedOutput() async throws {
         let transport = MockTransport()
         let client = ACPSubagentClient(transport: transport, cwd: "/workspace")

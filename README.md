@@ -2,7 +2,7 @@
 
 # Harness Mobile
 
-**把 DeepSeek Harness 的 Agent 工作流带到 iPhone：推理走你自己的模型 API，工具、插件与命令只在设备本机执行。**
+**把 DeepSeek Harness 的 Agent 工作流带到 iPhone：推理走你自己的模型 API，工具、插件与命令默认在设备本机执行。**
 
 [![Platform](https://img.shields.io/badge/platform-iOS%2018%2B-000000?style=flat-square&logo=apple&logoColor=white)](#快速开始)
 [![Swift](https://img.shields.io/badge/Swift-6.0-F05138?style=flat-square&logo=swift&logoColor=white)](#架构)
@@ -18,7 +18,7 @@
 > [!WARNING]
 > 这是面向个人 Xcode 侧载与开发调试的实验性项目，不是 App Store 发行版。请使用独立、限额、可撤销的模型 API Key；不要把密钥、私密日志或工作区内容提交到 Issue。
 
-Harness Mobile 不是网页壳，也不会把命令悄悄转发到服务器。它是一个原生 SwiftUI Agent 客户端：模型推理由用户配置的 HTTPS API 完成；Agent loop、文件工作区、会话、轨迹、iOS 工具、Cordis Host-half 插件和 Linux 命令都在 iPhone 上运行。
+Harness Mobile 不是网页壳，也不会把命令悄悄转发到服务器。它是一个原生 SwiftUI Agent 客户端：模型推理由用户配置的 HTTPS API 完成；Agent loop、文件工作区、会话、轨迹、iOS 工具、Cordis Host-half 插件和 Linux 命令默认都在 iPhone 上运行。D-011 定义的 e2b、webhook、ACP 远程后端必须显式配置并显示状态，当前仍按能力目录保留 TODO/VERIFY。
 
 <p align="center">
   <img src="Docs/Evidence/home-projects-2026-09-01.png" width="31%" alt="Harness Mobile 项目优先首页" />
@@ -165,7 +165,7 @@ Harness Mobile 的明确承诺是：**没有远程命令执行回退。**
 
 - **已覆盖核心路径**：Provider、会话、工具循环、工作区、轨迹、计划、图片输入、插件 Host-half、Jobs/受限子 Agent 与本机 shell。
 - **仍在补齐**：完整桌面信息架构、更多 workflow/worker 合约、桌面级 Skill registry、LSP 与持续交互式 PTY。
-- **刻意不做**：Remote Executor、E2B、服务器工具回退、任意 Web/HTTP 工具和下载原生代码执行。
+- **默认不做**：Remote Executor、服务器工具回退、任意 Web/HTTP 工具和下载原生代码执行；e2b/webhook/ACP 只按 D-011 作为显式配置能力推进，未配置时不存在。
 
 升级上游时请先跑 `./Scripts/check-upstream-parity.sh`，再按 [升级说明](Docs/UPGRADING.md) 和 [修补清单](Docs/DESKTOP_PARITY_REMEDIATION.md) 逐项更新；不要仅因 package 版本变化而声称兼容。
 

@@ -2,7 +2,7 @@
 
 ## Harness 控制入口
 
-本仓库使用 `AGENTS.md` + 12 份根级控制文档约束产品、设计、实现和验收。所有任务先读本文件；开始改动前再读 [PRD](PRD.md) 和 [决策记录](DECISIONS.md)，并按下表加载与改动直接相关的文档。不要为了“完整上下文”一次灌入所有大文件。
+本仓库使用 `AGENTS.md` + 12 份根级控制文档约束产品、设计、实现和验收。所有任务先读本文件。产品或实现改动前读 [PRD](PRD.md) 和 [决策记录](DECISIONS.md)，再按下表加载直接相关文档；纯配置、文档或只读任务只加载其涉及的规则。不要为了“完整上下文”一次灌入所有大文件。
 
 | 控制文档 | 控制内容 | 何时必读 |
 | --- | --- | --- |
@@ -27,7 +27,7 @@
 4. 设计、前后端、技术栈和质量文档约束实现方式。
 5. `IMPLEMENTATION_PLAN.md` 只控制顺序，不能降低上面的验收标准。
 
-源码、测试和设备结果是“当前实现事实”的最终证据；文档与事实冲突时先停止扩散，确认正确方向后同步修正，不静默选择对当前改动最方便的一方。
+源码、测试和设备结果是“当前实现事实”的最终证据。遇到文档冲突，指出冲突并暂停依赖该决策的改动，继续其他已授权工作；已明确取代的旧规则按新决策同步。涉及产品范围、安全或远程执行的未解决冲突，不以模型升级为由扩大权限。
 
 ### 文档同步
 
@@ -52,6 +52,7 @@
 - Plugin Host：`cd HarnessMobile/Resources/PluginHost && npm run check`；Node smoke 使用同目录锁定依赖。
 - 边界审计：`./Scripts/audit-no-remote-execution.sh`；上游一致性：`./Scripts/check-upstream-parity.sh`；收尾执行 `git diff --check`。
 - 构建缓存只放 `/tmp`，不在项目根新建 `DerivedData*`、`build` 或 `.build`。
+- 检查范围按 [质量规范](QUALITY_GUIDELINES.md) 选择。仅修改 Codex 配置或协作 Markdown 时，验证配置解析、实际加载、链接与 diff；涉及脚本时做语法/执行检查。没有产品代码或构建输入变化时不启动 Swift、Node 或真机全套验收；实现改动仍完成其规定门禁。
 
 ## 验证标准
 
@@ -64,7 +65,7 @@
 
 | 模块 | 路径 | 职责 |
 | --- | --- | --- |
-| App/UI 状态 | `HarnessMobile/App/` | AppModel、根视图、生命周期和安装入口；`AppModel.swift` 约 8600 行，先 grep 定位，禁止整读 |
+| App/UI 状态 | `HarnessMobile/App/` | AppModel、根视图、生命周期和安装入口；大文件先定位相关符号，按理解调用链所需范围展开 |
 | Agent loop | `HarnessMobile/Core/Agent/AgentRuntime.swift` | 请求组装、流式回合、工具循环、取消、压缩和 inbox；约 4600 行，先 grep |
 | 网络协议 | `HarnessMobile/Core/Network/` | DeepSeek、OpenAI-compatible、Anthropic、Files API、重试和 SSE |
 | 配置/凭据 | `HarnessMobile/Core/Configuration/`、`Core/Security/` | Provider/Profile/Bundle、Keychain 引用、模型发现和设置迁移 |
@@ -79,7 +80,7 @@
 ## 大文件纪律
 
 - 超过 1500 行的文件至少包括：`AppModel.swift`、`AgentRuntime.swift`、`WorkspaceStore.swift`、`SessionEventTrajectory.swift`、`SlashCommandCore.swift`、`ISHPluginHostDynamicHarnessBridge.swift`、`CordisPluginRuntime.swift`、`TrajectoryView.swift`、`ChatView.swift`、`NativeToolEventViews.swift` 及对应测试。
-- 读取大文件前先用 `rg -n`、`sed -n` 定位相关类型/方法；只读取必要窗口，不整文件灌入上下文。
+- 读取大文件前先用 `rg -n`、`sed -n` 定位相关类型/方法，随后按调用者、被调用者和状态流展开；理解或检查需要全文件时可以读取，避免无关内容反复加载。
 - 修改 `HarnessMobile/App/`、`HarnessMobile/Core/Agent/`、`HarnessMobile/Core/Plugins/` 或 `HarnessMobileTests/` 前，先读该目录最近的 `AGENTS.md`；它只补充该模块的入口、边界和最小验证，不重复本文件。
 
 ## 工作纪律

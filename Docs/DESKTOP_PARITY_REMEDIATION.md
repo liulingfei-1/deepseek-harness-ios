@@ -986,3 +986,20 @@ git diff --check
 
 - **移动端变更**：`DiagnosticLogView` 使用系统 `insetGrouped` 分组和 44pt 最小行高，统一运行状态、Cordis Host、导出与性能采样区域；刷新、导出和脱敏说明不变。
 - **验证**：`HarnessTraceStoreTests` 8/8 通过；真实页面截图和 UI 自动化仍待下一轮运行器复测。
+
+
+### 协作配置审计 · GPT-6 Astra（2026-09-05）
+
+- 范围：仅 Codex 协作说明，无产品代码、API、Target、权限或运行时行为改动。
+- 根 AGENTS 按任务加载控制文档；大文件允许按完整调用链继续展开；配置/文档变更按实际影响验证。App/Agent 子目录同步阅读规则。
+- Plugins 子目录删除与已接受 D-010 冲突的 Browser Client 一概禁止条款，保留未集成状态、设备执行和原生代码/凭据边界。
+- 验证：配置 TOML 解析、Codex 0.153.3 的 config/read、skills/list、hooks/list、zsh 语法及新终端版本检查通过；文档链接和 git diff --check 通过。未运行与本次范围无关的 Swift/Node/真机测试，不变更任何产品能力的 VERIFY/DONE 状态。
+- 备注：当时记录的 D-011 与根 AGENTS/PRD 边界冲突已在本批次统一为“默认本机、远程后端显式配置”；后续仍需按能力状态完成真实远端和真机验收。
+- 依据：[Astra 指南](https://developers.openai.com/api/docs/guides/latest-model?model=gpt-6-astra)、[AGENTS 分层](https://learn.chatgpt.com/docs/agent-configuration/agents-md)。
+
+### 配置与远程后端边界收口（2026-09-05）
+
+- 全局 Codex provider 移除当前配置文件中的明文 bearer token，改为 `env_key = "HUOSHENAI_API_KEY"`；原配置已备份。旧 token 仍需在服务商侧轮换/撤销，当前 shell 未发现该环境变量，因此请求会按缺少凭据处理。
+- 项目修补：`ACPSubagentProviderCatalog.shared` 改为空 catalog，未配置 ACP 时不注册通道；`LocalWebhookRule` fallback 和默认 job id 修复为真实插值，并补回归测试。
+- 文档收口：PRD、后端结构、能力目录、README 与 D-011 验证文字统一为“默认本机、远程后端显式配置、未配置不注册”；e2b 仍 TODO，webhook/ACP 的真实隧道、远端 agent 和真机链路仍 VERIFY。
+- 验证：本批次运行 ACP/webhook 窄测试、配置解析、远程执行边界审计、上游 parity、能力清单校验和 `git diff --check`；不把模拟器或 mock 结果写成真机完成。

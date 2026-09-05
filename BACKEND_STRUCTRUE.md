@@ -1,11 +1,11 @@
 # Harness Mobile 后端结构
 
 状态：受控文档
-说明：文件名按项目约定保留 `BACKEND_STRUCTRUE.md`；本项目没有自建远程执行后端。
+说明：文件名按项目约定保留 `BACKEND_STRUCTRUE.md`；本项目没有自建远程执行服务器，D-011 定义的远程后端只有在用户显式配置后才可接入。
 
 ## 定义
 
-这里的“后端”指 iPhone 上的业务、运行时、存储和沙箱层。唯一允许离开设备的主业务请求是用户配置的模型 HTTPS API，以及用户明确调用的网络信息工具；工具执行本身不转发到项目服务器。
+这里的“后端”指 iPhone 上的业务、运行时、存储和沙箱层。默认离开设备的主业务请求是用户配置的模型 HTTPS API，以及用户明确调用的网络信息工具；D-011 的 e2b、webhook、ACP 通道必须先有显式配置和用户可见披露，工具执行不得静默转发到项目服务器。
 
 ## 运行结构
 
@@ -60,7 +60,7 @@ SwiftUI
 - API Key 不进入 iSH、插件、Prompt、轨迹、UserDefaults 或导出。
 - Linux 命令只经固定 HarnessISH 边界启动 guest 进程。
 - 动态插件只能是验证后的原生清单或 iSH Host-half JavaScript。
-- 不增加 Remote Executor、服务器 scheduler 或下载原生代码执行。
+- 不增加 Remote Executor、服务器 scheduler 或下载原生代码执行；D-011 远程后端只走配置驱动、最小权限和显式状态，未配置时不注册能力。
 
 ## 修改门禁
 

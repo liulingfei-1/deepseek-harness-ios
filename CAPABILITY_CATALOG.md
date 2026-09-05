@@ -46,7 +46,7 @@
 
 ## 明确禁止的能力
 
-- 远程 shell、Remote Executor、服务器工具回退或服务器 scheduler。
+- 远程 shell、Remote Executor、服务器工具回退或服务器 scheduler。D-011 的 e2b/webhook/ACP 仅作为显式配置后端，不能成为默认或静默回退。
 - 下载并执行 Swift/framework、native addon 或机器码。
 - 无审批的任意工具注册、凭据访问或跨 sandbox 文件访问。
 - 假后台常驻、静默系统权限或不透明数据上传。

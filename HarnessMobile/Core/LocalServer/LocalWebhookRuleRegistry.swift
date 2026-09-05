@@ -48,7 +48,7 @@ struct LocalWebhookRule: Codable, Sendable, Equatable, Identifiable {
     }
 
     func renderedPrompt(for event: LocalWebhookEvent) -> String {
-        let fallback = "处理 (event.providerKind) webhook：(event.eventName)\n\n(event.payload.displayText)"
+        let fallback = "处理 \(event.providerKind) webhook：\(event.eventName)\n\n\(event.payload.displayText)"
         guard let prompt, !prompt.isEmpty else { return fallback }
         return prompt
             .replacingOccurrences(of: "{event}", with: event.eventName)
@@ -58,7 +58,7 @@ struct LocalWebhookRule: Codable, Sendable, Equatable, Identifiable {
 
     static func defaultJob(for event: LocalWebhookEvent) -> LocalWebhookRule {
         try! LocalWebhookRule(
-            id: "(event.providerKind)-default",
+            id: "\(event.providerKind)-default",
             providerKind: event.providerKind,
             eventName: "*",
             jobLabel: event.eventName
