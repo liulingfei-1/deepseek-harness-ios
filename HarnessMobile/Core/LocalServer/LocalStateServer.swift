@@ -706,6 +706,94 @@ func localSessionControlBaseline(
     ])
 }
 
+/// Projects canonical assistant chunk events into the v2 process-local stream
+/// contract. The attempt id is deterministic for a session/turn/step so a
+/// reconnect can rebase without a second runtime-owned state store.
+func localAssistantStreamBaseline(
+    sessionID: UUID,
+    events: [SessionEvent],
+    active: Bool
+) -> JSONValue {
+    guard active else {
+        return .object(["revision": .number(0)])
+    }
+    let lastMessageIndex = events.lastIndex(where: { $0.type == SessionEventVocabulary.assistantMessage }) ?? -1
+    let chunks = events[(lastMessageIndex + 1)...].filter { $0.type == SessionEventVocabulary.assistantChunk }
+    guard let first = chunks.first,
+          let firstData = first.assistantChunkData else {
+        return .object(["revision": .number(0)])
+    }
+    let attemptID = localAssistantAttemptID(sessionID: sessionID, turn: firstData.turn, step: firstData.step)
+    let stream = chunks.compactMap { $0.assistantChunkData?.chunk }
+    return .object([
+        "revision": .number(Double(stream.count + 1)),
+        "activeAttempt": .object([
+            "attemptId": .string(attemptID),
+            "startedAfterSeq": .number(first.seq == 0 ? -1 : Double(first.seq - 1)),
+            "turn": .number(Double(firstData.turn)),
+            "step": .number(Double(firstData.step)),
+            "nextIndex": .number(Double(stream.count)),
+            "stream": .array(stream)
+        ])
+    ])
+}
+
+/// Converts a durable assistant chunk/message suffix into ordered
+/// start/chunk/end frames. This is intentionally a projection over the
+/// canonical log; the next step can replace it with a native event bus.
+func localAssistantStreamFrames(sessionID: UUID, events: [SessionEvent]) -> [JSONValue] {
+    var result: [JSONValue] = []
+    var currentKey: (turn: Int, step: Int)?
+    var chunks: [SessionEvent] = []
+    func flush(endEvent: SessionEvent? = nil) {
+        guard let first = chunks.first, let firstData = first.assistantChunkData else { return }
+        let attemptID = localAssistantAttemptID(sessionID: sessionID, turn: firstData.turn, step: firstData.step)
+        result.append(.object(["type": .string("assistant-stream"), "frame": .object([
+            "type": .string("start"), "attemptId": .string(attemptID), "revision": .number(1),
+            "startedAfterSeq": .number(first.seq == 0 ? -1 : Double(first.seq - 1)),
+            "turn": .number(Double(firstData.turn)), "step": .number(Double(firstData.step))
+        ])]))
+        for (index, event) in chunks.enumerated() {
+            guard let data = event.assistantChunkData else { continue }
+            result.append(.object(["type": .string("assistant-stream"), "frame": .object([
+                "type": .string("chunk"), "attemptId": .string(attemptID),
+                "revision": .number(Double(index + 2)), "index": .number(Double(index)),
+                "time": .number(Double(event.time)), "chunk": data.chunk
+            ])]))
+        }
+        if let endEvent {
+            result.append(.object(["type": .string("assistant-stream"), "frame": .object([
+                "type": .string("end"), "attemptId": .string(attemptID),
+                "revision": .number(Double(chunks.count + 2)), "index": .number(Double(chunks.count)),
+                "outcome": .object([
+                    "kind": .string("committed"), "eventType": .string("assistant/message"),
+                    "seq": .number(Double(endEvent.seq))
+                ])
+            ])]))
+        }
+        chunks.removeAll(keepingCapacity: true)
+    }
+    for event in events {
+        if let data = event.assistantChunkData {
+            let key = (data.turn, data.step)
+            if currentKey.map({ $0.0 == key.0 && $0.1 == key.1 }) != true {
+                flush()
+                currentKey = key
+            }
+            chunks.append(event)
+        } else if event.type == SessionEventVocabulary.assistantMessage, !chunks.isEmpty {
+            flush(endEvent: event)
+            currentKey = nil
+        }
+    }
+    flush()
+    return result
+}
+
+private func localAssistantAttemptID(sessionID: UUID, turn: Int, step: Int) -> String {
+    "mobile:\(sessionID.uuidString.lowercased()):\(turn):\(step)"
+}
+
 func localSessionControlFrames(previous: JSONValue?, current: JSONValue) -> [JSONValue] {
     guard let previous, let oldValue = previous.objectValue?["value"]?.objectValue,
           let newValue = current.objectValue?["value"]?.objectValue else {

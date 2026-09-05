@@ -1277,6 +1277,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
             return .object(["accepted": .bool(true)])
         case "session/follow":
             let id = try sessionID()
+            let includeAssistantStream = fields["assistantStream"]?.booleanValue == true
             let since: Int
             if case let .number(value) = fields["sinceSequence"] {
                 guard value.isFinite, value >= 0, value <= Double(Int.max) else {
@@ -1288,7 +1289,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
             }
             let snapshot = try await trajectoryRepository.persistenceSnapshot(sessionID: id)
             let events = snapshot.snapshot.events.filter { Int($0.seq) >= since }
-            return .object([
+            var result: [String: JSONValue] = [
                 "type": .string("snapshot"),
                 "sessionId": .string(id.uuidString.lowercased()),
                 "streamID": .string(snapshot.revision.streamID),
@@ -1296,7 +1297,16 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                 "fromSequence": .number(Double(since)),
                 "events": try encodedValue(events),
                 "hasMore": .bool(false)
-            ])
+            ]
+            if includeAssistantStream {
+                let active = (await sessionRunRegistry.presentation(sessionID: id))?.phase.isQuiescent == false
+                result["assistantStream"] = localAssistantStreamBaseline(
+                    sessionID: id,
+                    events: snapshot.snapshot.events,
+                    active: active
+                )
+            }
+            return .object(result)
         case "session/page":
             let id = try sessionID()
             guard case let .number(rawThrough)? = fields["throughSeq"],
@@ -1546,6 +1556,7 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                         }
                     } else {
                         let fields = payload.objectValue ?? [:]
+                        let includeAssistantStream = fields["assistantStream"]?.booleanValue == true
                         guard let rawID = fields["sessionId"]?.stringValue,
                               let sessionID = UUID(uuidString: rawID) else {
                             throw LocalStateRPCError.invalidPayload("sessionId")
@@ -1581,6 +1592,16 @@ final class AppModel: ObservableObject, SessionControlling, SettingsControlling,
                                         "cursor": .number(nextCursor),
                                         "event": event
                                     ]))
+                                }
+                                if includeAssistantStream {
+                                    let liveEvents = try await self.trajectoryRepository.allEvents(sessionID: sessionID)
+                                        .filter { Int($0.seq) >= cursor }
+                                    for frame in localAssistantStreamFrames(
+                                        sessionID: sessionID,
+                                        events: liveEvents
+                                    ) {
+                                        continuation.yield(frame)
+                                    }
                                 }
                             }
                             cursor = Int(nextCursor.rounded(.down))

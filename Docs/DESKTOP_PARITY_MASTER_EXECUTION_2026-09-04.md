@@ -29,6 +29,7 @@
 | Session attachment/upload | `session.attachment` 做轨迹引用授权；`POST /api/session/uploadFileBinary` 流式接收并返回 staged receipt | 已接入本机同名上传路径（缓冲上限 64 MiB），复用 `FileAttachmentAdmission`/`WorkspaceStore`，receipt 可由 `session/prompt.content[]` 的 file part 消费；专项 loopback 回归通过 | `VERIFY` |
 | Session control stream | 上游 `SessionControlController.control()` 首帧 baseline，随后推送 queue/jobs/projection replacement，支持 AbortSignal 结束 | 已接入 loopback `session/control` SSE/chunked stream；baseline 覆盖 queue/jobs/projection，jobs 来自本地 `HarnessJobRegistry`，queue/jobs/基础运行状态 replacement 由 `SessionRunRegistry` + 250ms 轮询产生；原生事件订阅和 generation 语义仍缺 | `VERIFY` |
 | Session model/skill controls | 上游 `session/selectModel` 与独立 `skills/list` Remote | 本地复用会话模型配置与 `MobileSkillRegistry`，新增对应 RPC/schema 与 Session 存在性校验 | `VERIFY` |
+| Assistant stream | `session/follow` 可选 `assistantStream`，snapshot baseline + start/chunk/end frames | 本地复用 canonical `assistant/chunk`/`assistant/message` 事件生成 baseline 与三类 frame；专项投影回归通过 | `VERIFY` |
 | Windows host | PowerShell/win32/ACL 依赖 Windows 内核 | iOS 无等价内核能力 | `OUT-OF-SCOPE` |
 
 ## 3. 逐项执行顺序

@@ -54,6 +54,7 @@ git diff --check
 | PARITY-021 | Client connection state/generation | `LocalStateHTTPClient.callRPCStream` → connecting/connected/disconnected callbacks + monotone generation | VERIFY | 已实现并回归；WKWebView online/offline、retry jitter、AbortSignal cascade 和真实 Desktop client 互操作仍待补齐 |
 | PARITY-014 | frontend-static/client-half、Windows host 包 | loopback route 已补 `GET/HEAD` 兼容；WKWebView 可承载但桌面 bundle 未接入 | OUT-OF-SCOPE/VERIFY | 打包并接入真实 bundle；Windows PowerShell/win32/ACL 保持平台不适用 |
 | PARITY-023 | file-upload `POST /api/session/uploadFileBinary` + staged receipt | 本机同名二进制路由、64 MiB 上限、附件准入、receipt 和 `session/prompt.content[]` file 消费已接线；loopback upload 回归通过 | VERIFY | 用上游 v2 fixture 对照 receipt/过期/取消/大文件/真实 client；当前请求体仍为有界缓冲，不宣称流式零拷贝 |
+| PARITY-024 | `session/follow` assistant-stream baseline/start/chunk/end | `assistantStream: true` 返回活动 baseline；canonical assistant chunk/message suffix 投影为三类 frame；纯函数回归通过 | VERIFY | 用上游 client accumulator/v2 fixture 逐字段对照，并补原生事件源与真实 Desktop client 重连 |
 
 ### PARITY-002 本批次逐步修改清单
 

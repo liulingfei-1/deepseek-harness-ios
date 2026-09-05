@@ -369,6 +369,32 @@ final class LocalStateServerTests: XCTestCase {
         XCTAssertEqual(response.objectValue?["value"]?.objectValue?["receiptId"], .string("receipt-1"))
     }
 
+    func testAssistantStreamProjectionEmitsStartChunkAndCommittedEnd() throws {
+        let sessionID = UUID()
+        let events = [
+            try SessionEvent(type: SessionEventVocabulary.assistantChunk, seq: 0, time: 10, data: .object([
+                "turn": .number(1), "step": .number(1),
+                "chunk": .object(["type": .string("text-delta"), "index": .number(0), "text": .string("hi")])
+            ])),
+            try SessionEvent(type: SessionEventVocabulary.assistantMessage, seq: 1, time: 11, data: .object([
+                "turn": .number(1), "step": .number(1),
+                "message": .object(["role": .string("assistant")])
+            ]))
+        ]
+        let frames = localAssistantStreamFrames(sessionID: sessionID, events: events)
+        XCTAssertEqual(frames.count, 3)
+        XCTAssertEqual(frames[0].objectValue?["frame"]?.objectValue?["type"], .string("start"))
+        XCTAssertTrue(frames[0].objectValue?["frame"]?.objectValue?["attemptId"]?.stringValue?.hasPrefix("mobile:") == true)
+        XCTAssertEqual(frames[1].objectValue?["frame"]?.objectValue?["type"], .string("chunk"))
+        XCTAssertEqual(frames[2].objectValue?["frame"]?.objectValue?["type"], .string("end"))
+        XCTAssertEqual(
+            frames[2].objectValue?["frame"]?.objectValue?["outcome"]?.objectValue?["seq"],
+            .number(1)
+        )
+        let baseline = localAssistantStreamBaseline(sessionID: sessionID, events: Array(events.prefix(1)), active: true)
+        XCTAssertEqual(baseline.objectValue?["activeAttempt"]?.objectValue?["nextIndex"], .number(1))
+    }
+
     func testLiveHTTPClientReceivesSnapshotFirstSSEStream() async throws {
         let server = LocalStateServer(
             endpoints: [],

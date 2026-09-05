@@ -229,6 +229,8 @@ git diff --check
 | PARITY-010 LocalStateServer | VERIFY | AppModel 启动 loopback server 并注册 health/status/sessions；新增线程安全快照盒、真实 `LocalStateHTTPClient` GET、`POST /api` Connection RPC envelope、session mutation/follow 增量窗口、provider remove 与 workspace mount mutations；已接入 session/workspace follow SSE/chunked carrier、snapshot-first stream client 与 live loopback 回归；当前仍为 250ms persistence polling bridge，原生事件订阅、workspace baseline/increment、重连 generation、WebSocket、生命周期、端口冲突和真机 HTTP 待验证 |
 | PARITY-011/012/014 | VERIFY/TODO | PARITY-011 已实现动态 listing、exact resolution、capability cache、OAuth record、RFC 6749 refresh single-flight 与单次 401 token-rotation retry；provider-specific OAuth UI/真实设备仍 VERIFY；PARITY-012/014 仍按下方边界处理 |
 | PARITY-013 webhook | VERIFY | GitHub delivery/event/payload envelope、loopback POST `/webhook/github`、有界去重及跨重启 delivery state 已实现；Settings 可配置/删除 Keychain secret，listener 支持运行时 secret 与真实 POST/HMAC；修复 AppModel sink 初始化时提前 claim delivery 的 bug，Job 投影路径已接通；11 个 LocalStateServer 测试通过；rule/重试/Agent 唤醒仍待实现 |
+| PARITY-023 file upload | VERIFY | 已接入 `/api/session/uploadFileBinary`、有界二进制接收、复用附件准入与 staged receipt，并由 `session/prompt.content[]` file part 消费；loopback 回归通过；v2 fixture/取消/过期/真实 client 待验证 |
+| PARITY-024 assistant stream | VERIFY | `session/follow` 支持 `assistantStream: true`，返回 baseline 与 start/chunk/end frame；由 canonical assistant 事件投影；上游 accumulator 逐字段、原生事件总线与真机待验证 |
 
 本表只记录可复核证据，不把“计划存在”或“源码类型存在”当作能力完成。
 

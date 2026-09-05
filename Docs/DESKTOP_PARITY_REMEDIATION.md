@@ -8,6 +8,14 @@
 - **专项验证**：`swift test --build-path /tmp/hm-build --filter LocalStateServerTests.testLiveHTTPClientUploadsBinaryFileAndReturnsReceiptValue` → **1 test passed**；既有 `LocalStateServerTests` → **29 tests passed**。
 - **剩余边界**：当前网络层按 Content-Length 做有界缓冲，不等同上游零聚合 streaming；尚未完成 v2 fixture 逐字段对照、取消/过期/重启回收、真实 Desktop client 和 iPhone 16 Pro 证据，继续保持 `VERIFY`。
 
+### PARITY-024 · assistant-stream follow frames（2026-09-05）
+
+- **状态**：VERIFY
+- **上游复核**：最新 `session-controller` 的 `SessionFollowRequest.assistantStream` 开关返回 `SessionAssistantStreamBaseline`，后续 frame 使用 `start/chunk/end`，end 携带 durable settlement。
+- **移动端变更**：`session/follow` 支持 `assistantStream: true`；复用 canonical `assistant/chunk` 与 `assistant/message` 事件生成 deterministic attempt ID、baseline 和三类 stream frame，避免新增并行状态源。
+- **专项验证**：`LocalStateServerTests.testAssistantStreamProjectionEmitsStartChunkAndCommittedEnd` → **1 test passed**；`LocalStateServerTests` → **30 tests passed**。
+- **剩余边界**：当前 frame 由持久化轮询投影，baseline stream 保留原始 chunk JSON，尚未接入原生 agent event bus，也未取得上游 client accumulator 逐字段、真实 Desktop client、断线重连和真机证据，继续保持 `VERIFY`。
+
 ### PARITY-PLAN-2026-09-03 · 全量逐项实施计划
 
 - **状态**：ACTIVE
