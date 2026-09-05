@@ -295,7 +295,10 @@ private struct WebSearchSettingsView: View {
                 }
             }
         }
-        .harnessCompactListChrome()
+        .listStyle(.insetGrouped)
+        .environment(\.defaultMinListRowHeight, 44)
+        .scrollContentBackground(.hidden)
+        .background(HarnessTheme.pageBackground)
         .navigationTitle("联网搜索")
         .task {
             let saved = UserDefaults.standard.string(forKey: "harness.web-search-provider")
