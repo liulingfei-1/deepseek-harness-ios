@@ -8,6 +8,7 @@ import XCTest
 
 final class LiveModelAPIIntegrationTests: XCTestCase {
     func testConfiguredDeepSeekStreamWhenExplicitlyEnabled() async throws {
+        FileHandle.standardError.write(Data("[live-test] stream start\n".utf8))
         guard let apiKey = ProcessInfo.processInfo.environment["HARNESS_LIVE_API_KEY"],
               !apiKey.isEmpty else {
             throw XCTSkip("Set HARNESS_LIVE_API_KEY only for an explicit live API test.")
@@ -39,9 +40,11 @@ final class LiveModelAPIIntegrationTests: XCTestCase {
 
         XCTAssertEqual(text.trimmingCharacters(in: .whitespacesAndNewlines), "OK")
         XCTAssertTrue(sawFinish)
+        FileHandle.standardError.write(Data("[live-test] stream complete\n".utf8))
     }
 
     func testDeepSeekLocalToolRoundTripWhenExplicitlyEnabled() async throws {
+        FileHandle.standardError.write(Data("[live-test] tool start\n".utf8))
         guard let apiKey = ProcessInfo.processInfo.environment["HARNESS_LIVE_API_KEY"],
               !apiKey.isEmpty else {
             throw XCTSkip("Set HARNESS_LIVE_API_KEY only for an explicit live API test.")
@@ -74,6 +77,7 @@ final class LiveModelAPIIntegrationTests: XCTestCase {
         XCTAssertEqual(committed.count, 2)
         XCTAssertEqual(committed.first?.map(\.role), [.assistant, .tool])
         XCTAssertTrue(committed.last?.last?.content.contains("LOCAL_TOOL_OK") == true)
+        FileHandle.standardError.write(Data("[live-test] tool complete\n".utf8))
     }
 
     func testNativePluginCompilerAppliesParentRepairGuidanceWhenExplicitlyEnabled() async throws {
