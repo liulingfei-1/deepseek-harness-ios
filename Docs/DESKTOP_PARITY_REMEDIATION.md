@@ -906,3 +906,9 @@ git diff --check
 - 为 `ExaSearchProvider` 与 `PerplexitySearchProvider` 增加可选 `URLProtocol` 注入，仅用于测试复现真实 transport；生产默认路径不变。
 - 回归覆盖 Exa 429、Perplexity 401、Perplexity timeout，断言 provider-specific endpoint 错误或 `WebFetchError.timedOut`，并保留原有 citation/highlight 映射测试。
 - 专项 `ExaSearchProviderTests|PerplexitySearchProviderTests` 9 项通过；完整 SwiftPM 950 tests、5 skipped、0 failures；真实 endpoint、重试/断网恢复、Keychain/UI 与 iPhone 16 Pro 仍为 `VERIFY`。
+
+### 2026-09-05 · DeepSeek 官方真实 API 模拟器验证尝试
+
+- 使用仓库现成 `LiveModelAPIIntegrationTests`，目标为 iOS 27.0 Simulator；通过 `HARNESS_LIVE_API_KEY` 仅注入模拟器进程环境，不写入源码或配置。
+- 模拟器可启动并完成编译，但真实 Agent 测试在网络请求阶段无响应，超过观察窗口后中止，未取得 API response、stream finish 或 tool round-trip 证据。
+- 因此 PARITY-001/003/008/011 等真实 Provider 相关项继续保持 `VERIFY`；该密钥已在聊天中暴露，建议撤销并重新生成。
