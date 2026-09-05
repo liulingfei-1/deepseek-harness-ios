@@ -218,7 +218,7 @@ git diff --check
 | 项目 | 状态 | 本轮证据 |
 |---|---|---|
 | PARITY-001 请求扩展 | VERIFY | 生产 client 接线、顶层字段序列化、保留字段保护；29 项 DeepSeek wire tests 通过；全量 897 tests/5 skipped/0 failures；Simulator build 通过；真实 provider/插件注册待验证 |
-| PARITY-002 session-log | VERIFY | 新增 `SessionLogDeliveryCoordinator`：durable watermark、`dsh_session_log` suffix body、accepted cursor 与重复抑制；专项测试通过；尚未接入 AppModel/真实 endpoint |
+| PARITY-002 session-log | VERIFY | `AppModel(sessionLogEnabled:)` 已接入 `SessionLogDeepSeekExtensionProvider`，提供 durable watermark、`dsh_session_log` suffix body、accepted cursor 与重复抑制；专项测试通过；真实 endpoint/设备 ack 仍待验证 |
 | PARITY-003 telemetry | VERIFY | `TelemetrySessionPersistence` 接入 AppModel append；5 项 telemetry tests 通过；全量 897 tests/5 skipped/0 failures；模式设置、feedback release、真机 OTLP 待验证 |
 | PARITY-006 子 Agent reasoning | VERIFY | schema 与 LocalSubagentRequest 支持 reasoning_effort，并应用到 child configuration；新增 `list_subagent_models`；HarnessJobs 专项通过；provider listing/真实多 provider 仍待实现 |
 | PARITY-007 hooks | VERIFY | `AgentRuntime` 已接入 SessionStart/UserPromptSubmit/PreToolUse/PostToolUse/Stop；AppModel 另在子 Agent activation 接入 Claude `SubagentStart/SubagentStop`，Start 可阻断、Stop 失败写诊断；全量 905 tests/5 skipped/0 failures，真机 iSH 命令执行仍待验证 |
