@@ -1027,3 +1027,9 @@ git diff --check
 - **移动端变更**：`JobsPanelView` 的后台任务列表改用系统 `insetGrouped` 分组、语义页面背景和 44pt 最小行高；空态改为铺满面板的系统空状态背景，避免与任务列表使用不同的旧列表壳。
 - **交互保留**：子 Agent 顶部树、刷新、任务输出、停止任务、完成返回和空态文案均不变。
 - **验证**：Xcode Beta arm64 generic iOS Simulator build 待本批次完成后执行；真实后台任务、子 Agent、深色/大字、横屏、VoiceOver 和真机仍为 `VERIFY`。
+
+### 真机启动崩溃修复 · ProductionToolCatalog 白名单（2026-09-05）
+
+- **根因**：iPhone 真机启动注册完整生产工具目录时，`ProductionToolCatalog` 的审计白名单遗漏已存在的 `list_subagent_models`，触发 `precondition` 并以 signal 5 退出。
+- **修复**：将 `list_subagent_models` 补入 `baseApprovedNames`；不改变工具实现、权限或执行边界。
+- **验证**：Xcode `ProductionToolCatalogTests` 3/3 通过；iphoneos arm64 构建成功；iPhone 16 Pro 覆盖安装成功并启动稳定。`devicectl --console` 捕获真实 DeepSeek 流式响应（HTTP 200）、iSH rootfs 初始化和工作区挂载；20 秒观察命令因应用持续运行而超时退出，不是应用崩溃。
