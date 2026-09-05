@@ -160,8 +160,10 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             } header: { Label("隐私与诊断", systemImage: "checkmark.shield") }
         }
-        .harnessCompactListChrome()
+        .listStyle(.insetGrouped)
+        .environment(\.defaultMinListRowHeight, 44)
         .scrollContentBackground(.hidden)
+        .background(HarnessTheme.pageBackground)
         .navigationTitle("设置")
         .confirmationDialog(
             "清空当前会话？",

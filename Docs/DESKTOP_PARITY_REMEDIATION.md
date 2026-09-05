@@ -926,3 +926,8 @@ git diff --check
 - iphoneos arm64 构建成功，`devicectl device install app` 安装成功；启动被系统拒绝，原始错误为 `CoreDeviceError 10002` / `FBSOpenApplicationServiceErrorDomain`，原因是开发者签名、entitlement 或 profile 尚未被设备信任。
 - 安装证据成立，启动、真实交互和 API 仍保持 `VERIFY`。
 - 复试启动：`devicectl device process launch --device C650014D-7034-5FD7-A35B-D96BF7E488CE com.llf.harnessmobile` 返回 `Launched application`；设备端启动证据成立，真实交互和 API 仍待执行。
+
+### UI-012 · 根设置页分组收口（2026-09-05）
+
+- **移动端变更**：`SettingsView` 使用系统 `insetGrouped` 分组和 44pt 最小行高，减少入口被渲染成巨型独立卡片的问题；保留现有入口、图标和操作。
+- **验证**：iphoneos arm64 构建、安装和启动成功；设置 UI 回归被 Xcode 诊断阶段 `simctl` 路径错误阻断，待下一轮 Simulator UI 运行器修复后复测。
