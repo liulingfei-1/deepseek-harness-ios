@@ -925,3 +925,4 @@ git diff --check
 - `xcrun devicectl list devices`：目标设备 `C650014D-7034-5FD7-A35B-D96BF7E488CE` 为 available/paired。
 - iphoneos arm64 构建成功，`devicectl device install app` 安装成功；启动被系统拒绝，原始错误为 `CoreDeviceError 10002` / `FBSOpenApplicationServiceErrorDomain`，原因是开发者签名、entitlement 或 profile 尚未被设备信任。
 - 安装证据成立，启动、真实交互和 API 仍保持 `VERIFY`。
+- 复试启动：`devicectl device process launch --device C650014D-7034-5FD7-A35B-D96BF7E488CE com.llf.harnessmobile` 返回 `Launched application`；设备端启动证据成立，真实交互和 API 仍待执行。
