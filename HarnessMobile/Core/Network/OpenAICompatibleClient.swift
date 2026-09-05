@@ -1,6 +1,8 @@
 import Foundation
+import os
 
 final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDiscovering, @unchecked Sendable {
+    private static let logger = Logger(subsystem: "com.llf.harnessmobile", category: "llm-stream")
     private static let maximumModelRequestBodyBytes = 24 * 1_024 * 1_024
     private let redirectDelegate: SameHostRedirectDelegate
     private let session: URLSession
@@ -352,6 +354,9 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
         onAccepted: (@Sendable () async throws -> Void)? = nil
     ) async throws {
         let urlRequest = try adapter.makeStreamingRequest(request)
+        let host = urlRequest.url?.host ?? "unknown"
+        let path = urlRequest.url?.path ?? ""
+        Self.logger.info("stream request start host=\(host, privacy: .public) path=\(path, privacy: .public) model=\(request.configuration.model, privacy: .public)")
         guard let encodedBody = urlRequest.httpBody else {
             throw ModelClientError.invalidResponse
         }
@@ -364,6 +369,7 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
             throw ModelClientError.invalidResponse
         }
         guard (200..<300).contains(httpResponse.statusCode) else {
+            Self.logger.error("stream response status=\(httpResponse.statusCode, privacy: .public)")
             throw try await makeHTTPError(
                 response: httpResponse,
                 bytes: bytes,
@@ -387,17 +393,20 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
         }
 
         var sse = SSEEventDecoder()
+        Self.logger.info("stream headers status=\(httpResponse.statusCode, privacy: .public) contentType=\(contentType, privacy: .public)")
         var sawSemanticFinish = false
         var sawDone = false
         var sawToolCallDelta = false
         try await withTaskCancellationHandler {
             streamLoop: for try await byte in bytes {
                 try Task.checkCancellation()
+                if !sawSemanticFinish && !sawDone { Self.logger.debug("stream first byte=\(byte, privacy: .public)") }
                 guard let payload = try sse.consume(byte: byte) else {
                     continue
                 }
                 if Self.isDoneMarker(payload) {
                     sawDone = true
+                    Self.logger.info("stream done marker")
                     break streamLoop
                 }
                 for event in try decodeEvents(payload) {
@@ -453,8 +462,10 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
             sawSemanticFinish: sawSemanticFinish,
             sawDone: sawDone
         ) {
+            Self.logger.error("stream ended without terminal marker")
             throw ModelClientError.incompleteStream
         }
+        Self.logger.info("stream complete semanticFinish=\(sawSemanticFinish, privacy: .public) done=\(sawDone, privacy: .public)")
     }
 
     private func performAnthropic(
