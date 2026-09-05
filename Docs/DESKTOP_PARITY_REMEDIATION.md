@@ -919,3 +919,9 @@ git diff --check
 - 使用仓库现成 `LiveModelAPIIntegrationTests`，目标为 iOS 27.0 Simulator；通过 `HARNESS_LIVE_API_KEY` 仅注入模拟器进程环境，不写入源码或配置。
 - 模拟器可启动并完成编译，但真实 Agent 测试在网络请求阶段无响应，超过观察窗口后中止，未取得 API response、stream finish 或 tool round-trip 证据；同一环境下主机直接请求 `https://api.deepseek.com/v1/chat/completions` 返回 HTTP 200/`OK`，说明密钥与官方 endpoint 可用，差异收敛到模拟器测试进程或 URLSession 流式路径。
 - 因此 PARITY-001/003/008/011 等真实 Provider 相关项继续保持 `VERIFY`；该密钥已在聊天中暴露，建议撤销并重新生成。
+
+### 2026-09-05 · iPhone 16 Pro 安装尝试
+
+- `xcrun devicectl list devices`：目标设备 `C650014D-7034-5FD7-A35B-D96BF7E488CE` 为 available/paired。
+- iphoneos arm64 构建成功，`devicectl device install app` 安装成功；启动被系统拒绝，原始错误为 `CoreDeviceError 10002` / `FBSOpenApplicationServiceErrorDomain`，原因是开发者签名、entitlement 或 profile 尚未被设备信任。
+- 安装证据成立，启动、真实交互和 API 仍保持 `VERIFY`。
