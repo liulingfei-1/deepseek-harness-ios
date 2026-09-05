@@ -976,3 +976,8 @@ git diff --check
 
 - **移动端变更**：`PluginManagementView` 使用系统 `insetGrouped` 分组和 44pt 最小行高，统一运行时摘要、Host 插件和插件列表的视觉层级；运行、停止、卸载、重启与安装入口不变。
 - **验证**：插件相关 SwiftPM 测试 52/52 通过；真实页面截图和 UI 自动化仍待下一轮运行器复测。
+
+### UI-012 · 工具授权页分组收口（2026-09-05）
+
+- **移动端变更**：`ToolApprovalSettingsView` 使用系统 `insetGrouped` 分组和 44pt 最小行高，统一长期授权列表与撤销操作；授权范围、风险提示和撤销行为不变。
+- **验证**：`ConversationControlsTests` 13/13 通过；真实页面截图和 UI 自动化仍待下一轮运行器复测。

@@ -718,7 +718,10 @@ private struct ToolApprovalSettingsView: View {
                 }
             }
         }
-        .harnessCompactListChrome()
+        .listStyle(.insetGrouped)
+        .environment(\.defaultMinListRowHeight, 44)
+        .scrollContentBackground(.hidden)
+        .background(HarnessTheme.pageBackground)
         .navigationTitle("工具授权")
         .confirmationDialog(
             "撤销全部工具授权？",
