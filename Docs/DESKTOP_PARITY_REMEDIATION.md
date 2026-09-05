@@ -951,3 +951,8 @@ git diff --check
 
 - **移动端变更**：`WebSearchSettingsView` 使用系统 `insetGrouped` 分组和 44pt 最小行高，统一 Provider 选择与凭据区域；Keychain 保存、删除和缺失提示行为不变。
 - **验证**：DeepSeek/Exa/Perplexity 搜索 Provider 测试 12/12 通过；真实页面截图和 UI 自动化仍待下一轮运行器复测。
+
+### UI-012 · GitHub Webhook 页分组收口（2026-09-05）
+
+- **移动端变更**：`LocalWebhookSettingsView` 使用系统 `insetGrouped` 分组和 44pt 最小行高，统一签名、规则和监听范围区域；Secret、规则重试与本机监听行为不变。
+- **验证**：`LocalStateServerTests` 31/31 通过；真实页面截图和 UI 自动化仍待下一轮运行器复测。

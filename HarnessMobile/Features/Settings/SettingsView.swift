@@ -443,7 +443,10 @@ private struct LocalWebhookSettingsView: View {
                 Text("监听范围")
             }
         }
-        .harnessCompactListChrome()
+        .listStyle(.insetGrouped)
+        .environment(\.defaultMinListRowHeight, 44)
+        .scrollContentBackground(.hidden)
+        .background(HarnessTheme.pageBackground)
         .navigationTitle("GitHub Webhook")
         .task { configured = await model.localWebhookSecretConfigured(); await reloadRules() }
         .alert("Webhook 设置失败", isPresented: Binding(
