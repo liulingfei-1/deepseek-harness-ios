@@ -971,3 +971,8 @@ git diff --check
 
 - **移动端变更**：`MemoryManagementView` 使用系统 `insetGrouped` 分组和 44pt 最小行高，统一当前会话、已保存记忆和导出区域；读取、删除、开关和导出行为不变。
 - **验证**：`MemoryStoreTests` 7/7 通过；真实页面截图和 UI 自动化仍待下一轮运行器复测。
+
+### UI-012 · Cordis 插件管理页分组收口（2026-09-05）
+
+- **移动端变更**：`PluginManagementView` 使用系统 `insetGrouped` 分组和 44pt 最小行高，统一运行时摘要、Host 插件和插件列表的视觉层级；运行、停止、卸载、重启与安装入口不变。
+- **验证**：插件相关 SwiftPM 测试 52/52 通过；真实页面截图和 UI 自动化仍待下一轮运行器复测。

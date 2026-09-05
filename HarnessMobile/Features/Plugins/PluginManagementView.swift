@@ -90,7 +90,10 @@ struct PluginManagementView: View {
                 } header: { Label("插件", systemImage: "puzzlepiece.extension") }
             }
         }
-        .harnessCompactListChrome()
+        .listStyle(.insetGrouped)
+        .environment(\.defaultMinListRowHeight, 44)
+        .scrollContentBackground(.hidden)
+        .background(HarnessTheme.pageBackground)
         .navigationTitle("插件")
         .searchable(text: $query, prompt: "搜索插件、依赖或服务")
         .toolbar {
