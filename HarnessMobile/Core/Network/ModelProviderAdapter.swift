@@ -73,12 +73,18 @@ struct DeepSeekChatCompletionsAdapter: ModelProviderAdapter {
     let modelListSchemaVersion = 1
 
     func chatCompletionsURL(for configuration: AgentConfiguration) throws -> URL {
-        try configuration.apiEndpointURL(appending: "chat/completions")
+        let path = URLComponents(string: configuration.baseURL)?.path ?? ""
+        return try configuration.apiEndpointURL(
+            appending: path.trimmingCharacters(in: CharacterSet(charactersIn: "/")).isEmpty
+                ? "v1/chat/completions"
+                : "chat/completions"
+        )
     }
 
     func modelListURL(for configuration: AgentConfiguration) throws -> URL {
-        try configuration.apiEndpointURL(
-            appending: "models",
+        let path = URLComponents(string: configuration.baseURL)?.path ?? ""
+        return try configuration.apiEndpointURL(
+            appending: path.trimmingCharacters(in: CharacterSet(charactersIn: "/")).isEmpty ? "v1/models" : "models",
             replacingTrailingPath: "chat/completions"
         )
     }

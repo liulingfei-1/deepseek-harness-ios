@@ -6,13 +6,13 @@ import XCTest
 #endif
 
 final class AgentConfigurationTests: XCTestCase {
-    func testDeepSeekRootUsesChatCompletionsWithoutV1() throws {
+    func testDeepSeekRootUsesV1ChatCompletions() throws {
         var configuration = AgentConfiguration()
         configuration.baseURL = "https://api.deepseek.com/"
 
         XCTAssertEqual(
             try configuration.chatCompletionsURL().absoluteString,
-            "https://api.deepseek.com/chat/completions"
+            "https://api.deepseek.com/v1/chat/completions"
         )
     }
 

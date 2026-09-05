@@ -1,7 +1,7 @@
 import Foundation
 
 struct AgentConfiguration: Codable, Sendable, Equatable {
-    static let defaultBaseURL = "https://api.deepseek.com"
+    static let defaultBaseURL = "https://api.deepseek.com/v1"
     static let defaultModel = "deepseek-v4-flash"
 
     var providerID: ModelProviderID = .deepSeekOfficial
