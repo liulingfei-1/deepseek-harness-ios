@@ -724,7 +724,7 @@ func localAssistantStreamBaseline(
         return .object(["revision": .number(0)])
     }
     let attemptID = localAssistantAttemptID(sessionID: sessionID, turn: firstData.turn, step: firstData.step)
-    let stream = chunks.compactMap { $0.assistantChunkData?.chunk }
+    let stream = localAssistantStreamRecords(chunks)
     return .object([
         "revision": .number(Double(stream.count + 1)),
         "activeAttempt": .object([
@@ -736,6 +736,80 @@ func localAssistantStreamBaseline(
             "stream": .array(stream)
         ])
     ])
+}
+
+private func localAssistantStreamRecords(_ events: [SessionEvent]) -> [JSONValue] {
+    var records: [[String: JSONValue]] = []
+    for event in events {
+        guard let chunk = event.assistantChunkData?.chunk.objectValue,
+              let type = chunk["type"]?.stringValue else { continue }
+        let index = localJSONNumber(chunk["index"]) ?? 0
+        if type == "text-delta" || type == "reasoning-delta",
+           let text = chunk["text"]?.stringValue {
+            let recordType = type == "text-delta" ? "text-chunks" : "reasoning-chunks"
+            if let last = records.indices.last,
+               records[last]["type"] == .string(recordType),
+               localJSONNumber(records[last]["index"]) == index,
+               let previousTime = localJSONNumber(records[last]["_lastTime"]) {
+                records[last]["dt"] = appendNumber(records[last]["dt"], Double(event.time) - previousTime)
+                records[last]["texts"] = appendString(records[last]["texts"], text)
+                records[last]["_lastTime"] = .number(Double(event.time))
+            } else {
+                records.append([
+                    "type": .string(recordType), "time0": .number(Double(event.time)),
+                    "index": .number(index), "dt": .array([]), "texts": .array([.string(text)]),
+                    "_lastTime": .number(Double(event.time))
+                ])
+            }
+        } else if type == "tool-call-delta",
+                  let id = chunk["id"]?.stringValue,
+                  let args = chunk["argumentsDelta"]?.stringValue {
+            let name = chunk["name"]?.stringValue
+            if let last = records.indices.last,
+               records[last]["type"] == .string("tool-call-chunks"),
+               localJSONNumber(records[last]["index"]) == index,
+               records[last]["id"]?.stringValue == id,
+               records[last]["name"]?.stringValue == name,
+               let previousTime = localJSONNumber(records[last]["_lastTime"]) {
+                records[last]["dt"] = appendNumber(records[last]["dt"], Double(event.time) - previousTime)
+                records[last]["args"] = appendString(records[last]["args"], args)
+                records[last]["_lastTime"] = .number(Double(event.time))
+            } else {
+                var record: [String: JSONValue] = [
+                    "type": .string("tool-call-chunks"), "time0": .number(Double(event.time)),
+                    "index": .number(index), "dt": .array([]), "id": .string(id),
+                    "args": .array([.string(args)]), "_lastTime": .number(Double(event.time))
+                ]
+                if let name { record["name"] = .string(name) }
+                records.append(record)
+            }
+        } else {
+            records.append([
+                "type": .string("chunk"), "time": .number(Double(event.time)),
+                "chunk": .object(chunk)
+            ])
+        }
+    }
+    return records.map { record in
+        var copy = record
+        copy.removeValue(forKey: "_lastTime")
+        return .object(copy)
+    }
+}
+
+private func appendNumber(_ value: JSONValue?, _ item: Double) -> JSONValue {
+    guard case let .array(values)? = value else { return .array([.number(item)]) }
+    return .array(values + [.number(item)])
+}
+
+private func appendString(_ value: JSONValue?, _ item: String) -> JSONValue {
+    guard case let .array(values)? = value else { return .array([.string(item)]) }
+    return .array(values + [.string(item)])
+}
+
+private func localJSONNumber(_ value: JSONValue?) -> Double? {
+    guard case let .number(number)? = value else { return nil }
+    return number
 }
 
 /// Converts a durable assistant chunk/message suffix into ordered
