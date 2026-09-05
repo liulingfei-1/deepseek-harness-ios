@@ -941,3 +941,8 @@ git diff --check
 
 - **移动端变更**：`ProviderProfilesView` 使用系统 `insetGrouped` 分组和 44pt 最小行高，统一 Profile、请求行为和添加入口的视觉层级；激活、编辑、快速测试、删除和自定义 Provider 保持不变。
 - **验证**：`ProviderProfileTests` 14/14 通过；arm64 Simulator build 生成成功；真实页面截图和 UI 自动化仍待下一轮运行器复测。
+
+### UI-012 · 后台任务页分组收口（2026-09-05）
+
+- **移动端变更**：`BackgroundSettingsView` 使用系统 `insetGrouped` 分组和 44pt 最小行高，统一后台开关、权限、系统投影与安全边界说明的层级；后台行为不变。
+- **验证**：`BackgroundPreferencesTests` 5/5 通过；真实页面截图和 UI 自动化仍待下一轮运行器复测。

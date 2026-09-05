@@ -59,7 +59,10 @@ struct BackgroundSettingsView: View {
                 }
             }
         }
-        .harnessCompactListChrome()
+        .listStyle(.insetGrouped)
+        .environment(\.defaultMinListRowHeight, 44)
+        .scrollContentBackground(.hidden)
+        .background(HarnessTheme.pageBackground)
         .navigationTitle("后台任务")
         .navigationBarTitleDisplayMode(.inline)
         .task {
