@@ -7,6 +7,37 @@ import XCTest
 #endif
 
 final class DeepSeekWireTests: XCTestCase {
+    func testStreamFromTemporaryClientSettlesWithoutAnExternalOwner() async {
+        // Invalid configuration must fail before networking, even when the
+        // caller keeps only the stream returned by a temporary client.
+        let settled = expectation(description: "all streams settle")
+        settled.expectedFulfillmentCount = 16
+        let request = ModelRequest(
+            configuration: AgentConfiguration(baseURL: "http://invalid.example"),
+            apiKey: "test-only", systemPrompt: "", messages: [.user("test")], tools: []
+        )
+        let consumers = (0..<16).map { _ in
+            let stream = OpenAICompatibleClient().stream(request)
+            return Task {
+                do {
+                    for try await _ in stream {}
+                    if !Task.isCancelled { XCTFail("invalid configuration must throw") }
+                } catch {
+                    if !Task.isCancelled {
+                        guard case .invalidHTTPSURL? = error as? AgentConfigurationError else {
+                            XCTFail("expected invalid HTTPS URL, got \(error)")
+                            return
+                        }
+                    }
+                }
+                settled.fulfill()
+            }
+        }
+        await fulfillment(of: [settled], timeout: 2)
+        for consumer in consumers { consumer.cancel() }
+        for consumer in consumers { await consumer.value }
+    }
+
     override func tearDown() {
         DeepSeekStreamingURLProtocolStub.handler = nil
         super.tearDown()

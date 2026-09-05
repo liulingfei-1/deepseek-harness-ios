@@ -81,10 +81,9 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
     func stream(_ request: ModelRequest) -> AsyncThrowingStream<LLMStreamEvent, Error> {
         Self.debugLog("stream API called")
         let streamID = UUID()
-        return AsyncThrowingStream { [weak self] continuation in
-            self?.registerActiveStream(continuation, id: streamID)
-            let task = Task { [weak self] in
-                guard let self else { return }
+        return AsyncThrowingStream { [self] continuation in
+            self.registerActiveStream(continuation, id: streamID)
+            let task = Task { [self] in
                 Self.debugLog("stream task started")
                 defer { self.unregisterActiveStream(id: streamID) }
                 do {
@@ -409,11 +408,15 @@ final class OpenAICompatibleClient: NSObject, LLMStreamingClient, ModelCatalogDi
         var sawSemanticFinish = false
         var sawDone = false
         var sawToolCallDelta = false
+        var loggedFirstByte = false
         try await withTaskCancellationHandler {
             streamLoop: for try await byte in bytes {
                 try Task.checkCancellation()
-                if !sawSemanticFinish && !sawDone { Self.logger.debug("stream first byte=\(byte, privacy: .public)") }
-                if !sawSemanticFinish && !sawDone { Self.debugLog("first byte=\(byte)") }
+                if !loggedFirstByte {
+                    loggedFirstByte = true
+                    Self.logger.debug("stream first byte=\(byte, privacy: .public)")
+                    Self.debugLog("first byte=\(byte)")
+                }
                 guard let payload = try sse.consume(byte: byte) else {
                     continue
                 }

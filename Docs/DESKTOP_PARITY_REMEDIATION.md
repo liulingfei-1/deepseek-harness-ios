@@ -16,6 +16,13 @@
 - **专项验证**：`LocalStateServerTests.testAssistantStreamProjectionEmitsStartChunkAndCommittedEnd` → **1 test passed**；`LocalStateServerTests` → **31 tests passed**。
 - **剩余边界**：当前 frame 由持久化轮询投影，baseline 已压缩为上游同名的 text/reasoning/tool-call record；尚未接入原生 agent event bus，也未取得上游 client accumulator 逐字段、真实 Desktop client、断线重连和真机证据，继续保持 `VERIFY`。
 
+### PARITY-025 · streaming client lifetime（2026-09-05）
+
+- **状态**：VERIFY
+- **根因**：`OpenAICompatibleClient.stream()` 使用 weak capture；临时 client 被释放后，异步 task 不启动，返回的 stream 永不 settlement。
+- **修复**：由返回的 `AsyncThrowingStream` 持有 client 到 stream 结束；新增 temporary-client regression，避免回归。
+- **验证**：真实 DeepSeek 官方流式 Agent 测试 → **1 test passed，1.01s**；lifetime regression 与配置回归通过。真机仍需复测，继续保持 `VERIFY`。
+
 ### PARITY-PLAN-2026-09-03 · 全量逐项实施计划
 
 - **状态**：ACTIVE
