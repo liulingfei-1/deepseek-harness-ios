@@ -127,7 +127,10 @@ struct ProviderProfilesView: View {
                 }
             } header: { Label("添加", systemImage: "plus.circle") }
         }
-        .harnessCompactListChrome()
+        .listStyle(.insetGrouped)
+        .environment(\.defaultMinListRowHeight, 44)
+        .scrollContentBackground(.hidden)
+        .background(HarnessTheme.pageBackground)
         .navigationTitle("模型与服务商")
         .task {
             await model.refreshProviderCredentialStatuses()

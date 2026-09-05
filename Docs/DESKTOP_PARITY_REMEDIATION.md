@@ -936,3 +936,8 @@ git diff --check
 
 - **移动端变更**：`WorkspaceView` 使用系统 `insetGrouped` 分组和 44pt 最小行高，统一挂载目录与文件列表的层级和留白；导入、挂载、导出与卸载操作保持不变。
 - **验证**：arm64 Simulator build 生成成功；真实页面截图和 UI 自动化仍待下一轮运行器复测。
+
+### UI-012 · 模型与服务商页分组收口（2026-09-05）
+
+- **移动端变更**：`ProviderProfilesView` 使用系统 `insetGrouped` 分组和 44pt 最小行高，统一 Profile、请求行为和添加入口的视觉层级；激活、编辑、快速测试、删除和自定义 Provider 保持不变。
+- **验证**：`ProviderProfileTests` 14/14 通过；arm64 Simulator build 生成成功；真实页面截图和 UI 自动化仍待下一轮运行器复测。
