@@ -1021,3 +1021,9 @@ git diff --check
 - **移动端变更**：`WorkStateView` 使用系统 `insetGrouped` 分组、语义页面背景和 44pt 最小行高，统一错误、恢复、当前运行、目标、计划、待办和上下文治理区域。
 - **交互保留**：恢复检查点、目标创建/编辑/转移/清空、计划与待办展示、上下文省略提示及错误投影不变。
 - **验证**：Xcode Beta arm64 generic iOS Simulator build 待本批次完成后执行；工作状态真实运行/恢复、深色/大字、横屏、VoiceOver 和真机仍为 `VERIFY`。
+
+### UI-016 · 聊天后台任务面板分组收口（2026-09-05）
+
+- **移动端变更**：`JobsPanelView` 的后台任务列表改用系统 `insetGrouped` 分组、语义页面背景和 44pt 最小行高；空态改为铺满面板的系统空状态背景，避免与任务列表使用不同的旧列表壳。
+- **交互保留**：子 Agent 顶部树、刷新、任务输出、停止任务、完成返回和空态文案均不变。
+- **验证**：Xcode Beta arm64 generic iOS Simulator build 待本批次完成后执行；真实后台任务、子 Agent、深色/大字、横屏、VoiceOver 和真机仍为 `VERIFY`。

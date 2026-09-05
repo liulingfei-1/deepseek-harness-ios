@@ -426,3 +426,8 @@ Harness 采用同一原则，但保留自己的开发者信息架构：运行后
 
 - `WorkStateView` 统一使用系统 `insetGrouped` 页面背景与 44pt 行高，使错误、恢复、当前运行、目标、计划、待办和上下文治理分组保持一致。
 - 恢复、目标操作、计划/待办和错误状态保持原有顺序与行为。验证：arm64 generic iOS Simulator build 待本批次完成后执行；真实运行/恢复、深色、大字、横屏、VoiceOver 和真机仍为 `VERIFY`。
+
+### 2026-09-05 · 聊天后台任务面板分组收口
+
+- 后台任务面板的有任务态切换为 `insetGrouped` 列表背景与 44pt 行高，空态使用铺满面板的系统背景；子 Agent 树、刷新、停止和输出查看保持不变。
+- 验证：arm64 generic iOS Simulator build 待本批次完成后执行；真实后台任务、深色、大字、横屏、VoiceOver 和真机仍为 `VERIFY`。

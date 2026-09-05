@@ -1366,7 +1366,8 @@ private struct JobsPanelView: View {
                         systemImage: "checkmark.circle",
                         description: Text("后台工具和子 Agent 完成后会保留在这里。")
                     )
-                    .harnessCompactListChrome()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(HarnessTheme.pageBackground)
                 } else {
                     List {
                         ForEach(model.visibleJobs, id: \.id) { job in
@@ -1388,7 +1389,10 @@ private struct JobsPanelView: View {
                             )
                         }
                     }
-                    .harnessCompactListChrome()
+                    .listStyle(.insetGrouped)
+                    .environment(\.defaultMinListRowHeight, 44)
+                    .scrollContentBackground(.hidden)
+                    .background(HarnessTheme.pageBackground)
                 }
             }
             .safeAreaInset(edge: .top) {
